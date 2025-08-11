@@ -8,7 +8,7 @@ const PROFILE_KEY = 'profile';
 
 export default function OwnerIntroScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
-  const [status, setStatus] = useState('none'); // none | pending | approved
+  const [status, setStatus] = useState('none');
   const [name, setName] = useState('');
 
   const load = useCallback(async () => {
@@ -29,7 +29,6 @@ export default function OwnerIntroScreen({ navigation }) {
     return unsub;
   }, [navigation, load]);
 
-  // ==== כפתור סודי לפיתוח: מאשר לחשבון owner_status=approved ====
   const approveDev = useCallback(async () => {
     const raw = await AsyncStorage.getItem(PROFILE_KEY);
     const prev = raw ? JSON.parse(raw) : {};
@@ -37,15 +36,10 @@ export default function OwnerIntroScreen({ navigation }) {
       ? Array.from(new Set([...prev.roles, 'owner']))
       : ['seeker', 'owner'];
 
-    const next = {
-      ...prev,
-      owner_status: 'approved',
-      roles,
-    };
+    const next = { ...prev, owner_status: 'approved', roles };
     await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(next));
     setStatus('approved');
   }, []);
-  // ================================================================
 
   if (loading) {
     return (
@@ -60,8 +54,6 @@ export default function OwnerIntroScreen({ navigation }) {
     <View style={styles.wrap}>
       <View style={styles.headerRow}>
         <Text style={styles.header}>השכרת חניה ב‑Zpoto</Text>
-
-        {/* כפתור סודי – להסיר לפני פרודקשן */}
         {status !== 'approved' && (
           <TouchableOpacity onPress={approveDev} style={styles.devBtn} hitSlop={{ top:8, bottom:8, left:8, right:8 }}>
             <Text style={styles.devBtnText}>אשר אותי (DEV)</Text>
@@ -69,21 +61,24 @@ export default function OwnerIntroScreen({ navigation }) {
         )}
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.title}>איך זה עובד?</Text>
-        <Text style={styles.line}>• מפרסמים את החניה (כתובת, מחיר לשעה, זמינות).</Text>
-        <Text style={styles.line}>• נהגים מזמינים דרך האפליקציה.</Text>
-        <Text style={styles.line}>• אתם מקבלים תשלום אוטומטי (בהמשך: Stripe Connect).</Text>
-      </View>
-
       {status === 'approved' && (
         <View style={[styles.card, { borderColor:'#b9f5cf', backgroundColor:'#f7fffb' }]}>
           <Text style={styles.title}>ברוך/ה הבא/ה{ name ? `, ${name}` : '' }!</Text>
-          <Text style={styles.line}>החשבון שלך מאושר כבעל/ת חניה.</Text>
-          <TouchableOpacity style={styles.primary} onPress={() => navigation.navigate('OwnerDashboard')}>
-            <Ionicons name="speedometer" size={18} color="#fff" style={{ marginEnd:6 }} />
-            <Text style={styles.primaryText}>כניסה ללוח הבקרה</Text>
-          </TouchableOpacity>
+          <Text style={styles.line}>בחר/י לאן להיכנס:</Text>
+          <View style={{ gap:10, marginTop:8 }}>
+            <TouchableOpacity style={styles.primary} onPress={() => navigation.navigate('OwnerOverview')}>
+              <Ionicons name="speedometer" size={18} color="#fff" style={{ marginEnd:6 }} />
+              <Text style={styles.primaryText}>סקירה כללית</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.secondary} onPress={() => navigation.navigate('OwnerPending')}>
+              <Ionicons name="timer" size={16} color="#0b6aa8" style={{ marginEnd:6 }} />
+              <Text style={styles.secondaryText}>בקשות בהמתנה</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.secondary} onPress={() => navigation.navigate('OwnerDashboard')}>
+              <Ionicons name="business" size={16} color="#0b6aa8" style={{ marginEnd:6 }} />
+              <Text style={styles.secondaryText}>ניהול החניות</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       )}
 
@@ -119,7 +114,6 @@ const styles = StyleSheet.create({
   headerRow:{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:12 },
   header:{ fontSize:22, fontWeight:'800', textAlign:'center' },
 
-  // כפתור סודי (DEV)
   devBtn:{ paddingVertical:6, paddingHorizontal:10, borderRadius:8, borderWidth:1, borderColor:'#888', backgroundColor:'#eee' },
   devBtnText:{ fontSize:11, color:'#333', fontWeight:'700' },
 
@@ -127,7 +121,7 @@ const styles = StyleSheet.create({
   title:{ fontSize:16, fontWeight:'800', marginBottom:6 },
   line:{ fontSize:14, color:'#333', marginVertical:2 },
 
-  primary:{ marginTop:10, flexDirection:'row', alignItems:'center', justifyContent:'center', backgroundColor:'#00C6FF', paddingVertical:12, borderRadius:10 },
+  primary:{ marginTop:6, flexDirection:'row', alignItems:'center', justifyContent:'center', backgroundColor:'#00C6FF', paddingVertical:12, borderRadius:10 },
   primaryText:{ color:'#fff', fontWeight:'800' },
 
   secondary:{ marginTop:8, flexDirection:'row', alignItems:'center', justifyContent:'center', backgroundColor:'#eaf4ff', paddingVertical:10, borderRadius:10, borderWidth:1, borderColor:'#cfe3ff' },

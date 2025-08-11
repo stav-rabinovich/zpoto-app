@@ -14,11 +14,13 @@ import FavoritesScreen from './screens/FavoritesScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import AdvancedSearchScreen from './screens/AdvancedSearchScreen';
 
-// מסכי בעלי חניה
+// מסכי בעלי חניה (מחולק)
 import OwnerIntroScreen from './screens/OwnerIntroScreen';
-import OwnerDashboardScreen from './screens/OwnerDashboardScreen';
+import OwnerDashboardScreen from './screens/OwnerDashboardScreen';   // ניהול חניות
 import OwnerListingFormScreen from './screens/OwnerListingFormScreen';
-import OwnerAnalyticsScreen from './screens/OwnerAnalyticsScreen';
+import OwnerOverviewScreen from './screens/OwnerOverviewScreen';     // חדש – סקירה כללית
+import OwnerPendingScreen from './screens/OwnerPendingScreen';       // חדש – בקשות בהמתנה
+import OwnerListingDetailScreen from './screens/OwnerListingDetailScreen'; // חדש – דוח חניה
 
 const Stack = createNativeStackNavigator();
 
@@ -42,23 +44,22 @@ export default function App() {
   return (
     <NavigationContainer ref={navigationRef}>
       <Stack.Navigator>
-        {/* עטפנו את כל ה-Screen בתוך Fragment כדי למנוע טקסט/רווחים כילדים של ה-Navigator */}
-        <>
-          {/* מסכי חיפוש והזמנות */}
-          <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Zpoto' }} />
-          <Stack.Screen name="SearchResults" component={SearchResultsScreen} options={{ title: 'תוצאות חיפוש' }} />
-          <Stack.Screen name="Booking" component={BookingScreen} options={{ title: 'הזמנה' }} />
-          <Stack.Screen name="Bookings" component={BookingsScreen} options={{ title: 'ההזמנות שלי' }} />
-          <Stack.Screen name="Favorites" component={FavoritesScreen} options={{ title: 'מועדפים' }} />
-          <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: 'הפרופיל שלי' }} />
-          <Stack.Screen name="AdvancedSearch" component={AdvancedSearchScreen} options={{ title: 'חיפוש מתקדם' }} />
+        {/* מסכי חיפוש והזמנות */}
+        <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Zpoto' }} />
+        <Stack.Screen name="SearchResults" component={SearchResultsScreen} options={{ title: 'תוצאות חיפוש' }} />
+        <Stack.Screen name="Booking" component={BookingScreen} options={{ title: 'הזמנה' }} />
+        <Stack.Screen name="Bookings" component={BookingsScreen} options={{ title: 'ההזמנות שלי' }} />
+        <Stack.Screen name="Favorites" component={FavoritesScreen} options={{ title: 'מועדפים' }} />
+        <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: 'הפרופיל שלי' }} />
+        <Stack.Screen name="AdvancedSearch" component={AdvancedSearchScreen} options={{ title: 'חיפוש מתקדם' }} />
 
-          {/* מסכי בעלי חניה */}
-          <Stack.Screen name="OwnerIntro" component={OwnerIntroScreen} options={{ title: 'בעלי חניה' }} />
-          <Stack.Screen name="OwnerDashboard" component={OwnerDashboardScreen} options={{ title: 'לוח בקרה – בעלי חניה' }} />
-          <Stack.Screen name="OwnerListingForm" component={OwnerListingFormScreen} options={{ title: 'טופס חניה' }} />
-          <Stack.Screen name="OwnerAnalytics" component={OwnerAnalyticsScreen} options={{ title: 'סטטיסטיקות חניה' }} />
-        </>
+        {/* בעלי חניה */}
+        <Stack.Screen name="OwnerIntro" component={OwnerIntroScreen} options={{ title: 'בעלי חניה' }} />
+        <Stack.Screen name="OwnerOverview" component={OwnerOverviewScreen} options={{ title: 'סקירה כללית' }} />
+        <Stack.Screen name="OwnerPending" component={OwnerPendingScreen} options={{ title: 'בקשות בהמתנה' }} />
+        <Stack.Screen name="OwnerDashboard" component={OwnerDashboardScreen} options={{ title: 'ניהול החניות' }} />
+        <Stack.Screen name="OwnerListingForm" component={OwnerListingFormScreen} options={{ title: 'טופס חניה' }} />
+        <Stack.Screen name="OwnerListingDetail" component={OwnerListingDetailScreen} options={{ title: 'דוח חניה' }} />
       </Stack.Navigator>
     </NavigationContainer>
   );
