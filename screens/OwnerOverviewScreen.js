@@ -1,188 +1,176 @@
 // screens/OwnerOverviewScreen.js
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, FlatList } from 'react-native';
+import * as bookingsRepo from '../data/bookingsRepo';
+import { BOOKING_STATUS } from '../types/status';
 
-const LISTINGS_KEY = 'owner_listings';
-const BOOKINGS_KEY = 'bookings';
+const PRESETS = [
+  { key: '7d', label: '7 ימים', deltaDays: 7 },
+  { key: '30d', label: '30 ימים', deltaDays: 30 },
+  { key: '90d', label: '90 ימים', deltaDays: 90 },
+];
 
-function dateKey(d){ return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`; }
-function overlaps(aStart, aEnd, bStart, bEnd){ return aStart < bEnd && aEnd > bStart; }
-
-export default function OwnerOverviewScreen({ navigation }) {
-  const [listings, setListings] = useState([]);
-  const [bookings, setBookings] = useState([]);
-
-  const [from, setFrom] = useState(() => { const d=new Date(); d.setDate(d.getDate()-6); d.setHours(0,0,0,0); return d; });
-  const [to, setTo] = useState(() => { const d=new Date(); d.setHours(23,59,59,999); return d; });
-  const [showFrom, setShowFrom] = useState(false);
-  const [showTo, setShowTo] = useState(false);
+export default function OwnerOverviewScreen() {
+  const [from, setFrom] = useState(daysAgo(7));
+  const [to, setTo] = useState(new Date());
+  const [loading, setLoading] = useState(false);
+  const [all, setAll] = useState([]);
+  const [kpi, setKpi] = useState({ revenue: 0, completedCount: 0, approvedCount: 0, totalCount: 0 });
 
   const load = useCallback(async () => {
-    const [rawL, rawB] = await Promise.all([
-      AsyncStorage.getItem(LISTINGS_KEY),
-      AsyncStorage.getItem(BOOKINGS_KEY),
-    ]);
-    setListings(rawL ? JSON.parse(rawL) : []);
-    const bs = rawB ? JSON.parse(rawB) : [];
-    bs.sort((a,b)=>new Date(b.start)-new Date(a.start));
-    setBookings(bs);
+    setLoading(true);
+    try {
+      const items = await bookingsRepo.getAll();
+      setAll(items);
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
+  async function recompute() {
+    const res = await bookingsRepo.kpis(from, to);
+    setKpi(res);
+  }
+
   useEffect(() => {
-    const unsub = navigation.addListener('focus', load);
     load();
-    return unsub;
-  }, [navigation, load]);
+  }, [load]);
 
-  const myBookings = useMemo(() => {
-    const ids = new Set(listings.map(l=>l.id));
-    return bookings.filter(b => b.ownerListingId && ids.has(b.ownerListingId));
-  }, [bookings, listings]);
+  useEffect(() => {
+    recompute();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [from, to, all.length]);
 
-  const inRangeConfirmed = useMemo(() => {
-    return myBookings.filter(b => {
-      if (b.status !== 'confirmed') return false;
-      const s = new Date(b.start), e = new Date(b.end);
-      return overlaps(s,e,from,to);
-    });
-  }, [myBookings, from, to]);
+  const filtered = useMemo(
+    () => all.filter((b) => bookingsRepo.inRange(b, from, to)),
+    [all, from, to]
+  );
 
-  const totals = useMemo(() => {
-    const income = inRangeConfirmed.reduce((sum,b)=> sum + (b.total||0), 0);
-    const count  = inRangeConfirmed.length;
-    const byListing = {};
-    inRangeConfirmed.forEach(b => {
-      byListing[b.ownerListingId] = (byListing[b.ownerListingId]||0) + (b.total||0);
-    });
-    return { income, count, byListing };
-  }, [inRangeConfirmed]);
+  const completed = useMemo(
+    () => filtered.filter((b) => b.status === BOOKING_STATUS.COMPLETED),
+    [filtered]
+  );
 
-  const chart = useMemo(() => {
-    const map = {};
-    const cur = new Date(from);
-    while (cur <= to) { map[dateKey(cur)] = 0; cur.setDate(cur.getDate()+1); }
-    inRangeConfirmed.forEach(b => {
-      const k = dateKey(new Date(b.end));
-      if (map[k] != null) map[k] += (b.total||0);
-    });
-    const arr = [];
-    const c = new Date(from);
-    while (c <= to) {
-      const k = dateKey(c);
-      arr.push({ label: `${c.getDate()}/${c.getMonth()+1}`, value: map[k]||0 });
-      c.setDate(c.getDate()+1);
-    }
-    return arr;
-  }, [from, to, inRangeConfirmed]);
-
-  const maxVal = Math.max(1, ...chart.map(p=>p.value));
+  const approved = useMemo(
+    () => filtered.filter((b) => b.status === BOOKING_STATUS.APPROVED),
+    [filtered]
+  );
 
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.header}>סקירה כללית – בעלי חניה</Text>
+    <View style={styles.container}>
+      <Text style={styles.header}>סקירה כללית</Text>
 
-      <View style={styles.card}>
-        <Text style={styles.title}>טווח נתונים</Text>
-        <View style={{ flexDirection:'row', gap:8, marginTop:8 }}>
-          <TouchableOpacity style={styles.rangeBtn} onPress={() => { const d=new Date(); d.setDate(d.getDate()-6); d.setHours(0,0,0,0); setFrom(d); const e=new Date(); e.setHours(23,59,59,999); setTo(e); }}>
-            <Text style={styles.rangeBtnText}>7 ימים</Text>
+      {/* Presets */}
+      <View style={styles.presetRow}>
+        {PRESETS.map((p) => (
+          <TouchableOpacity
+            key={p.key}
+            style={[
+              styles.presetBtn,
+              isSameRange(from, to, p.deltaDays) && styles.presetBtnActive
+            ]}
+            onPress={() => {
+              setFrom(daysAgo(p.deltaDays));
+              setTo(new Date());
+            }}
+          >
+            <Text style={[styles.presetText, isSameRange(from, to, p.deltaDays) && styles.presetTextActive]}>
+              {p.label}
+            </Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.rangeBtn} onPress={() => { const d=new Date(); d.setDate(d.getDate()-29); d.setHours(0,0,0,0); setFrom(d); const e=new Date(); e.setHours(23,59,59,999); setTo(e); }}>
-            <Text style={styles.rangeBtnText}>30 ימים</Text>
-          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* KPIs */}
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator />
+          <Text>טוען נתונים…</Text>
         </View>
-
-        <View style={{ flexDirection:'row', gap:10, marginTop:8 }}>
-          <TouchableOpacity style={styles.datePick} onPress={() => setShowFrom(true)}>
-            <Ionicons name="calendar" size={16} color="#0b6aa8" style={{ marginEnd:6 }} />
-            <Text style={styles.datePickText}>מ־{from.toLocaleDateString()}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.datePick} onPress={() => setShowTo(true)}>
-            <Ionicons name="calendar" size={16} color="#0b6aa8" style={{ marginEnd:6 }} />
-            <Text style={styles.datePickText}>עד {to.toLocaleDateString()}</Text>
-          </TouchableOpacity>
+      ) : (
+        <View style={styles.kpis}>
+          <Kpi title="הכנסה" value={formatCurrency(kpi.revenue)} />
+          <Kpi title="הזמנות שהושלמו" value={String(kpi.completedCount)} />
+          <Kpi title="הזמנות שאושרו" value={String(kpi.approvedCount)} />
+          <Kpi title="סה״כ הזמנות בטווח" value={String(kpi.totalCount)} />
         </View>
+      )}
 
-        {showFrom && (
-          <DateTimePicker value={from} mode="date" onChange={(_,d)=>{ setShowFrom(false); if(d){ d.setHours(0,0,0,0); setFrom(d);} }} />
+      {/* רשימת הזמנות בטווח */}
+      <Text style={styles.subHeader}>הזמנות בטווח הנבחר</Text>
+      <FlatList
+        data={filtered.sort((a, b) => (new Date(b.startAt) - new Date(a.startAt)))}
+        keyExtractor={(item) => String(item.id)}
+        renderItem={({ item }) => (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>{item.title || 'הזמנה'}</Text>
+            <Text style={styles.row}>סטטוס: {item.status}</Text>
+            <Text style={styles.row}>מתאריך: {fmt(item.startAt)} עד {fmt(item.endAt)}</Text>
+            <Text style={styles.row}>מחיר משוער: {bookingsRepo.calcTotalPrice(item)} ₪</Text>
+          </View>
         )}
-        {showTo && (
-          <DateTimePicker value={to} mode="date" onChange={(_,d)=>{ setShowTo(false); if(d){ d.setHours(23,59,59,999); setTo(d);} }} />
-        )}
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.title}>סיכום</Text>
-        <Text style={styles.line}>סה״כ הכנסות בטווח: <Text style={styles.bold}>₪{totals.income}</Text></Text>
-        <Text style={styles.line}>מס׳ הזמנות מאושרות: <Text style={styles.bold}>{totals.count}</Text></Text>
-
-        <View style={styles.chartRow}>
-          {chart.map((p,i)=>{
-            const h = Math.round((p.value/maxVal)*80);
-            return (
-              <View key={`${p.label}-${i}`} style={styles.barWrap}>
-                <View style={[styles.bar, { height: Math.max(2,h) }]} />
-                <Text style={styles.barLabel}>{p.label}</Text>
-              </View>
-            );
-          })}
-        </View>
-      </View>
-
-      <View style={{ flexDirection:'row', gap:10 }}>
-        <TouchableOpacity style={styles.navBtn} onPress={()=> navigation.navigate('OwnerPending')}>
-          <Ionicons name="timer" size={16} color="#fff" style={{ marginEnd:6 }} />
-          <Text style={styles.navBtnText}>בקשות בהמתנה</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navBtnOutline} onPress={()=> navigation.navigate('OwnerDashboard')}>
-          <Text style={styles.navBtnOutlineText}>ניהול החניות</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={[styles.title, { marginBottom:6 }]}>חניות – קפיצה לדוח</Text>
-        {listings.length === 0 ? (
-          <Text style={{ color:'#666' }}>אין חניות. צור חניה חדשה במסך "ניהול החניות".</Text>
-        ) : (
-          listings.map(l => (
-            <TouchableOpacity key={l.id} style={styles.listingRow} onPress={() => navigation.navigate('OwnerListingDetail', { id: l.id })}>
-              <Text style={styles.listingTitle}>{l.title || l.address || 'חניה'}</Text>
-              <Ionicons name="chevron-back" size={18} color="#0b6aa8" />
-            </TouchableOpacity>
-          ))
-        )}
-      </View>
+        contentContainerStyle={{ padding: 12, paddingBottom: 48 }}
+      />
     </View>
   );
 }
 
+function Kpi({ title, value }) {
+  return (
+    <View style={styles.kpiCard}>
+      <Text style={styles.kpiTitle}>{title}</Text>
+      <Text style={styles.kpiValue}>{value}</Text>
+    </View>
+  );
+}
+
+function fmt(v) {
+  try {
+    const d = new Date(v);
+    const dd = d.toLocaleDateString('he-IL');
+    const tt = d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+    return `${dd} ${tt}`;
+  } catch {
+    return '-';
+  }
+}
+
+function formatCurrency(n) {
+  const val = Number(n || 0);
+  return val.toLocaleString('he-IL', { style: 'currency', currency: 'ILS', maximumFractionDigits: 0 });
+}
+
+function daysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function isSameRange(from, to, deltaDays) {
+  const targetFrom = daysAgo(deltaDays).getTime();
+  const now = new Date();
+  const okTo = Math.abs(to.getTime() - now.getTime()) < 1000 * 60 * 5; // 5 דקות
+  return Math.abs(from.getTime() - targetFrom) < 1000 * 60 && okTo;
+}
+
 const styles = StyleSheet.create({
-  wrap:{ flex:1, backgroundColor:'#f6f9fc', padding:14 },
-  header:{ fontSize:20, fontWeight:'800', textAlign:'center', marginBottom:12 },
-
-  card:{ backgroundColor:'#fff', borderRadius:14, padding:14, marginBottom:12, borderWidth:1, borderColor:'#ecf1f7' },
-  title:{ fontSize:16, fontWeight:'800' },
-  line:{ fontSize:14, marginTop:6, color:'#333' },
-  bold:{ fontWeight:'800' },
-
-  rangeBtn:{ paddingVertical:8, paddingHorizontal:10, borderRadius:10, borderWidth:1, borderColor:'#cfe3ff', backgroundColor:'#eaf4ff' },
-  rangeBtnText:{ color:'#0b6aa8', fontWeight:'800' },
-  datePick:{ paddingVertical:8, paddingHorizontal:10, borderRadius:10, borderWidth:1, borderColor:'#e3e9f0', backgroundColor:'#fff', flexDirection:'row', alignItems:'center' },
-  datePickText:{ color:'#0b6aa8', fontWeight:'700' },
-
-  chartRow:{ flexDirection:'row', gap:6, alignItems:'flex-end', marginTop:10, paddingTop:6, borderTopWidth:1, borderTopColor:'#f1f4f8' },
-  barWrap:{ alignItems:'center', width:24 },
-  bar:{ width:16, backgroundColor:'#00C6FF', borderRadius:6 },
-  barLabel:{ fontSize:10, color:'#555', marginTop:4 },
-
-  navBtn:{ flex:1, backgroundColor:'#00C6FF', paddingVertical:12, borderRadius:10, alignItems:'center', flexDirection:'row', justifyContent:'center' },
-  navBtnText:{ color:'#fff', fontWeight:'800' },
-  navBtnOutline:{ flex:1, backgroundColor:'#fff', paddingVertical:12, borderRadius:10, borderWidth:1, borderColor:'#00C6FF', alignItems:'center' },
-  navBtnOutlineText:{ color:'#00C6FF', fontWeight:'800' },
-
-  listingRow:{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', paddingVertical:10, borderTopWidth:1, borderTopColor:'#f1f4f8' },
-  listingTitle:{ fontSize:15, fontWeight:'700', color:'#0b6aa8' },
+  container: { flex: 1, backgroundColor: '#fff' },
+  header: { fontSize: 20, fontWeight: '700', margin: 16 },
+  presetRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 8 },
+  presetBtn: {
+    borderWidth: 1, borderColor: '#d4d4d8', borderRadius: 24, paddingHorizontal: 12, paddingVertical: 8
+  },
+  presetBtnActive: { backgroundColor: '#4f46e5', borderColor: '#4f46e5' },
+  presetText: { color: '#111827', fontWeight: '600' },
+  presetTextActive: { color: '#fff' },
+  center: { alignItems: 'center', justifyContent: 'center', paddingVertical: 24, gap: 6 },
+  kpis: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, paddingHorizontal: 16, marginBottom: 8 },
+  kpiCard: { flexBasis: '48%', backgroundColor: '#f7f7fb', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#ececf1' },
+  kpiTitle: { fontSize: 14, color: '#6b7280', marginBottom: 4 },
+  kpiValue: { fontSize: 18, fontWeight: '700' },
+  subHeader: { fontSize: 16, fontWeight: '700', marginHorizontal: 16, marginTop: 8, marginBottom: 4 },
+  card: { backgroundColor: '#f7f7fb', borderRadius: 12, padding: 12, marginHorizontal: 16, marginBottom: 10, borderWidth: 1, borderColor: '#ececf1' },
+  cardTitle: { fontSize: 15, fontWeight: '600', marginBottom: 4 },
+  row: { fontSize: 13, color: '#333' },
 });

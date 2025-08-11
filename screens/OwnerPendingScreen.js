@@ -1,126 +1,134 @@
 // screens/OwnerPendingScreen.js
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Ionicons } from '@expo/vector-icons';
-import { scheduleBookingNotifications } from '../utils/notify';
-
-const LISTINGS_KEY = 'owner_listings';
-const BOOKINGS_KEY  = 'bookings';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
+import * as bookingsRepo from '../data/bookingsRepo';
+import { BOOKING_STATUS } from '../types/status';
 
 export default function OwnerPendingScreen() {
-  const [listings, setListings] = useState([]);
-  const [bookings, setBookings] = useState([]);
+  const [pending, setPending] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback( async () => {
-    const [rawL, rawB] = await Promise.all([
-      AsyncStorage.getItem(LISTINGS_KEY),
-      AsyncStorage.getItem(BOOKINGS_KEY),
-    ]);
-    setListings(rawL ? JSON.parse(rawL) : []);
-    const bs = rawB ? JSON.parse(rawB) : [];
-    bs.sort((a,b)=> new Date(b.start)-new Date(a.start));
-    setBookings(bs);
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  const listingsMap = useMemo(() => {
-    const m = {}; listings.forEach(l=> m[l.id]=l); return m;
-  }, [listings]);
-
-  const pending = useMemo(() => bookings.filter(b => b.ownerListingId && b.status==='pending'), [bookings]);
-
-  const approve = useCallback(async (id) => {
-    const raw = await AsyncStorage.getItem(BOOKINGS_KEY);
-    const list = raw ? JSON.parse(raw) : [];
-    const i = list.findIndex(b => b.id === id);
-    if (i === -1) return;
-    const updated = { ...list[i], status:'confirmed', updatedAt: new Date().toISOString() };
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
-      const ids = await scheduleBookingNotifications(updated);
-      updated.notificationIds = ids;
-    } catch {}
-    list[i] = updated;
-    await AsyncStorage.setItem(BOOKINGS_KEY, JSON.stringify(list));
-    setBookings(list);
+      const items = await bookingsRepo.byStatus(BOOKING_STATUS.PENDING);
+      setPending(items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
-  const reject = useCallback(async (id) => {
-    const raw = await AsyncStorage.getItem(BOOKINGS_KEY);
-    const list = raw ? JSON.parse(raw) : [];
-    const i = list.findIndex(b => b.id === id);
-    if (i === -1) return;
-    list[i] = { ...list[i], status:'cancelled', updatedAt:new Date().toISOString() };
-    await AsyncStorage.setItem(BOOKINGS_KEY, JSON.stringify(list));
-    setBookings(list);
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const items = await bookingsRepo.byStatus(BOOKING_STATUS.PENDING);
+      setPending(items.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+    } finally {
+      setRefreshing(false);
+    }
   }, []);
+
+  async function approve(id) {
+    try {
+      await bookingsRepo.setStatus(id, BOOKING_STATUS.APPROVED);
+      Alert.alert('אושר', 'ההזמנה אושרה בהצלחה');
+      onRefresh();
+    } catch (e) {
+      Alert.alert('שגיאה', 'לא הצלחנו לאשר. נסה שוב.');
+    }
+  }
+
+  async function reject(id) {
+    try {
+      await bookingsRepo.setStatus(id, BOOKING_STATUS.REJECTED);
+      Alert.alert('נדחה', 'ההזמנה נדחתה');
+      onRefresh();
+    } catch (e) {
+      Alert.alert('שגיאה', 'לא הצלחנו לדחות. נסה שוב.');
+    }
+  }
 
   const renderItem = ({ item }) => {
-    const l = listingsMap[item.ownerListingId];
-    const thumb = l?.images?.[0]?.uri;
-    const s = new Date(item.start), e = new Date(item.end);
-
     return (
-      <View style={[styles.card, { borderColor:'#ffe1a8', backgroundColor:'#fffaf1' }]}>
-        <View style={{ flexDirection:'row', gap:10 }}>
-          {!!thumb && <Image source={{ uri: thumb }} style={styles.thumb} />}
-          <View style={{ flex:1 }}>
-            <Text style={styles.title}>{l?.title || item.spot?.title || 'חניה'}</Text>
-            {!!item.spot?.address && <Text style={styles.line}>כתובת: {item.spot.address}</Text>}
-            <Text style={styles.line}>מס׳ רכב: {item.plate}{item.carDesc ? ` – ${item.carDesc}` : ''}</Text>
-            <Text style={styles.line}>מ־{s.toLocaleString()} עד {e.toLocaleString()}</Text>
-            <Text style={styles.line}>משך: {item.hours} שעות • סה״כ: ₪{item.total}</Text>
-
-            <View style={{ flexDirection:'row', gap:8, marginTop:8 }}>
-              <TouchableOpacity style={styles.approveBtn} onPress={() => approve(item.id)}>
-                <Ionicons name="checkmark" size={16} color="#fff" style={{ marginEnd:6 }} />
-                <Text style={styles.approveText}>אשר</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.rejectBtn} onPress={() => reject(item.id)}>
-                <Ionicons name="close" size={16} color="#b33" style={{ marginEnd:6 }} />
-                <Text style={styles.rejectText}>דחה</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+      <View style={styles.card}>
+        <Text style={styles.title}>{item.title || 'בקשת הזמנה'}</Text>
+        <Text style={styles.row}>חניה: {item.listingId}</Text>
+        <Text style={styles.row}>מתאריך: {formatDate(item.startAt)} עד {formatDate(item.endAt)}</Text>
+        <Text style={styles.row}>מחיר לשעה: {item.pricePerHour ?? '-'} ₪</Text>
+        <View style={styles.actions}>
+          <TouchableOpacity style={[styles.btn, styles.approve]} onPress={() => approve(item.id)}>
+            <Text style={styles.btnText}>אישור</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.btn, styles.reject]} onPress={() => reject(item.id)}>
+            <Text style={styles.btnText}>דחייה</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
   };
 
-  const empty = (
-    <View style={{ padding:18, alignItems:'center' }}>
-      <Ionicons name="checkmark-done-circle-outline" size={28} color="#9ab7d6" />
-      <Text style={{ color:'#6992b8', marginTop:6 }}>אין בקשות בהמתנה.</Text>
-    </View>
-  );
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator />
+        <Text>טוען בקשות בהמתנה…</Text>
+      </View>
+    );
+  }
 
   return (
-    <View style={styles.wrap}>
-      <Text style={styles.header}>בקשות בהמתנה</Text>
-      <FlatList
-        data={pending}
-        keyExtractor={i => i.id}
-        renderItem={renderItem}
-        ListEmptyComponent={empty}
-        contentContainerStyle={{ padding:14, paddingBottom:24 }}
-      />
+    <View style={styles.container}>
+      {pending.length === 0 ? (
+        <View style={styles.center}>
+          <Text>אין בקשות בהמתנה כרגע</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={pending}
+          keyExtractor={(item) => String(item.id)}
+          renderItem={renderItem}
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          contentContainerStyle={{ padding: 12 }}
+        />
+      )}
     </View>
   );
 }
 
+function formatDate(v) {
+  if (!v) return '-';
+  try {
+    const d = new Date(v);
+    const dd = d.toLocaleDateString('he-IL');
+    const tt = d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+    return `${dd} ${tt}`;
+  } catch {
+    return String(v);
+  }
+}
+
 const styles = StyleSheet.create({
-  wrap:{ flex:1, backgroundColor:'#f6f9fc' },
-  header:{ fontSize:20, fontWeight:'800', textAlign:'center', marginVertical:12 },
-
-  card:{ backgroundColor:'#fff', borderRadius:14, padding:14, marginBottom:12, borderWidth:1 },
-  title:{ fontSize:16, fontWeight:'800', marginBottom:6 },
-  line:{ fontSize:14, color:'#333', marginVertical:2 },
-
-  thumb:{ width:84, height:84, borderRadius:10 },
-
-  approveBtn:{ backgroundColor:'#0a7a3e', paddingVertical:10, paddingHorizontal:12, borderRadius:10, flexDirection:'row', alignItems:'center' },
-  approveText:{ color:'#fff', fontWeight:'800' },
-  rejectBtn:{ backgroundColor:'#fff', paddingVertical:10, paddingHorizontal:12, borderRadius:10, borderWidth:1, borderColor:'#ffd1d1', flexDirection:'row', alignItems:'center' },
-  rejectText:{ color:'#b33', fontWeight:'800' },
+  container: { flex: 1, backgroundColor: '#fff' },
+  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  card: {
+    backgroundColor: '#f7f7fb',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#ececf1',
+  },
+  title: { fontSize: 16, fontWeight: '600', marginBottom: 6 },
+  row: { fontSize: 14, color: '#333', marginBottom: 2 },
+  actions: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  btn: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
+  approve: { backgroundColor: '#16a34a' },
+  reject: { backgroundColor: '#dc2626' },
+  btnText: { color: '#fff', fontWeight: '600' },
 });
