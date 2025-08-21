@@ -1,8 +1,8 @@
 // screens/BookingDetailScreen.js
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
-import * as bookingsRepo from '../../data/bookingsRepo';
-import { BOOKING_STATUS } from '../../data/bookingsRepo';
+import * as bookingsRepo from '../data/bookingsRepo';
+import { BOOKING_STATUS } from '../data/bookingsRepo';
 import { useTheme } from '@shopify/restyle';
 import ZpButton from '../components/ui/ZpButton';
 

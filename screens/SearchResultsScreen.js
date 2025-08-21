@@ -13,8 +13,8 @@ import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@shopify/restyle';
-import { osmReverse } from '../../utils/osm';
-import { openWaze } from '../../utils/nav';
+import { osmReverse } from '../utils/osm';
+import { openWaze } from '../utils/nav';
 
 const OWNER_LISTINGS_KEY = 'owner_listings';
 const PREFS_KEY = 'search_prefs_v1';

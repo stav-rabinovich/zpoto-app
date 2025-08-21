@@ -8,10 +8,10 @@ import {
   HeaderStyleInterpolators,
   TransitionSpecs,
 } from '@react-navigation/stack';
-import { navigationRef } from '../navigationRef';
+import { navigationRef } from './navigationRef';
 import * as Notifications from 'expo-notifications';
 import { ThemeProvider, useTheme, createText } from '@shopify/restyle';
-import { theme } from '../theme/zpotoThemeRestyle';
+import { theme } from './theme/zpotoThemeRestyle';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -45,21 +45,21 @@ enableScreens(true);
 const RText = createText();
 
 // מסכים
-import HomeScreen from '../screens/HomeScreen';
-import SearchResultsScreen from '../screens/SearchResultsScreen';
-import BookingScreen from '../screens/BookingScreen';
-import BookingsScreen from '../screens/BookingsScreen';
-import BookingDetailScreen from '../screens/BookingDetailScreen';
-import FavoritesScreen from '../screens/FavoritesScreen';
-import ProfileScreen from '../screens/ProfileScreen';
-import AdvancedSearchScreen from '../screens/AdvancedSearchScreen';
+import HomeScreen from './screens/HomeScreen';
+import SearchResultsScreen from './screens/SearchResultsScreen';
+import BookingScreen from './screens/BookingScreen';
+import BookingsScreen from './screens/BookingsScreen';
+import BookingDetailScreen from './screens/BookingDetailScreen';
+import FavoritesScreen from './screens/FavoritesScreen';
+import ProfileScreen from './screens/ProfileScreen';
+import AdvancedSearchScreen from './screens/AdvancedSearchScreen';
 
-import OwnerIntroScreen from '../screens/OwnerIntroScreen';
-import OwnerDashboardScreen from '../screens/OwnerDashboardScreen';
-import OwnerListingFormScreen from '../screens/OwnerListingFormScreen';
-import OwnerOverviewScreen from '../screens/OwnerOverviewScreen';
-import OwnerPendingScreen from '../screens/OwnerPendingScreen';
-import OwnerListingDetailScreen from '../screens/OwnerListingDetailScreen';
+import OwnerIntroScreen from './screens/OwnerIntroScreen';
+import OwnerDashboardScreen from './screens/OwnerDashboardScreen';
+import OwnerListingFormScreen from './screens/OwnerListingFormScreen';
+import OwnerOverviewScreen from './screens/OwnerOverviewScreen';
+import OwnerPendingScreen from './screens/OwnerPendingScreen';
+import OwnerListingDetailScreen from './screens/OwnerListingDetailScreen';
 
 // Stack (JS)
 const Stack = createStackNavigator();

@@ -25,7 +25,7 @@ import 'dayjs/locale/he';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { scheduleBookingNotifications, cancelBookingNotifications } from '../../utils/notify';
+import { scheduleBookingNotifications, cancelBookingNotifications } from '../utils/notify';
 import { useTheme } from '@shopify/restyle';
 import ZpButton from '../components/ui/ZpButton';
 import { LinearGradient } from 'expo-linear-gradient';

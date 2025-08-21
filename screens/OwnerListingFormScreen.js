@@ -6,11 +6,11 @@ import {
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import * as listingsRepo from '../../data/listingsRepo';
-import { osmReverse } from '../../utils/osm';
+import * as listingsRepo from '../data/listingsRepo';
+import { osmReverse } from '../utils/osm';
 import { useTheme } from '@shopify/restyle';
 import ZpButton from '../components/ui/ZpButton';
-import { API_BASE } from '../../src/config/api'; // ← חשוב: קובץ הקונפיג מהשלב הקודם
+import { API_BASE } from '../src/config/api'; // ← חשוב: קובץ הקונפיג מהשלב הקודם
 
 // קטגוריות רכבים מצומצמות לפי הפרשי גודל
 const VEHICLE_TYPES = [

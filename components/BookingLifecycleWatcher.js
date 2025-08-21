@@ -1,7 +1,7 @@
 // components/BookingLifecycleWatcher.js
 import React, { useEffect } from 'react';
 import { AppState } from 'react-native';
-import * as bookingsRepo from '../../data/bookingsRepo';
+import * as bookingsRepo from '../data/bookingsRepo';
 
 /**
  * קומפוננטה קלה שרצה "ברקע" בכל מסך שבו מרנדרים אותה,

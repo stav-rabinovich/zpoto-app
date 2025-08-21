@@ -1,7 +1,7 @@
 // screens/OwnerMyListingsScreen.js
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert } from 'react-native';
-import * as listingsRepo from '../../data/listingsRepo';
+import * as listingsRepo from '../data/listingsRepo';
 
 export default function OwnerMyListingsScreen({ navigation }) {
   const [listings, setListings] = useState([]);

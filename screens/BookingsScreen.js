@@ -2,9 +2,9 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import * as bookingsRepo from '../../data/bookingsRepo';
+import * as bookingsRepo from '../data/bookingsRepo';
 import BookingLifecycleWatcher from '../components/BookingLifecycleWatcher';
-import { BOOKING_STATUS } from '../../data/bookingsRepo';
+import { BOOKING_STATUS } from '../data/bookingsRepo';
 import { useTheme } from '@shopify/restyle';
 import { Ionicons } from '@expo/vector-icons';
 

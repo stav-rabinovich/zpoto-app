@@ -14,7 +14,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { openWaze } from '../../utils/nav';
+import { openWaze } from '../utils/nav';
 import { useTheme } from '@shopify/restyle';
 
 const IDS_KEY = 'favorites';

@@ -8,7 +8,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import * as Location from 'expo-location';
 import ZpButton from '../components/ui/ZpButton';
-import { osmAutocomplete } from '../../utils/osm';
+import { osmAutocomplete } from '../utils/osm';
 
 const PROFILE_KEY = 'profile';
 const VEHICLES_KEY = 'vehicles';

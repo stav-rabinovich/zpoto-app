@@ -30,7 +30,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@shopify/restyle';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { osmAutocomplete } from '../../utils/osm';
+import { osmAutocomplete } from '../utils/osm';
 
 function msToHhMmSs(ms) {
   if (ms <= 0) return '00:00:00';

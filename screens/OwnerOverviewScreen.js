@@ -1,8 +1,8 @@
 // screens/OwnerOverviewScreen.js
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, FlatList } from 'react-native';
-import * as bookingsRepo from '../../data/bookingsRepo';
-import { BOOKING_STATUS } from '../../data/bookingsRepo';
+import * as bookingsRepo from '../data/bookingsRepo';
+import { BOOKING_STATUS } from '../data/bookingsRepo';
 import BookingLifecycleWatcher from '../components/BookingLifecycleWatcher';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
