@@ -2,7 +2,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Switch } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { HEB_DAYS, isValidHHmm, defaultAlwaysAvailable, defaultWeekdayPreset, setAllDays } from '../utils/availability';
+import { HEB_DAYS, isValidHHmm, defaultAlwaysAvailable, defaultWeekdayPreset, setAllDays } from '../../utils/availability';
 
 export default function AvailabilityEditor({ value, onChange }) {
   const avail = value ?? defaultAlwaysAvailable();

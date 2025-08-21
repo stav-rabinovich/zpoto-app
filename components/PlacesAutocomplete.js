@@ -1,99 +1,80 @@
 // components/PlacesAutocomplete.js
-import React, { useEffect, useRef, useState } from 'react';
-import { View, TextInput, StyleSheet, FlatList, TouchableOpacity, Text, ActivityIndicator } from 'react-native';
-import { osmAutocomplete } from '../utils/osm';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useState } from 'react';
+import { View, TextInput, TouchableOpacity, Text, StyleSheet, ScrollView } from 'react-native';
+import { osmAutocomplete } from '../../utils/osm';
 
-export default function PlacesAutocomplete({
-  placeholder = 'הזן כתובת…',
-  initialText = '',
-  value,                // ✅ טקסט נשלט מבחוץ (אופציונלי)
-  aroundLocation = null,
-  onSelect,             // (item) -> void
-  onChangeText,         // ✅ ידווח החוצה על שינויי טקסט
-  inputStyle,
-  containerStyle,
-  listMaxHeight = 220,
-  debounceMs = 250,
-}) {
-  const [text, setText] = useState(initialText);
-  const [loading, setLoading] = useState(false);
-  const [items, setItems] = useState([]);
+function useDebounced(value, delay = 400) {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return v;
+}
+
+/**
+ * Props:
+ *  - value (string)
+ *  - onChangeText(text)
+ *  - onSelect({ id, placeId, description, lat, lon })
+ *  - placeholder?
+ *  - aroundLocation? { latitude, longitude }
+ */
+export default function PlacesAutocomplete({ value, onChangeText, onSelect, placeholder, aroundLocation }) {
+  const [results, setResults] = useState([]);
   const [open, setOpen] = useState(false);
-  const timerRef = useRef(null);
-
-  // ✅ סנכרון פנימי עם value/initialText אם משתנים מבחוץ
-  useEffect(() => {
-    if (typeof value === 'string') {
-      setText(value);
-    } else if (initialText) {
-      setText(initialText);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, initialText]);
+  const [loading, setLoading] = useState(false);
+  const debounced = useDebounced(value, 400);
 
   useEffect(() => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-    if (!text || text.trim().length < 2) {
-      setItems([]);
-      setOpen(false);
-      return;
-    }
-    timerRef.current = setTimeout(async () => {
-      try {
-        setLoading(true);
-        const results = await osmAutocomplete(text.trim(), { aroundLocation });
-        setItems(results);
-        setOpen(true);
-      } catch {
-        setItems([]);
-        setOpen(false);
-      } finally {
-        setLoading(false);
+    let alive = true;
+    const run = async () => {
+      if (!debounced || debounced.trim().length < 2) {
+        setResults([]);
+        return;
       }
-    }, debounceMs);
-    return () => timerRef.current && clearTimeout(timerRef.current);
-  }, [text, aroundLocation, debounceMs]);
+      setLoading(true);
+      const items = await osmAutocomplete(debounced, { aroundLocation, limit: 7, language: 'he' }).catch(() => []);
+      if (!alive) return;
+      setResults(items || []);
+      setLoading(false);
+    };
+    run();
+    return () => { alive = false; };
+  }, [debounced, aroundLocation]);
 
-  const renderItem = ({ item }) => (
-    <TouchableOpacity
-      style={styles.row}
-      onPress={() => {
-        setOpen(false);
-        setItems([]);
-        // ✅ מעדכן גם את הטקסט הנראה וגם מדווח להורה
-        setText(item.description);
-        onChangeText?.(item.description);
-        onSelect?.(item);
-      }}
-    >
-      <Ionicons name="location-outline" size={16} color="#0b6aa8" style={{ marginEnd: 8 }} />
-      <Text numberOfLines={2} style={styles.rowText}>{item.description}</Text>
-    </TouchableOpacity>
-  );
+  function pick(item) {
+    setOpen(false);
+    onSelect?.(item);
+  }
 
   return (
-    <View style={[styles.wrap, containerStyle]}>
-      <View style={styles.inputWrap}>
-        <Ionicons name="search" size={18} color="#00A7E6" style={{ marginEnd: 6 }} />
-        <TextInput
-          value={text}
-          onChangeText={(t) => { setText(t); onChangeText?.(t); }}
-          placeholder={placeholder}
-          style={[styles.input, inputStyle]}
-          onFocus={() => { if (items.length > 0) setOpen(true); }}
-        />
-        {loading && <ActivityIndicator size="small" />}
-      </View>
+    <View style={styles.wrap} pointerEvents="box-none">
+      <TextInput
+        value={value}
+        onChangeText={(t) => { onChangeText?.(t); setOpen(true); }}
+        placeholder={placeholder || 'כתובת...'}
+        style={styles.input}
+      />
 
-      {open && items.length > 0 && (
-        <View style={[styles.dropdown, { maxHeight: listMaxHeight }]}>
-          <FlatList
-            data={items}
-            keyExtractor={(it, idx) => it.id || String(idx)}
-            renderItem={renderItem}
-            keyboardShouldPersistTaps="handled"
-          />
+      {open && (results.length > 0 || loading) && (
+        <View style={styles.dropdown} pointerEvents="box-none">
+          {loading ? (
+            <Text style={styles.hint}>מחפש…</Text>
+          ) : (
+            <ScrollView
+              style={styles.scroll}
+              keyboardShouldPersistTaps="handled"
+              nestedScrollEnabled
+            >
+              {results.map((item) => (
+                <TouchableOpacity key={String(item.id)} style={styles.item} onPress={() => pick(item)}>
+                  <Text style={styles.itemText} numberOfLines={2}>{item.description}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          )}
+          {!loading && results.length === 0 && <Text style={styles.hint}>לא נמצאו תוצאות</Text>}
         </View>
       )}
     </View>
@@ -101,18 +82,18 @@ export default function PlacesAutocomplete({
 }
 
 const styles = StyleSheet.create({
-  wrap:{ position:'relative' },
-  inputWrap:{
-    flexDirection:'row', alignItems:'center',
-    backgroundColor:'#fff', borderRadius:12, borderWidth:1, borderColor:'#cdefff',
-    paddingHorizontal:12, height:50
+  wrap: { position: 'relative' },
+  input: { borderWidth: 1, borderColor: '#e5e7eb', borderRadius: 10, padding: 10, backgroundColor: '#fff' },
+  dropdown: {
+    position: 'absolute', top: 48, left: 0, right: 0,
+    backgroundColor: '#fff', borderWidth: 1, borderColor: '#e5e7eb',
+    borderRadius: 10, maxHeight: 220, zIndex: 999,
+    // צל קל מעל הטופס
+    shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 6, shadowOffset: { width: 0, height: 2 },
+    elevation: 3,
   },
-  input:{ flex:1, fontSize:16, paddingVertical:8 },
-  dropdown:{
-    position:'absolute', zIndex:10, left:0, right:0, top:52,
-    backgroundColor:'#fff', borderWidth:1, borderColor:'#e6f3ff', borderRadius:12,
-    shadowColor:'#000', shadowOpacity:0.08, shadowRadius:8, shadowOffset:{ width:0, height:4 }
-  },
-  row:{ padding:12, flexDirection:'row', alignItems:'center' },
-  rowText:{ flex:1, color:'#0b6aa8' },
+  scroll: { maxHeight: 220 },
+  item: { paddingHorizontal: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  itemText: { fontSize: 13, color: '#111827' },
+  hint: { padding: 10, fontSize: 12, color: '#6b7280' },
 });

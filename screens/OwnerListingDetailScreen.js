@@ -4,6 +4,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image } from 'react
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '@shopify/restyle';
 
 const LISTINGS_KEY = 'owner_listings';
 const BOOKINGS_KEY  = 'bookings';
@@ -12,6 +13,9 @@ function dateKey(d){ return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}
 function overlaps(aStart, aEnd, bStart, bEnd){ return aStart < bEnd && aEnd > bStart; }
 
 export default function OwnerListingDetailScreen({ route, navigation }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
+
   const listingId = route?.params?.id;
   const [listing, setListing] = useState(null);
   const [bookings, setBookings] = useState([]);
@@ -76,18 +80,27 @@ export default function OwnerListingDetailScreen({ route, navigation }) {
 
   const renderBooking = ({ item }) => {
     const s = new Date(item.start), e = new Date(item.end);
+    const isConfirmed = item.status === 'confirmed';
+    const isPending   = item.status === 'pending';
     return (
       <View style={styles.bCard}>
-        <Text style={styles.bTitle}>{item.spot?.title || 'חניה'}</Text>
+        <View style={styles.bHeader}>
+          <Text style={styles.bTitle} numberOfLines={1}>{item.spot?.title || 'חניה'}</Text>
+          <Text
+            style={[
+              styles.statusPill,
+              isConfirmed && styles.statusOk,
+              isPending && styles.statusPending,
+              (!isConfirmed && !isPending) && styles.statusCancel
+            ]}
+          >
+            {isConfirmed ? 'מאושר' : isPending ? 'ממתין' : 'בוטל'}
+          </Text>
+        </View>
+
         {!!item.spot?.address && <Text style={styles.line}>כתובת: {item.spot.address}</Text>}
         <Text style={styles.line}>מ־{s.toLocaleString()} עד {e.toLocaleString()}</Text>
         <Text style={styles.line}>משך: {item.hours} שעות • סה״כ: ₪{item.total}</Text>
-        <Text style={[styles.badge, { backgroundColor: item.status==='confirmed' ? '#e8fff2' : (item.status==='pending' ? '#fff7e6' : '#fff3f3'),
-          borderColor: item.status==='confirmed' ? '#b9f5cf' : (item.status==='pending' ? '#ffd79a' : '#ffd1d1'),
-          color: item.status==='confirmed' ? '#0a7a3e' : (item.status==='pending' ? '#7a4d00' : '#b33') }]}
-        >
-          {item.status==='confirmed'?'מאושר': item.status==='pending'?'ממתין':'בוטל'}
-        </Text>
       </View>
     );
   };
@@ -101,29 +114,46 @@ export default function OwnerListingDetailScreen({ route, navigation }) {
       {listing ? (
         <View style={styles.card}>
           {!!thumb && <Image source={{ uri: thumb }} style={styles.hero} />}
-          <Text style={styles.title}>{listing.title || listing.address || 'חניה'}</Text>
+
+          <View style={styles.cardHeader}>
+            <View style={styles.cardIconWrap}>
+              <Ionicons name="business-outline" size={16} color="#fff" />
+            </View>
+            <Text style={styles.title}>{listing.title || listing.address || 'חניה'}</Text>
+          </View>
+
           {!!listing.address && <Text style={styles.line}>כתובת: {listing.address}</Text>}
           <Text style={styles.line}>מחיר לשעה: ₪{listing.price || 0}</Text>
           {typeof listing.latitude === 'number' && typeof listing.longitude === 'number' && (
             <Text style={styles.line}>מיקום: {listing.latitude.toFixed(5)}, {listing.longitude.toFixed(5)}</Text>
           )}
 
-          <View style={{ flexDirection:'row', gap:8, marginTop:8 }}>
-            <TouchableOpacity style={styles.rangeBtn} onPress={() => { const d=new Date(); d.setDate(d.getDate()-6); d.setHours(0,0,0,0); setFrom(d); const e=new Date(); e.setHours(23,59,59,999); setTo(e); }}>
+          {/* טווחים מהירים */}
+          <View style={styles.quickRow}>
+            <TouchableOpacity
+              style={styles.rangeBtn}
+              onPress={() => { const d=new Date(); d.setDate(d.getDate()-6); d.setHours(0,0,0,0); setFrom(d); const e=new Date(); e.setHours(23,59,59,999); setTo(e); }}
+              activeOpacity={0.9}
+            >
               <Text style={styles.rangeBtnText}>7 ימים</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.rangeBtn} onPress={() => { const d=new Date(); d.setDate(d.getDate()-29); d.setHours(0,0,0,0); setFrom(d); const e=new Date(); e.setHours(23,59,59,999); setTo(e); }}>
+            <TouchableOpacity
+              style={styles.rangeBtn}
+              onPress={() => { const d=new Date(); d.setDate(d.getDate()-29); d.setHours(0,0,0,0); setFrom(d); const e=new Date(); e.setHours(23,59,59,999); setTo(e); }}
+              activeOpacity={0.9}
+            >
               <Text style={styles.rangeBtnText}>30 ימים</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={{ flexDirection:'row', gap:10, marginTop:8 }}>
-            <TouchableOpacity style={styles.datePick} onPress={() => setShowFrom(true)}>
-              <Ionicons name="calendar" size={16} color="#0b6aa8" style={{ marginEnd:6 }} />
+          {/* בחירת תאריכים */}
+          <View style={styles.dateRow}>
+            <TouchableOpacity style={styles.datePick} onPress={() => setShowFrom(true)} activeOpacity={0.9}>
+              <Ionicons name="calendar-outline" size={16} color={theme.colors.primary} style={{ marginEnd:6 }} />
               <Text style={styles.datePickText}>מ־{from.toLocaleDateString()}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.datePick} onPress={() => setShowTo(true)}>
-              <Ionicons name="calendar" size={16} color="#0b6aa8" style={{ marginEnd:6 }} />
+            <TouchableOpacity style={styles.datePick} onPress={() => setShowTo(true)} activeOpacity={0.9}>
+              <Ionicons name="calendar-outline" size={16} color={theme.colors.primary} style={{ marginEnd:6 }} />
               <Text style={styles.datePickText}>עד {to.toLocaleDateString()}</Text>
             </TouchableOpacity>
           </View>
@@ -135,11 +165,18 @@ export default function OwnerListingDetailScreen({ route, navigation }) {
             <DateTimePicker value={to} mode="date" onChange={(_,d)=>{ setShowTo(false); if(d){ d.setHours(23,59,59,999); setTo(d);} }} />
           )}
 
-          <Text style={[styles.line, { marginTop:6 }]}><Text style={{ fontWeight:'800' }}>סה״כ הכנסות בטווח:</Text> ₪{totals.income}</Text>
+          {/* סיכום הכנסות */}
+          <View style={styles.summary}>
+            <Ionicons name="cash-outline" size={16} color={theme.colors.text} style={{ marginEnd: 6 }} />
+            <Text style={styles.summaryText}>
+              סה״כ הכנסות בטווח: ₪{totals.income} • {totals.count} הזמנות
+            </Text>
+          </View>
 
+          {/* גרף עמודות */}
           <View style={styles.chartRow}>
             {chart.map((p,i)=>{
-              const h = Math.round((p.value/Math.max(1,...chart.map(x=>x.value)))*80);
+              const h = Math.round((p.value / maxVal) * 80);
               return (
                 <View key={`${p.label}-${i}`} style={styles.barWrap}>
                   <View style={[styles.bar,{ height: Math.max(2,h)}]} />
@@ -150,7 +187,7 @@ export default function OwnerListingDetailScreen({ route, navigation }) {
           </View>
         </View>
       ) : (
-        <View style={styles.card}><Text>החניה לא נמצאה.</Text></View>
+        <View style={styles.card}><Text style={styles.line}>החניה לא נמצאה.</Text></View>
       )}
 
       <Text style={styles.section}>הזמנות רלוונטיות</Text>
@@ -158,36 +195,108 @@ export default function OwnerListingDetailScreen({ route, navigation }) {
         data={myBookings}
         keyExtractor={i=>i.id}
         renderItem={renderBooking}
-        contentContainerStyle={{ paddingBottom:24 }}
-        ListEmptyComponent={<Text style={{ color:'#666', textAlign:'center', marginTop:8 }}>אין הזמנות.</Text>}
+        contentContainerStyle={{ paddingBottom: theme.spacing.xl }}
+        ListEmptyComponent={<Text style={[styles.line, { textAlign:'center', color: theme.colors.subtext, marginTop: 8 }]}>אין הזמנות.</Text>}
       />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  wrap:{ flex:1, backgroundColor:'#f6f9fc', padding:14 },
-  header:{ fontSize:20, fontWeight:'800', textAlign:'center', marginBottom:12 },
+function makeStyles(theme) {
+  const { colors, spacing, borderRadii } = theme;
+  return StyleSheet.create({
+    wrap:{ flex:1, backgroundColor: colors.bg, padding: spacing.lg },
+    header:{ fontSize:20, fontWeight:'800', textAlign:'center', marginBottom: spacing.md, color: colors.text },
 
-  card:{ backgroundColor:'#fff', borderRadius:14, padding:14, marginBottom:12, borderWidth:1, borderColor:'#ecf1f7' },
-  title:{ fontSize:16, fontWeight:'800', marginBottom:6 },
-  line:{ fontSize:14, color:'#333', marginVertical:2 },
+    // כרטיס עליון
+    card:{
+      backgroundColor: colors.surface,
+      borderRadius: borderRadii.md,
+      padding: spacing.lg,
+      marginBottom: spacing.md,
+      borderWidth:1, borderColor: colors.border,
+      shadowColor:'#000', shadowOpacity:0.06, shadowRadius:12, shadowOffset:{ width:0, height:6 }, elevation:2
+    },
+    cardHeader:{ flexDirection:'row', alignItems:'center', marginBottom: spacing.xs },
+    cardIconWrap:{
+      width:24, height:24, borderRadius:12,
+      alignItems:'center', justifyContent:'center',
+      marginEnd:8, backgroundColor: colors.primary
+    },
 
-  hero:{ width:'100%', height:160, borderRadius:10, marginBottom:8 },
+    title:{ fontSize:16, fontWeight:'800', color: colors.text, flexShrink:1 },
+    line:{ fontSize:14, color: colors.text, marginVertical:2 },
 
-  rangeBtn:{ paddingVertical:8, paddingHorizontal:10, borderRadius:10, borderWidth:1, borderColor:'#cfe3ff', backgroundColor:'#eaf4ff' },
-  rangeBtnText:{ color:'#0b6aa8', fontWeight:'800' },
-  datePick:{ paddingVertical:8, paddingHorizontal:10, borderRadius:10, borderWidth:1, borderColor:'#e3e9f0', backgroundColor:'#fff', flexDirection:'row', alignItems:'center' },
-  datePickText:{ color:'#0b6aa8', fontWeight:'700' },
+    hero:{ width:'100%', height:160, borderRadius: borderRadii.sm, marginBottom:8, backgroundColor: colors.bg },
 
-  chartRow:{ flexDirection:'row', gap:6, alignItems:'flex-end', marginTop:10, paddingTop:6, borderTopWidth:1, borderTopColor:'#f1f4f8' },
-  barWrap:{ alignItems:'center', width:24 },
-  bar:{ width:16, backgroundColor:'#00C6FF', borderRadius:6 },
-  barLabel:{ fontSize:10, color:'#555', marginTop:4 },
+    // טווחים מהירים
+    quickRow:{ flexDirection:'row', gap:8, marginTop:8 },
+    rangeBtn:{
+      paddingVertical:8, paddingHorizontal:10,
+      borderRadius: borderRadii.sm,
+      borderWidth:1, borderColor: colors.primary,
+      backgroundColor: colors.surface,
+      shadowColor:'#000', shadowOpacity:0.04, shadowRadius:10, shadowOffset:{ width:0, height:4 }, elevation:1
+    },
+    rangeBtnText:{ color: colors.primary, fontWeight:'800' },
 
-  section:{ fontSize:16, fontWeight:'800', marginBottom:6, marginTop:4, color:'#0b6aa8' },
+    // בחירת תאריכים
+    dateRow:{ flexDirection:'row', gap:10, marginTop:8 },
+    datePick:{
+      paddingVertical:10, paddingHorizontal:12,
+      borderRadius: borderRadii.sm,
+      borderWidth:1, borderColor: colors.border,
+      backgroundColor: colors.surface,
+      flexDirection:'row', alignItems:'center',
+      shadowColor:'#000', shadowOpacity:0.04, shadowRadius:10, shadowOffset:{ width:0, height:4 }, elevation:1
+    },
+    datePickText:{ color: colors.text, fontWeight:'700' },
 
-  bCard:{ backgroundColor:'#fff', borderRadius:12, padding:12, marginBottom:10, borderWidth:1, borderColor:'#ecf1f7' },
-  bTitle:{ fontSize:15, fontWeight:'800', marginBottom:4 },
-  badge:{ marginTop:6, alignSelf:'flex-start', borderWidth:1, borderRadius:8, paddingHorizontal:8, paddingVertical:4, fontWeight:'700' },
-});
+    // סיכום הכנסות
+    summary:{
+      marginTop: spacing.sm,
+      flexDirection:'row', alignItems:'center',
+      backgroundColor:'#EEF3FF',
+      borderRadius: borderRadii.md,
+      borderWidth:1, borderColor: colors.border,
+      padding: spacing.md
+    },
+    summaryText:{ color: colors.text, fontWeight:'700' },
+
+    // גרף
+    chartRow:{
+      flexDirection:'row', gap:6, alignItems:'flex-end',
+      marginTop:10, paddingTop:6, borderTopWidth:1, borderTopColor: colors.border
+    },
+    barWrap:{ alignItems:'center', width:28 },
+    bar:{
+      width:18, backgroundColor: colors.primary,
+      borderRadius: 8
+    },
+    barLabel:{ fontSize:10, color: colors.subtext, marginTop:4 },
+
+    // כותרת משנה
+    section:{ fontSize:16, fontWeight:'800', marginBottom:6, marginTop:4, color: colors.text },
+
+    // כרטיס הזמנה
+    bCard:{
+      backgroundColor: colors.surface,
+      borderRadius: borderRadii.md,
+      padding: spacing.md,
+      marginBottom: 10,
+      borderWidth:1, borderColor: colors.border
+    },
+    bHeader:{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom:4 },
+    bTitle:{ fontSize:15, fontWeight:'800', color: colors.text, flex:1, marginEnd: spacing.sm },
+
+    // סטטוס כ־Pill
+    statusPill:{
+      paddingVertical:4, paddingHorizontal:10, borderRadius:999,
+      fontSize:12, overflow:'hidden',
+      borderWidth:1, borderColor: colors.border, color: colors.text, backgroundColor: colors.bg
+    },
+    statusOk:{ color: colors.success, borderColor: '#b9f5cf', backgroundColor:'#f7fffb' },
+    statusPending:{ color: colors.warning, borderColor:'#ffd79a', backgroundColor:'#fff7e6' },
+    statusCancel:{ color: '#fff', borderColor: '#d66', backgroundColor:'#d66' },
+  });
+}

@@ -13,7 +13,6 @@ export const BOOKING_STATUS = {
   CANCELED: 'canceled',
 };
 
-// ---------- Helpers ----------
 function normalize(b) {
   return {
     id: b.id,
@@ -24,7 +23,7 @@ function normalize(b) {
     endAt: b.endAt ?? null,
     pricePerHour: b.pricePerHour ?? 12,
     totalPrice: typeof b.totalPrice === 'number' ? b.totalPrice : undefined,
-    status: b.status ?? null, // ייקבע אוטומטית אם חסר
+    status: b.status ?? null,
     events: Array.isArray(b.events) ? b.events : [],
     createdAt: b.createdAt ?? Date.now(),
     updatedAt: b.updatedAt ?? Date.now(),
@@ -54,11 +53,10 @@ export function calcTotalPrice(booking) {
     0,
     (new Date(booking.endAt).getTime() - new Date(booking.startAt).getTime()) / (1000 * 60 * 60)
   );
-  const hoursRoundedUp = Math.ceil(diffHrs); // עיגול לשעה
+  const hoursRoundedUp = Math.ceil(diffHrs);
   return Math.round(hoursRoundedUp * booking.pricePerHour);
 }
 
-// קובע סטטוס התחלתי לפי הגדרת החניה (auto/manual)
 async function deriveInitialStatus(booking) {
   try {
     const listing = booking?.listingId ? await listingsRepo.getById(booking.listingId) : null;
@@ -69,7 +67,6 @@ async function deriveInitialStatus(booking) {
   }
 }
 
-// ---------- CRUD ----------
 export async function upsert(booking) {
   const all = await getAll();
   const idx = all.findIndex((b) => b.id === booking.id);
@@ -125,7 +122,6 @@ export async function setStatus(id, status, extraEventPayload = undefined) {
   return updated;
 }
 
-// יצירת הזמנה – נקרא מכל מסך שמייצר הזמנה
 export async function requestBooking({ id, listingId, renterId, startAt, endAt, pricePerHour, title }) {
   const booking = {
     id: id ?? `b_${Date.now()}`,
@@ -136,12 +132,9 @@ export async function requestBooking({ id, listingId, renterId, startAt, endAt, 
     endAt,
     pricePerHour,
   };
-  return upsert(booking); // יקבל PENDING/APPROVED לפי החניה
+  return upsert(booking);
 }
 
-// ---------- לוגיקת מחזור חיים (אוטומטית) ----------
-// מאשר שהזמנות APPROVED יהפכו ל-ACTIVE בזמן ההתחלה,
-// והזמנות ACTIVE יהפכו ל-COMPLETED אחרי זמן הסיום.
 export async function sweepAndAutoTransition(nowTs = Date.now()) {
   const all = await getAll();
   let changed = false;
@@ -165,7 +158,7 @@ export async function sweepAndAutoTransition(nowTs = Date.now()) {
       const completed = {
         ...b,
         status: BOOKING_STATUS.COMPLETED,
-        endAt: b.endAt, // נשאר
+        endAt: b.endAt,
         totalPrice: calcTotalPrice(b),
         updatedAt: nowTs,
         events: [...(b.events || []), { type: 'status_change', at: nowTs, payload: { to: BOOKING_STATUS.COMPLETED } }],
@@ -179,7 +172,6 @@ export async function sweepAndAutoTransition(nowTs = Date.now()) {
   return changed;
 }
 
-// הארכת הזמנה פעילה/מאושרת
 export async function extend(bookingId, newEndAt) {
   const all = await getAll();
   const idx = all.findIndex((b) => b.id === bookingId);
@@ -197,7 +189,6 @@ export async function extend(bookingId, newEndAt) {
   return updated;
 }
 
-// סיום מוקדם – מחשב חיוב עד עכשיו ומסיים
 export async function finishNow(bookingId) {
   const all = await getAll();
   const idx = all.findIndex((b) => b.id === bookingId);
@@ -217,7 +208,6 @@ export async function finishNow(bookingId) {
   return completed;
 }
 
-// KPIs לטווח
 export async function kpis(from, to) {
   const all = await getAll();
   const inR = all.filter((b) => inRange(b, from, to));

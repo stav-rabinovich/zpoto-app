@@ -1,7 +1,9 @@
 // screens/OwnerApplyScreen.js
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, Alert, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, TextInput, Alert, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useTheme } from '@shopify/restyle';
+import ZpButton from '../components/ui/ZpButton';
 
 const PROFILE_KEY = 'profile';
 const OWNER_APP_KEY = 'owner_application';
@@ -13,6 +15,9 @@ function emailValid(email) {
 }
 
 export default function OwnerApplyScreen({ navigation }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
+
   const [name, setName]   = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -81,46 +86,91 @@ export default function OwnerApplyScreen({ navigation }) {
 
   return (
     <KeyboardAvoidingView style={{ flex:1 }} behavior={Platform.select({ ios:'padding' })}>
-      <ScrollView contentContainerStyle={styles.wrap}>
+      <ScrollView contentContainerStyle={styles.wrap} keyboardShouldPersistTaps="handled">
         <Text style={styles.header}>בקשה להיות בעל/ת חניה</Text>
 
         <View style={styles.card}>
           <Text style={styles.label}>שם מלא</Text>
-          <TextInput style={styles.input} value={name} onChangeText={setName} placeholder="לדוגמה: ישראל ישראלי" />
+          <TextInput
+            style={styles.input}
+            value={name}
+            onChangeText={setName}
+            placeholder="לדוגמה: ישראל ישראלי"
+            placeholderTextColor={theme.colors.subtext}
+          />
 
           <Text style={styles.label}>אימייל</Text>
-          <TextInput style={styles.input} value={email} onChangeText={setEmail} placeholder="you@example.com" keyboardType="email-address" autoCapitalize="none" />
+          <TextInput
+            style={styles.input}
+            value={email}
+            onChangeText={setEmail}
+            placeholder="you@example.com"
+            placeholderTextColor={theme.colors.subtext}
+            keyboardType="email-address"
+            autoCapitalize="none"
+          />
 
           <Text style={styles.label}>טלפון</Text>
-          <TextInput style={styles.input} value={phone} onChangeText={setPhone} placeholder="050-0000000" keyboardType="phone-pad" />
+          <TextInput
+            style={styles.input}
+            value={phone}
+            onChangeText={setPhone}
+            placeholder="050-0000000"
+            placeholderTextColor={theme.colors.subtext}
+            keyboardType="phone-pad"
+          />
 
           <Text style={styles.label}>כתובת חניה (ראשית)</Text>
-          <TextInput style={styles.input} value={address} onChangeText={setAddress} placeholder="רחוב, מספר, עיר" />
+          <TextInput
+            style={styles.input}
+            value={address}
+            onChangeText={setAddress}
+            placeholder="רחוב, מספר, עיר"
+            placeholderTextColor={theme.colors.subtext}
+          />
         </View>
 
-        <TouchableOpacity style={[styles.primary, submitting && { opacity: 0.6 }]} onPress={submit} disabled={submitting}>
-          {submitting ? (
-            <>
-              <ActivityIndicator color="#fff" />
-              <Text style={[styles.primaryText, { marginStart: 8 }]}>שולח…</Text>
-            </>
-          ) : (
-            <Text style={styles.primaryText}>שלח בקשה</Text>
-          )}
-        </TouchableOpacity>
+        <ZpButton
+          title={submitting ? 'שולח…' : 'שלח בקשה'}
+          onPress={submit}
+          disabled={submitting}
+          leftIcon={submitting ? <ActivityIndicator color="#fff" /> : null}
+        />
 
-        <View style={{ height: 14 }} />
+        <View style={{ height: theme.spacing.xl }} />
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  wrap:{ padding:14, backgroundColor:'#f6f9fc' },
-  header:{ fontSize:20, fontWeight:'800', textAlign:'center', marginBottom:12 },
-  card:{ backgroundColor:'#fff', borderRadius:14, padding:14, marginBottom:12, borderWidth:1, borderColor:'#ecf1f7' },
-  label:{ fontSize:13, color:'#555', marginTop:6, marginBottom:6 },
-  input:{ height:48, borderRadius:10, borderWidth:1, borderColor:'#e3e9f0', backgroundColor:'#fff', paddingHorizontal:12, fontSize:15 },
-  primary:{ backgroundColor:'#00C6FF', paddingVertical:14, borderRadius:12, alignItems:'center', flexDirection:'row', justifyContent:'center' },
-  primaryText:{ color:'#fff', fontWeight:'800' },
-});
+function makeStyles(theme) {
+  const { colors, spacing, borderRadii } = theme;
+  return StyleSheet.create({
+    wrap:{ padding: spacing.lg, backgroundColor: colors.bg },
+    header:{ fontSize:20, fontWeight:'800', textAlign:'center', marginBottom: spacing.md, color: colors.text },
+
+    card:{
+      backgroundColor: colors.surface,
+      borderRadius: borderRadii.md,
+      padding: spacing.lg,
+      marginBottom: spacing.md,
+      borderWidth:1, borderColor: colors.border,
+      shadowColor:'#000', shadowOpacity:0.06, shadowRadius:12, shadowOffset:{ width:0, height:6 }, elevation:2
+    },
+
+    label:{ fontSize:13, color: colors.subtext, marginTop:6, marginBottom:6 },
+
+    input:{
+      height:48,
+      borderRadius: borderRadii.sm,
+      borderWidth:1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingHorizontal:12,
+      fontSize:15,
+      color: colors.text,
+      marginBottom:8,
+      shadowColor:'#000', shadowOpacity:0.04, shadowRadius:10, shadowOffset:{ width:0, height:4 }, elevation:1
+    },
+  });
+}

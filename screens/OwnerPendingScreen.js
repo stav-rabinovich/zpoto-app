@@ -1,8 +1,8 @@
 // screens/OwnerPendingScreen.js
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
-import * as bookingsRepo from '../data/bookingsRepo';
-import { BOOKING_STATUS } from '../types/status';
+import * as bookingsRepo from '../../data/bookingsRepo';
+import { BOOKING_STATUS } from '../../data/bookingsRepo';
 
 export default function OwnerPendingScreen() {
   const [pending, setPending] = useState([]);

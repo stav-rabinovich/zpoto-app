@@ -1,12 +1,17 @@
 // screens/OwnerDashboardScreen.js
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, Image } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '@shopify/restyle';
+import ZpButton from '../components/ui/ZpButton';
 
 export const LISTINGS_KEY = 'owner_listings';
 
 export default function OwnerDashboardScreen({ navigation }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
+
   const [listings, setListings] = useState([]);
 
   const load = useCallback(async () => {
@@ -51,40 +56,45 @@ export default function OwnerDashboardScreen({ navigation }) {
 
   const renderListing = ({ item }) => {
     const thumb = Array.isArray(item.images) && item.images[0]?.uri;
+
     return (
       <View style={[styles.card, item.active ? styles.cardActive : null]}>
-        <View style={{ flexDirection:'row', justifyContent:'space-between', alignItems:'center' }}>
-          <Text style={styles.title}>{item.title || 'חניה ללא שם'}</Text>
-          <View style={{ flexDirection:'row', gap:10 }}>
-            <TouchableOpacity onPress={() => navigation.navigate('OwnerListingDetail', { id: item.id })}>
-              <Ionicons name="bar-chart" size={18} color="#00C6FF" />
+        {/* כותרת + אקשנים */}
+        <View style={styles.cardHeader}>
+          <Text style={styles.title} numberOfLines={1}>{item.title || 'חניה ללא שם'}</Text>
+
+          <View style={styles.actionsRow}>
+            <TouchableOpacity onPress={() => navigation.navigate('OwnerListingDetail', { id: item.id })} style={styles.iconBtn} activeOpacity={0.85}>
+              <Ionicons name="bar-chart" size={18} color={theme.colors.primary} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation.navigate('OwnerListingForm', { id: item.id })}>
-              <Ionicons name="create-outline" size={18} color="#0b6aa8" />
+            <TouchableOpacity onPress={() => navigation.navigate('OwnerListingForm', { id: item.id })} style={styles.iconBtn} activeOpacity={0.85}>
+              <Ionicons name="create-outline" size={18} color={theme.colors.text} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => toggleActive(item.id)}>
-              <Ionicons name={item.active ? 'toggle' : 'toggle-outline'} size={22} color={item.active ? '#0a7a3e' : '#999'} />
+            <TouchableOpacity onPress={() => toggleActive(item.id)} style={styles.iconBtn} activeOpacity={0.85}>
+              <Ionicons name={item.active ? 'toggle' : 'toggle-outline'} size={22} color={item.active ? theme.colors.success : theme.colors.subtext} />
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => removeListing(item.id)}>
-              <Ionicons name="trash-outline" size={18} color="#d33" />
+            <TouchableOpacity onPress={() => removeListing(item.id)} style={styles.iconBtn} activeOpacity={0.85}>
+              <Ionicons name="trash-outline" size={18} color={theme.colors.error} />
             </TouchableOpacity>
           </View>
         </View>
 
         {!!thumb && <Image source={{ uri: thumb }} style={styles.thumb} />}
+
         {!!item.address && <Text style={styles.line}>כתובת: {item.address}</Text>}
         <Text style={styles.line}>מחיר לשעה: ₪{item.price || 0}</Text>
         {(item.latitude && item.longitude) && (
           <Text style={styles.line}>מיקום: {item.latitude.toFixed(5)}, {item.longitude.toFixed(5)}</Text>
         )}
-        <Text style={[styles.badge, { backgroundColor: item.active ? '#e8fff2' : '#fff3f3', borderColor: item.active ? '#b9f5cf' : '#ffd1d1', color: item.active ? '#0a7a3e' : '#b33' }]}>
-          {item.active ? 'פעיל' : 'כבוי'}
-        </Text>
-        {item.approvalMode === 'manual' && (
-          <Text style={[styles.badge, { backgroundColor:'#fff7e6', borderColor:'#ffd79a', color:'#7a4d00', marginTop:6 }]}>
-            אישור ידני מופעל
+
+        <View style={styles.pillsRow}>
+          <Text style={[styles.statusPill, item.active ? styles.pillOn : styles.pillOff]}>
+            {item.active ? 'פעיל' : 'כבוי'}
           </Text>
-        )}
+          {item.approvalMode === 'manual' && (
+            <Text style={[styles.statusPill, styles.pillManual]}>אישור ידני מופעל</Text>
+          )}
+        </View>
       </View>
     );
   };
@@ -93,15 +103,17 @@ export default function OwnerDashboardScreen({ navigation }) {
     <View style={styles.wrap}>
       <Text style={styles.header}>ניהול החניות</Text>
 
-      <View style={{ flexDirection:'row', gap:10, marginBottom:10 }}>
-        <TouchableOpacity style={styles.addBtn} onPress={() => navigation.navigate('OwnerListingForm')}>
-          <Ionicons name="add" size={18} color="#fff" style={{ marginEnd:6 }} />
-          <Text style={styles.addBtnText}>הוסף חניה</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('OwnerOverview')}>
+      {/* אקשנים עליונים */}
+      <View style={styles.topActions}>
+        <ZpButton
+          title="הוסף חניה"
+          onPress={() => navigation.navigate('OwnerListingForm')}
+          leftIcon={<Ionicons name="add" size={18} color="#fff" style={{ marginEnd: 6 }} />}
+        />
+        <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('OwnerOverview')} activeOpacity={0.9}>
           <Text style={styles.secondaryBtnText}>סקירה כללית</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('OwnerPending')}>
+        <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('OwnerPending')} activeOpacity={0.9}>
           <Text style={styles.secondaryBtnText}>בקשות בהמתנה</Text>
         </TouchableOpacity>
       </View>
@@ -110,28 +122,63 @@ export default function OwnerDashboardScreen({ navigation }) {
         data={listings}
         keyExtractor={i => i.id}
         renderItem={renderListing}
-        ListEmptyComponent={<Text style={{ color:'#666', textAlign:'center', marginTop:8 }}>אין עדיין חניות. לחץ "הוסף חניה".</Text>}
-        contentContainerStyle={{ paddingBottom:24 }}
+        ListEmptyComponent={<Text style={styles.empty}>אין עדיין חניות. לחץ "הוסף חניה".</Text>}
+        contentContainerStyle={{ paddingBottom: theme.spacing.xl }}
       />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  wrap:{ flex:1, backgroundColor:'#f6f9fc', padding:14 },
-  header:{ fontSize:20, fontWeight:'800', textAlign:'center', marginBottom:12 },
+function makeStyles(theme) {
+  const { colors, spacing, borderRadii } = theme;
+  return StyleSheet.create({
+    wrap:{ flex:1, backgroundColor: colors.bg, padding: spacing.lg },
+    header:{ fontSize:20, fontWeight:'800', textAlign:'center', marginBottom: spacing.md, color: colors.text },
 
-  card:{ backgroundColor:'#fff', borderRadius:14, padding:14, marginBottom:12, borderWidth:1, borderColor:'#ecf1f7' },
-  cardActive:{ borderColor:'#b9f5cf', backgroundColor:'#f7fffb' },
-  title:{ fontSize:16, fontWeight:'800', marginBottom:6 },
-  line:{ fontSize:14, color:'#333', marginVertical:2 },
+    topActions:{ flexDirection:'row', gap: spacing.sm, marginBottom: spacing.md, alignItems:'center' },
 
-  addBtn:{ flexDirection:'row', alignItems:'center', justifyContent:'center', backgroundColor:'#00C6FF', paddingVertical:12, borderRadius:10, paddingHorizontal:14 },
-  addBtnText:{ color:'#fff', fontWeight:'800' },
+    // כרטיס חניה
+    card:{
+      backgroundColor: colors.surface,
+      borderRadius: borderRadii.md,
+      padding: spacing.md,
+      marginBottom: spacing.md,
+      borderWidth:1, borderColor: colors.border,
+      shadowColor:'#000', shadowOpacity:0.06, shadowRadius:12, shadowOffset:{ width:0, height:6 }, elevation:2
+    },
+    cardActive:{ borderColor:'#b9f5cf', backgroundColor:'#f7fffb' },
 
-  secondaryBtn:{ flex:1, backgroundColor:'#fff', paddingVertical:12, borderRadius:10, borderWidth:1, borderColor:'#00C6FF', alignItems:'center' },
-  secondaryBtnText:{ color:'#00C6FF', fontWeight:'800' },
+    cardHeader:{ flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom: spacing.xs },
+    actionsRow:{ flexDirection:'row', alignItems:'center' },
+    iconBtn:{ padding: 6, borderRadius: 8 },
 
-  badge:{ marginTop:8, alignSelf:'flex-start', borderWidth:1, borderRadius:8, paddingHorizontal:8, paddingVertical:4, fontWeight:'700' },
-  thumb:{ width:'100%', height:160, borderRadius:10, marginBottom:8 },
-});
+    title:{ fontSize:16, fontWeight:'800', marginBottom: 2, color: colors.text },
+    line:{ fontSize:14, color: colors.text, marginVertical:2 },
+
+    pillsRow:{ flexDirection:'row', gap: 8, marginTop: spacing.sm },
+
+    statusPill:{
+      paddingVertical:4, paddingHorizontal:10,
+      borderRadius: 999, fontSize:12, overflow:'hidden',
+      borderWidth:1, borderColor: colors.border, color: colors.text, backgroundColor: colors.bg
+    },
+    pillOn:{ color: colors.success, borderColor:'#b9f5cf', backgroundColor:'#f7fffb' },
+    pillOff:{ color:'#fff', borderColor:'#d66', backgroundColor:'#d66' },
+    pillManual:{ color: colors.warning, borderColor:'#ffd79a', backgroundColor:'#fff7e6' },
+
+    thumb:{ width:'100%', height:160, borderRadius: borderRadii.sm, marginBottom:8, backgroundColor: colors.bg },
+
+    secondaryBtn:{
+      flex:1,
+      backgroundColor: colors.surface,
+      paddingVertical:12,
+      borderRadius: borderRadii.sm,
+      borderWidth:1, borderColor: colors.primary,
+      alignItems:'center',
+      shadowColor:'#000', shadowOpacity:0.04, shadowRadius:10, shadowOffset:{ width:0, height:4 }, elevation:1
+    },
+    secondaryBtnText:{ color: colors.primary, fontWeight:'800' },
+
+    empty:{ color: colors.subtext, textAlign:'center', marginTop: 8 },
+  });
+}

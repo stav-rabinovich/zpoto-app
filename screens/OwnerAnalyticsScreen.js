@@ -1,8 +1,9 @@
 // screens/OwnerAnalyticsScreen.js
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import { useTheme } from '@shopify/restyle';
 import { getListingStats } from '../services/stats';
 import BarChartMini from '../components/BarChartMini';
 
@@ -15,8 +16,12 @@ function isoDaysAgo(n) {
   return { from: from.toISOString(), to: to.toISOString() };
 }
 function sum(arr, pluck) { return arr.reduce((s, x) => s + (Number(pluck ? x[pluck] : x) || 0), 0); }
+const fmtIL = (n) => new Intl.NumberFormat('he-IL').format(n || 0);
 
 export default function OwnerAnalyticsScreen({ route }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
+
   const listingId = route?.params?.id;
   const [listing, setListing] = useState(null);
   const [rangeKey, setRangeKey] = useState('30'); // 30 | 90 | 365
@@ -49,7 +54,7 @@ export default function OwnerAnalyticsScreen({ route }) {
       setHiRevenueIdx(null);
       setHiBookingsIdx(null);
     } catch (e) {
-      Alert.alert('שגיאה', 'לא ניתן לטעון סטטיסטיקות.');
+      setStats(null);
     } finally {
       setLoading(false);
     }
@@ -83,7 +88,7 @@ export default function OwnerAnalyticsScreen({ route }) {
       <Text style={styles.header}>סטטיסטיקות חניה</Text>
       <Text style={styles.title}>{listing?.title || listing?.address || 'חניה'}</Text>
 
-      {/* בחירת טווח */}
+      {/* בחירת טווח (segmented) */}
       <View style={styles.tabs}>
         {[
           { key: '30', label: '30 ימים' },
@@ -92,7 +97,12 @@ export default function OwnerAnalyticsScreen({ route }) {
         ].map(t => {
           const active = rangeKey === t.key;
           return (
-            <TouchableOpacity key={t.key} onPress={() => setRangeKey(t.key)} style={[styles.tab, active && styles.tabActive]}>
+            <TouchableOpacity
+              key={t.key}
+              onPress={() => setRangeKey(t.key)}
+              activeOpacity={0.9}
+              style={[styles.tab, active && styles.tabActive]}
+            >
               <Text style={[styles.tabText, active && styles.tabTextActive]}>{t.label}</Text>
             </TouchableOpacity>
           );
@@ -100,46 +110,47 @@ export default function OwnerAnalyticsScreen({ route }) {
       </View>
 
       {loading ? (
-        <View style={styles.center}><ActivityIndicator /></View>
+        <View style={styles.center}><ActivityIndicator color={theme.colors.primary} /></View>
       ) : !stats ? (
-        <Text style={{ textAlign: 'center', color: '#666' }}>אין נתונים.</Text>
+        <Text style={styles.empty}>אין נתונים.</Text>
       ) : (
         <>
-          {/* KPI */}
+          {/* KPI ראשיים */}
           <View style={styles.kpiRow}>
             <View style={styles.kpiCard}>
-              <Ionicons name="cash" size={18} color="#0a7a3e" />
-              <Text style={styles.kpiNumber}>₪{kpis.revenue}</Text>
+              <View style={styles.kpiIcon}><Ionicons name="cash-outline" size={16} color="#fff" /></View>
+              <Text style={styles.kpiNumber}>₪{fmtIL(kpis.revenue)}</Text>
               <Text style={styles.kpiLabel}>הכנסה בטווח</Text>
             </View>
             <View style={styles.kpiCard}>
-              <Ionicons name="calendar" size={18} color="#7a4d00" />
-              <Text style={styles.kpiNumber}>{kpis.bookings}</Text>
+              <View style={[styles.kpiIcon, { backgroundColor: '#7a4d00' }]}><Ionicons name="calendar-outline" size={16} color="#fff" /></View>
+              <Text style={styles.kpiNumber}>{fmtIL(kpis.bookings)}</Text>
               <Text style={styles.kpiLabel}>הזמנות</Text>
             </View>
             <View style={styles.kpiCard}>
-              <Ionicons name="time" size={18} color="#0b6aa8" />
-              <Text style={styles.kpiNumber}>{kpis.hours}</Text>
+              <View style={[styles.kpiIcon, { backgroundColor: theme.colors.primary }]}><Ionicons name="time-outline" size={16} color="#fff" /></View>
+              <Text style={styles.kpiNumber}>{fmtIL(kpis.hours)}</Text>
               <Text style={styles.kpiLabel}>שעות</Text>
             </View>
           </View>
 
+          {/* KPI משניים */}
           <View style={styles.kpiRow}>
             <View style={styles.kpiCardSmall}>
               <Text style={styles.kpiMiniTitle}>ממוצע להזמנה</Text>
-              <Text style={[styles.kpiMiniNum, { color: '#0a7a3e' }]}>₪{kpis.avgRevPerBooking}</Text>
+              <Text style={[styles.kpiMiniNum, { color: theme.colors.success }]}>₪{fmtIL(kpis.avgRevPerBooking)}</Text>
             </View>
             <View style={styles.kpiCardSmall}>
               <Text style={styles.kpiMiniTitle}>שעות להזמנה</Text>
-              <Text style={[styles.kpiMiniNum, { color: '#0b6aa8' }]}>{kpis.avgHoursPerBooking}</Text>
+              <Text style={[styles.kpiMiniNum, { color: theme.colors.primary }]}>{fmtIL(kpis.avgHoursPerBooking)}</Text>
             </View>
             <View style={styles.kpiCardSmall}>
               <Text style={styles.kpiMiniTitle}>₪ ב־30 יום</Text>
-              <Text style={[styles.kpiMiniNum, { color: '#0a7a3e' }]}>₪{kpis.last30Revenue}</Text>
+              <Text style={[styles.kpiMiniNum, { color: theme.colors.success }]}>₪{fmtIL(kpis.last30Revenue)}</Text>
             </View>
             <View style={styles.kpiCardSmall}>
               <Text style={styles.kpiMiniTitle}>הזמנות 30 יום</Text>
-              <Text style={[styles.kpiMiniNum, { color: '#7a4d00' }]}>{kpis.last30Bookings}</Text>
+              <Text style={[styles.kpiMiniNum, { color: '#7a4d00' }]}>{fmtIL(kpis.last30Bookings)}</Text>
             </View>
           </View>
 
@@ -147,7 +158,7 @@ export default function OwnerAnalyticsScreen({ route }) {
           <Text style={styles.section}>הכנסות יומיות (עד 30 ימים)</Text>
           <BarChartMini
             data={dailyRevenueData}
-            yFormatter={(n) => `₪${n}`}
+            yFormatter={(n) => `₪${fmtIL(n)}`}
             xFormatter={(s) => {
               // YYYY-MM-DD -> DD/MM
               if (!s) return '';
@@ -156,14 +167,14 @@ export default function OwnerAnalyticsScreen({ route }) {
             }}
             highlightIndex={hiRevenueIdx}
             onBarPress={(_, idx) => setHiRevenueIdx(idx)}
-            color="#0a7a3e"
+            color={theme.colors.success}
             colorFaded="rgba(10,122,62,0.18)"
           />
 
-          <Text style={[styles.section, { marginTop: 12 }]}>כמות הזמנות יומית (עד 30 ימים)</Text>
+          <Text style={[styles.section, { marginTop: theme.spacing.md }]}>כמות הזמנות יומית (עד 30 ימים)</Text>
           <BarChartMini
             data={dailyBookingsData}
-            yFormatter={(n) => `${n}`}
+            yFormatter={(n) => `${fmtIL(n)}`}
             xFormatter={(s) => {
               if (!s) return '';
               const [y,m,d] = s.split('-');
@@ -171,35 +182,36 @@ export default function OwnerAnalyticsScreen({ route }) {
             }}
             highlightIndex={hiBookingsIdx}
             onBarPress={(_, idx) => setHiBookingsIdx(idx)}
-            color="#00C6FF"
+            color={theme.colors.primary}
             colorFaded="rgba(0,198,255,0.18)"
           />
 
           {/* הזמנות אחרונות */}
-          <Text style={[styles.section, { marginTop: 12 }]}>הזמנות אחרונות</Text>
+          <Text style={[styles.section, { marginTop: theme.spacing.md }]}>הזמנות אחרונות</Text>
           <FlatList
             data={stats.recent}
             keyExtractor={(i) => i.id}
+            contentContainerStyle={{ paddingBottom: theme.spacing.xl }}
             renderItem={({ item }) => {
               const start = new Date(item.start);
               const end = new Date(item.end);
               return (
                 <View style={styles.bookingRow}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.bookingTitle}>{item.plate}{item.carDesc ? ` – ${item.carDesc}` : ''}</Text>
-                    {!!item.spot?.address && <Text style={styles.bookingLine}>כתובת: {item.spot.address}</Text>}
-                    <Text style={styles.bookingLine}>
-                      מ־{start.toLocaleString()} עד {end.toLocaleString()}
+                    <Text style={styles.bookingTitle} numberOfLines={1}>
+                      {item.plate}{item.carDesc ? ` – ${item.carDesc}` : ''}
                     </Text>
+                    {!!item.spot?.address && <Text style={styles.bookingLine}>כתובת: {item.spot.address}</Text>}
+                    <Text style={styles.bookingLine}>מ־{start.toLocaleString()} עד {end.toLocaleString()}</Text>
                   </View>
                   <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={styles.bookingPrice}>₪{item.total}</Text>
-                    <Text style={styles.bookingMeta}>{item.hours} שעות</Text>
+                    <Text style={styles.bookingPrice}>₪{fmtIL(item.total)}</Text>
+                    <Text style={styles.bookingMeta}>{fmtIL(item.hours)} שעות</Text>
                   </View>
                 </View>
               );
             }}
-            ListEmptyComponent={<Text style={{ color: '#666', textAlign: 'center', marginTop: 8 }}>אין הזמנות.</Text>}
+            ListEmptyComponent={<Text style={styles.empty}>אין הזמנות.</Text>}
           />
         </>
       )}
@@ -207,45 +219,80 @@ export default function OwnerAnalyticsScreen({ route }) {
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: { flex: 1, backgroundColor: '#f6f9fc', padding: 14 },
-  header: { fontSize: 20, fontWeight: '800', textAlign: 'center', marginBottom: 6 },
-  title: { fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: 8, color: '#0b6aa8' },
+function makeStyles(theme) {
+  const { colors, spacing, borderRadii } = theme;
+  return StyleSheet.create({
+    wrap: { flex: 1, backgroundColor: colors.bg, padding: spacing.lg },
 
-  tabs: {
-    flexDirection: 'row', backgroundColor: '#eaf4ff', borderRadius: 999,
-    borderWidth: 1, borderColor: '#cfe3ff', padding: 4, marginBottom: 8,
-  },
-  tab: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 999 },
-  tabActive: { backgroundColor: '#fff' },
-  tabText: { color: '#0b6aa8', fontWeight: '700' },
-  tabTextActive: { color: '#0b6aa8', fontWeight: '900' },
+    header: { fontSize: 20, fontWeight: '800', textAlign: 'center', marginBottom: spacing.xs, color: colors.text },
+    title: { fontSize: 16, fontWeight: '700', textAlign: 'center', marginBottom: spacing.sm, color: colors.primary },
 
-  center: { paddingVertical: 20 },
+    // Segmented tabs
+    tabs: {
+      flexDirection: 'row',
+      backgroundColor: '#EAF4FF',
+      borderRadius: 999,
+      borderWidth: 1, borderColor: colors.border,
+      padding: 4, marginBottom: spacing.md,
+    },
+    tab: {
+      flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 999,
+    },
+    tabActive: {
+      backgroundColor: colors.surface,
+      shadowColor:'#000', shadowOpacity:0.06, shadowRadius:10, shadowOffset:{ width:0, height:4 }, elevation:1
+    },
+    tabText: { color: colors.primary, fontWeight: '700' },
+    tabTextActive: { color: colors.primary, fontWeight: '900' },
 
-  kpiRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
-  kpiCard: {
-    flex: 1, backgroundColor: '#fff', borderRadius: 14, borderWidth: 1, borderColor: '#ecf1f7',
-    paddingVertical: 10, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center',
-  },
-  kpiNumber: { fontSize: 18, fontWeight: '900', marginTop: 4, color: '#0b6aa8' },
-  kpiLabel: { fontSize: 12, color: '#445' },
+    center: { paddingVertical: spacing.lg },
+    empty: { textAlign: 'center', color: colors.subtext },
 
-  kpiCardSmall: {
-    flex: 1, backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#ecf1f7',
-    paddingVertical: 10, paddingHorizontal: 8, alignItems: 'center', justifyContent: 'center',
-  },
-  kpiMiniTitle: { fontSize: 11, color: '#445' },
-  kpiMiniNum: { fontSize: 16, fontWeight: '900' },
+    // KPI
+    kpiRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
+    kpiCard: {
+      flex: 1,
+      backgroundColor: colors.surface,
+      borderRadius: borderRadii.md,
+      borderWidth: 1, borderColor: colors.border,
+      paddingVertical: 12, paddingHorizontal: spacing.md,
+      alignItems: 'center', justifyContent: 'center',
+      shadowColor:'#000', shadowOpacity:0.06, shadowRadius:12, shadowOffset:{ width:0, height:6 }, elevation:2
+    },
+    kpiIcon: {
+      width: 24, height: 24, borderRadius: 12,
+      alignItems:'center', justifyContent:'center',
+      backgroundColor: colors.success
+    },
+    kpiNumber: { fontSize: 18, fontWeight: '900', marginTop: 6, color: colors.text },
+    kpiLabel: { fontSize: 12, color: colors.subtext },
 
-  section: { fontSize: 15, fontWeight: '800', marginTop: 8, marginBottom: 6, color: '#0b6aa8' },
+    kpiCardSmall: {
+      flex: 1,
+      backgroundColor: colors.surface,
+      borderRadius: borderRadii.md,
+      borderWidth: 1, borderColor: colors.border,
+      paddingVertical: 10, paddingHorizontal: 8,
+      alignItems: 'center', justifyContent: 'center',
+      shadowColor:'#000', shadowOpacity:0.04, shadowRadius:10, shadowOffset:{ width:0, height:4 }, elevation:1
+    },
+    kpiMiniTitle: { fontSize: 11, color: colors.subtext },
+    kpiMiniNum: { fontSize: 16, fontWeight: '900' },
 
-  bookingRow: {
-    flexDirection: 'row', gap: 10, backgroundColor: '#fff', borderRadius: 12, borderWidth: 1, borderColor: '#ecf1f7',
-    padding: 12, marginBottom: 10,
-  },
-  bookingTitle: { fontSize: 14, fontWeight: '700' },
-  bookingLine: { fontSize: 12, color: '#444', marginTop: 2 },
-  bookingPrice: { fontSize: 16, fontWeight: '900', color: '#0a7a3e' },
-  bookingMeta: { fontSize: 12, color: '#666' },
-});
+    section: { fontSize: 15, fontWeight: '800', marginTop: spacing.sm, marginBottom: spacing.xs, color: colors.text },
+
+    // הזמנות אחרונות
+    bookingRow: {
+      flexDirection: 'row', gap: spacing.sm,
+      backgroundColor: colors.surface,
+      borderRadius: borderRadii.md,
+      borderWidth: 1, borderColor: colors.border,
+      padding: spacing.md, marginBottom: spacing.sm,
+      shadowColor:'#000', shadowOpacity:0.04, shadowRadius:10, shadowOffset:{ width:0, height:4 }, elevation:1
+    },
+    bookingTitle: { fontSize: 14, fontWeight: '700', color: colors.text },
+    bookingLine: { fontSize: 12, color: colors.subtext, marginTop: 2 },
+    bookingPrice: { fontSize: 16, fontWeight: '900', color: colors.success },
+    bookingMeta: { fontSize: 12, color: colors.subtext },
+  });
+}

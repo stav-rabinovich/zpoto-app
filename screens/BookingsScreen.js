@@ -1,42 +1,37 @@
 // screens/BookingsScreen.js
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert } from 'react-native';
-import { useFocusEffect, useRoute, useNavigation } from '@react-navigation/native';
-import * as bookingsRepo from '../data/bookingsRepo';
-import * as listingsRepo from '../data/listingsRepo';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl } from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import * as bookingsRepo from '../../data/bookingsRepo';
 import BookingLifecycleWatcher from '../components/BookingLifecycleWatcher';
-import { BOOKING_STATUS } from '../data/bookingsRepo';
+import { BOOKING_STATUS } from '../../data/bookingsRepo';
+import { useTheme } from '@shopify/restyle';
+import { Ionicons } from '@expo/vector-icons';
 
 export default function BookingsScreen() {
-  const [listings, setListings] = useState([]);
+  const theme = useTheme();
+  const styles = makeStyles(theme);
+
   const [bookings, setBookings] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
-  const route = useRoute();
   const navigation = useNavigation();
 
   const load = useCallback(async () => {
-    const [ls, bs] = await Promise.all([listingsRepo.getAll(), bookingsRepo.getAll()]);
-    setListings(ls);
+    const bs = await bookingsRepo.getAll();
     setBookings(bs.sort((a, b) => (new Date(b.startAt) - new Date(a.startAt))));
   }, []);
 
-  // טעינה ראשונית
   useEffect(() => {
     load();
   }, [load]);
 
-  // רענון כשמסך נכנס לפוקוס (כשחוזרים ממסך יצירת הזמנה)
   useFocusEffect(
     useCallback(() => {
       (async () => {
         await bookingsRepo.sweepAndAutoTransition();
         await load();
-        // אם הגיע פרמטר refresh מהניווט – ננקה אותו
-        if (route?.params?.refresh) {
-          navigation.setParams({ refresh: undefined });
-        }
       })();
-    }, [load, route?.params?.refresh, navigation])
+    }, [load])
   );
 
   const onRefresh = useCallback(async () => {
@@ -49,129 +44,92 @@ export default function BookingsScreen() {
     }
   }, [load]);
 
-  async function makeBooking(listing) {
-    try {
-      const start = new Date();
-      const end = new Date(start.getTime() + 60 * 60 * 1000);
-
-      const booking = await bookingsRepo.requestBooking({
-        listingId: listing.id,
-        renterId: 'me', // החלף למזהה משתמש בפועל אם יש
-        startAt: start.toISOString(),
-        endAt: end.toISOString(),
-        pricePerHour: listing.pricePerHour,
-        title: `הזמנה לחניה ${listing.title || listing.id}`,
-      });
-
-      if (booking.status === BOOKING_STATUS.PENDING) {
-        Alert.alert('הזמנה נוצרה', 'ההזמנה ממתינה לאישור בעל החניה.');
-    } else if (booking.status === BOOKING_STATUS.APPROVED) {
-        Alert.alert('הזמנה מאושרת', 'ההזמנה אושרה אוטומטית.');
-      } else {
-        Alert.alert('הזמנה נוצרה', `סטטוס: ${booking.status}`);
-      }
-      await onRefresh();
-    } catch (e) {
-      Alert.alert('שגיאה', 'לא הצלחנו ליצור הזמנה. נסה שוב.');
-    }
+  function openBooking(b) {
+    navigation.navigate('BookingDetail', { id: b.id });
   }
 
-  async function extend(booking) {
-    try {
-      const newEnd = new Date((new Date(booking.endAt)).getTime() + 30 * 60 * 1000);
-      const updated = await bookingsRepo.extend(booking.id, newEnd.toISOString());
-      Alert.alert('הוארך', `זמן סיום חדש: ${formatDate(updated.endAt)}\nחיוב משוער: ${bookingsRepo.calcTotalPrice(updated)} ₪`);
-      await onRefresh();
-    } catch {
-      Alert.alert('שגיאה', 'לא הצלחנו להאריך.');
-    }
-  }
+  const renderItem = ({ item }) => {
+    const price = bookingsRepo.calcTotalPrice(item);
+    return (
+      <TouchableOpacity onPress={() => openBooking(item)} activeOpacity={0.85} style={styles.cardTap}>
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            {/* סטטוס בצד ימין */}
+            <Text
+              style={[
+                styles.statusPill,
+                item.status === BOOKING_STATUS.ACTIVE && styles.statusActive,
+                item.status === BOOKING_STATUS.APPROVED && styles.statusApproved,
+                item.status === BOOKING_STATUS.PENDING && styles.statusPending,
+                item.status === BOOKING_STATUS.COMPLETED && styles.statusDone,
+                item.status === BOOKING_STATUS.REJECTED && styles.statusRejected,
+                item.status === BOOKING_STATUS.CANCELED && styles.statusCanceled,
+              ]}
+              numberOfLines={1}
+            >
+              {prettyStatus(item.status)}
+            </Text>
+            {/* כותרת לשמאל */}
+            <Text style={styles.title} numberOfLines={1}>{item.title || 'הזמנה'}</Text>
+          </View>
 
-  async function finishNow(booking) {
-    try {
-      const updated = await bookingsRepo.finishNow(booking.id);
-      Alert.alert('הסתיים', `החיוב הסופי: ${bookingsRepo.calcTotalPrice(updated)} ₪`);
-      await onRefresh();
-    } catch {
-      Alert.alert('שגיאה', 'לא הצלחנו לסיים כעת.');
-    }
-  }
+          <View style={styles.rowLine}>
+            <Ionicons name="calendar-outline" size={16} color={theme.colors.subtext} style={{ marginEnd: 6 }} />
+            <Text style={styles.rowText}>מתאריך: {fmt(item.startAt)} עד {fmt(item.endAt)}</Text>
+          </View>
+
+          <View style={styles.rowLine}>
+            <Ionicons name="cash-outline" size={16} color={theme.colors.subtext} style={{ marginEnd: 6 }} />
+            <Text style={styles.rowText}>חיוב משוער: {price} ₪</Text>
+          </View>
+
+          <View style={styles.ctaRow}>
+            <Text style={styles.link}>לחץ לצפייה ופעולות</Text>
+            <Ionicons name="chevron-back" size={16} color={theme.colors.primary} />
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={styles.container}>
       <BookingLifecycleWatcher />
 
-      <Text style={styles.header}>חניות זמינות (דמו)</Text>
-      {listings.length === 0 ? (
-        <Text style={styles.emptyHint}>אין חניות לדוגמה כרגע. צור חניה חדשה במסך הבעלים.</Text>
-      ) : (
-        <FlatList
-          data={listings}
-          keyExtractor={(item) => String(item.id)}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={{ paddingHorizontal: 12 }}
-          renderItem={({ item }) => (
-            <View style={styles.listingCard}>
-              <Text style={styles.listingTitle}>{item.title || 'חניה'}</Text>
-              <Text style={styles.row}>מחיר לשעה: {item.pricePerHour ?? '-'} ₪</Text>
-              <Text style={styles.row}>אישור: {item.approvalMode === 'manual' ? 'ידני' : 'אוטומטי'}</Text>
-              <TouchableOpacity style={styles.primaryBtn} onPress={() => makeBooking(item)}>
-                <Text style={styles.btnText}>הזמן לשעה עכשיו</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        />
-      )}
+      {/* כותרת מרכזית */}
+      <Text style={styles.header}>ההזמנות שלי</Text>
 
-      <Text style={styles.subHeader}>ההזמנות שלי</Text>
-      {bookings.length === 0 ? (
-        <Text style={styles.emptyHint}>אין עדיין הזמנות. צור הזמנה מאחת החניות למעלה, או חזור ממסך אחר — המסך יתעדכן אוטומטית.</Text>
-      ) : (
-        <FlatList
-          data={bookings}
-          keyExtractor={(item) => String(item.id)}
-          refreshing={refreshing}
-          onRefresh={onRefresh}
-          contentContainerStyle={{ padding: 12, paddingBottom: 60 }}
-          renderItem={({ item }) => (
-            <View style={styles.bookingCard}>
-              <Text style={styles.bookingTitle}>{item.title || 'הזמנה'}</Text>
-              <Text style={styles.row}>סטטוס: {prettyStatus(item.status)}</Text>
-              <Text style={styles.row}>מתאריך: {formatDate(item.startAt)} עד {formatDate(item.endAt)}</Text>
-              <Text style={styles.row}>חיוב משוער: {bookingsRepo.calcTotalPrice(item)} ₪</Text>
-
-              {item.status === BOOKING_STATUS.ACTIVE && (
-                <View style={styles.actions}>
-                  <TouchableOpacity style={styles.secondaryBtn} onPress={() => extend(item)}>
-                    <Text style={styles.btnText}>Extend +30m</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.secondaryBtn, styles.danger]} onPress={() => finishNow(item)}>
-                    <Text style={styles.btnText}>Finish Now</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-            </View>
-          )}
-        />
-      )}
+      <FlatList
+        data={bookings}
+        keyExtractor={(item) => String(item.id)}
+        ListEmptyComponent={<Text style={styles.empty}>אין עדיין הזמנות.</Text>}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.colors.primary}
+          />
+        }
+        contentContainerStyle={{ paddingHorizontal: theme.spacing.lg, paddingBottom: theme.spacing.xl }}
+        renderItem={renderItem}
+      />
     </View>
   );
 }
 
 function prettyStatus(s) {
   switch (s) {
-    case BOOKING_STATUS.PENDING: return 'ממתינה לאישור';
-    case BOOKING_STATUS.APPROVED: return 'מאושרת (עתידית)';
-    case BOOKING_STATUS.ACTIVE: return 'פעילה';
+    case BOOKING_STATUS.PENDING:   return 'ממתינה לאישור';
+    case BOOKING_STATUS.APPROVED:  return 'מאושרת (עתידית)';
+    case BOOKING_STATUS.ACTIVE:    return 'פעילה';
     case BOOKING_STATUS.COMPLETED: return 'הושלמה';
-    case BOOKING_STATUS.REJECTED: return 'נדחתה';
-    case BOOKING_STATUS.CANCELED: return 'בוטלה';
+    case BOOKING_STATUS.REJECTED:  return 'נדחתה';
+    case BOOKING_STATUS.CANCELED:  return 'בוטלה';
     default: return String(s || '-');
   }
 }
 
-function formatDate(v) {
+function fmt(v) {
   if (!v) return '-';
   try {
     const d = new Date(v);
@@ -183,19 +141,65 @@ function formatDate(v) {
   }
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  header: { fontSize: 18, fontWeight: '700', margin: 12 },
-  subHeader: { fontSize: 16, fontWeight: '700', marginHorizontal: 12, marginTop: 12 },
-  emptyHint: { marginHorizontal: 12, color: '#6b7280' },
-  listingCard: { width: 240, backgroundColor: '#f7f7fb', borderRadius: 12, padding: 12, marginRight: 10, borderWidth: 1, borderColor: '#ececf1' },
-  listingTitle: { fontSize: 16, fontWeight: '700', marginBottom: 6 },
-  bookingCard: { backgroundColor: '#f7f7fb', borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#ececf1' },
-  bookingTitle: { fontSize: 15, fontWeight: '700', marginBottom: 4 },
-  row: { fontSize: 13, color: '#333' },
-  primaryBtn: { backgroundColor: '#4f46e5', borderRadius: 10, paddingVertical: 10, alignItems: 'center', marginTop: 8 },
-  secondaryBtn: { backgroundColor: '#2563eb', borderRadius: 10, paddingVertical: 10, alignItems: 'center', flex: 1 },
-  danger: { backgroundColor: '#dc2626' },
-  btnText: { color: '#fff', fontWeight: '700' },
-  actions: { flexDirection: 'row', gap: 8, marginTop: 10 },
-});
+function makeStyles(theme) {
+  const { colors, spacing, borderRadii } = theme;
+  return StyleSheet.create({
+    container: { flex: 1, backgroundColor: colors.bg },
+
+    // כותרת מרכזית
+    header: { fontSize: 20, fontWeight: '800', margin: spacing.lg, color: colors.text, textAlign: 'center' },
+
+    empty: { marginHorizontal: spacing.lg, color: colors.subtext, textAlign: 'center' },
+
+    cardTap: { marginBottom: spacing.md },
+    card: {
+      backgroundColor: colors.surface,
+      borderRadius: borderRadii.md,
+      padding: spacing.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      shadowColor: '#000',
+      shadowOpacity: 0.06,
+      shadowRadius: 12,
+      shadowOffset: { width: 0, height: 6 },
+      elevation: 2,
+    },
+
+    // שורה עם סטטוס בצד ימין וכותרת בצד שמאל
+    cardHeader: {
+      flexDirection: 'row-reverse',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: spacing.xs,
+    },
+
+    // כותרת לשמאל
+    title: { fontSize: 16, fontWeight: '700', color: colors.text, flex: 1, textAlign: 'left', marginStart: spacing.sm },
+
+    // סטטוס בצד ימין
+    statusPill: {
+      paddingVertical: 4,
+      paddingHorizontal: 10,
+      borderRadius: 999,
+      fontSize: 12,
+      overflow: 'hidden',
+      color: colors.text,
+      backgroundColor: colors.bg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      flexShrink: 0,
+    },
+    statusApproved: { color: colors.secondary, borderColor: colors.secondary, backgroundColor: '#F3F0FF' },
+    statusActive: { color: colors.primary, borderColor: colors.primary, backgroundColor: '#EEF3FF' },
+    statusPending: { color: colors.warning, borderColor: colors.warning, backgroundColor: '#FFF7E8' },
+    statusDone: { color: colors.subtext, borderColor: colors.border, backgroundColor: '#F4F6FA' },
+    statusRejected: { color: '#FFFFFF', borderColor: colors.error, backgroundColor: colors.error },
+    statusCanceled: { color: '#FFFFFF', borderColor: colors.warning, backgroundColor: colors.warning },
+
+    rowLine: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
+    rowText: { fontSize: 13, color: colors.text },
+
+    ctaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: spacing.sm },
+    link: { fontSize: 13, fontWeight: '700', color: colors.primary, marginEnd: 4 },
+  });
+}

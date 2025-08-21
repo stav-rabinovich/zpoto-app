@@ -1,16 +1,26 @@
 // screens/SearchResultsScreen.js
+// תוצאות חיפוש – UI מותאם Zpoto, RTL מלא, ללא "מרכז חיפוש" עליון, חוויית 2090
+
 import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, Dimensions, ActivityIndicator, Alert, ScrollView, TouchableOpacity, StatusBar, Switch, Image } from 'react-native';
+import {
+  View, Text, StyleSheet, Dimensions, ActivityIndicator, Alert,
+  ScrollView, TouchableOpacity, StatusBar, Switch, Image, Platform
+} from 'react-native';
 import MapView, { Marker, UrlTile } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { osmReverse } from '../utils/osm';
-import { openWaze } from '../utils/nav';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useTheme } from '@shopify/restyle';
+import { osmReverse } from '../../utils/osm';
+import { openWaze } from '../../utils/nav';
 
 const OWNER_LISTINGS_KEY = 'owner_listings';
 const PREFS_KEY = 'search_prefs_v1';
+
+const SCREEN_W = Dimensions.get('window').width;
+const CARD_WIDTH = Math.min(SCREEN_W - 24, 340);
 
 function haversineKm(lat1, lon1, lat2, lon2) {
   const toRad = d => (d * Math.PI) / 180;
@@ -40,15 +50,10 @@ const GROUP_PRICES = [10, 12, 15, 20];
 const GROUP_DISTANCES = [0.5, 1, 2];
 const SEARCH_AREA_THRESHOLD_M = 120;
 
-const Chip = React.memo(function Chip({ label, active, onPress }) {
-  return (
-    <TouchableOpacity onPress={onPress} style={[styles.chip, active && styles.chipActive]}>
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
-    </TouchableOpacity>
-  );
-});
-
 export default function SearchResultsScreen({ route, navigation }) {
+  const theme = useTheme();
+  const styles = useMemo(() => makeStyles(theme, CARD_WIDTH), [theme]);
+
   const initialQuery = route?.params?.query ?? '';
   const coordsFromSearch = route?.params?.coords || null;
   const filtersFromAdvanced = route?.params?.filters || null;
@@ -61,6 +66,7 @@ export default function SearchResultsScreen({ route, navigation }) {
   const [selectedId, setSelectedId] = useState(null);
   const [query, setQuery] = useState(initialQuery);
   const mapRef = useRef(null);
+  const cardsScrollRef = useRef(null);
 
   const [maxPrice, setMaxPrice] = useState(null);
   const [maxDistance, setMaxDistance] = useState(null);
@@ -72,6 +78,28 @@ export default function SearchResultsScreen({ route, navigation }) {
   const [pickedPoint, setPickedPoint] = useState(null);
   const [reverseLoading, setReverseLoading] = useState(false);
   const [viewportDirty, setViewportDirty] = useState(false);
+
+  // Chip (מותאם מיתוג, RTL)
+  const Chip = useCallback(function Chip({ label, active, onPress }) {
+    if (active) {
+      return (
+        <TouchableOpacity onPress={onPress} activeOpacity={0.9} style={styles.chipWrapper} accessibilityRole="button">
+          <LinearGradient
+            colors={[theme.colors.gradientStart, theme.colors.gradientEnd]}
+            start={{ x: 0, y: 1 }} end={{ x: 1, y: 0 }}
+            style={[styles.chip, styles.chipActive]}
+          >
+            <Text style={styles.chipTextActive} numberOfLines={1}>{label}</Text>
+          </LinearGradient>
+        </TouchableOpacity>
+      );
+    }
+    return (
+      <TouchableOpacity onPress={onPress} activeOpacity={0.9} style={[styles.chip, styles.chipIdle]} accessibilityRole="button">
+        <Text style={styles.chipText} numberOfLines={1}>{label}</Text>
+      </TouchableOpacity>
+    );
+  }, [styles, theme.colors.gradientStart, theme.colors.gradientEnd]);
 
   useEffect(() => {
     (async () => {
@@ -137,7 +165,6 @@ export default function SearchResultsScreen({ route, navigation }) {
     const centerOfViewport = { latitude: nextRegion.latitude, longitude: nextRegion.longitude };
     const moved = haversineMeters(centerOfViewport, searchCenter) > SEARCH_AREA_THRESHOLD_M;
     setViewportDirty(moved);
-
     try {
       const prevRaw = await AsyncStorage.getItem(PREFS_KEY);
       const prev = prevRaw ? JSON.parse(prevRaw) : {};
@@ -202,8 +229,8 @@ export default function SearchResultsScreen({ route, navigation }) {
             images: Array.isArray(x.images) ? x.images : [],
             distanceKm: haversineKm(baseLat, baseLng, x.latitude, x.longitude),
             source: 'owner',
-            availability: x.availability || null,      // <<< חשוב
-            requireApproval: !!x.requireApproval,     // <<< חשוב
+            availability: x.availability || null,
+            requireApproval: !!x.requireApproval,
           }));
 
         setOwnerSpots(mapped);
@@ -223,7 +250,7 @@ export default function SearchResultsScreen({ route, navigation }) {
     let arr = [...spotsRaw];
     const filt = filtersFromAdvanced || {};
     const priceCap = maxPrice ?? filt.maxPrice ?? null;
-    const distCap  = maxDistance ?? filt.maxDistance ?? null;
+       const distCap  = maxDistance ?? filt.maxDistance ?? null;
 
     if (priceCap != null) arr = arr.filter(s => s.price <= priceCap);
     if (distCap  != null) arr = arr.filter(s => s.distanceKm <= distCap);
@@ -253,11 +280,18 @@ export default function SearchResultsScreen({ route, navigation }) {
     await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (mapRef.current) {
       mapRef.current.animateToRegion(
-        { latitude: spot.latitude, longitude: spot.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 },
+        { latitude: spot.latitude, longitude: spot.longitude, latitudeDelta: 0.012, longitudeDelta: 0.012 },
         400
       );
     }
-  }, []);
+    if (cardsScrollRef.current) {
+      const idx = spots.findIndex(s => s.id === spot.id);
+      if (idx >= 0) {
+        const x = idx * (CARD_WIDTH + 12);
+        cardsScrollRef.current.scrollTo({ x, y: 0, animated: true });
+      }
+    }
+  }, [spots]);
 
   const recenter = useCallback(async () => {
     await Haptics.selectionAsync();
@@ -298,7 +332,7 @@ export default function SearchResultsScreen({ route, navigation }) {
     setSearchCenter(nextCenter);
     setQuery(pickedPoint.address || 'חיפוש לפי נקודה במפה');
     setSelectedId(null);
-    setPickedPoint(null);
+   setPickedPoint(null);
 
     if (mapRef.current) {
       mapRef.current.animateToRegion(
@@ -319,12 +353,19 @@ export default function SearchResultsScreen({ route, navigation }) {
     setViewportDirty(false);
   }, [region]);
 
+  const clearFilters = useCallback(() => {
+    setMaxPrice(null);
+    setMaxDistance(null);
+    setSortBy('distance');
+    setShowOwnerListings(true);
+  }, []);
+
   if (loading || !region || !searchCenter) {
     return (
       <View style={styles.center}>
         <StatusBar barStyle="dark-content" />
         <ActivityIndicator size="large" />
-        <Text style={{ marginTop: 8 }}>טוען מפה… {query ? `(${query})` : ''}</Text>
+        <Text style={{ marginTop: 8, color: '#111', textAlign:'right' }}>טוען מפה… {query ? `(${query})` : ''}</Text>
       </View>
     );
   }
@@ -340,6 +381,7 @@ export default function SearchResultsScreen({ route, navigation }) {
         showsUserLocation
         onRegionChangeComplete={onRegionChangeComplete}
         onLongPress={onLongPress}
+        accessibilityLabel="מפת תוצאות חניה"
       >
         <UrlTile
           urlTemplate="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -348,11 +390,11 @@ export default function SearchResultsScreen({ route, navigation }) {
           zIndex={-1}
         />
 
+        {/* מרכז החיפוש: נקודה בלבד */}
         <Marker
           coordinate={{ latitude: searchCenter.latitude, longitude: searchCenter.longitude }}
-          title="מרכז חיפוש"
-          description="התוצאות מחושבות סביב נקודה זו"
-          pinColor="#2dd4bf"
+          pinColor={theme.colors.accent}
+          tracksViewChanges={false}
         />
 
         {spots.map(spot => (
@@ -362,7 +404,7 @@ export default function SearchResultsScreen({ route, navigation }) {
             title={`${spot.title || spot.address || 'חניה'}`}
             description={`₪${spot.price}/ש׳ • ${spot.distanceKm.toFixed(2)} ק״מ${spot.source === 'owner' ? ' • בעל חניה' : ''}`}
             onPress={() => onSelectSpot(spot)}
-            pinColor={spot.id === selectedId ? '#00C6FF' : (spot.source === 'owner' ? '#34c759' : undefined)}
+            pinColor={spot.id === selectedId ? theme.colors.primary : (spot.source === 'owner' ? theme.colors.success : undefined)}
           />
         ))}
 
@@ -371,85 +413,170 @@ export default function SearchResultsScreen({ route, navigation }) {
             coordinate={{ latitude: pickedPoint.latitude, longitude: pickedPoint.longitude }}
             title="נקודה שנבחרה"
             description={pickedPoint.address || 'טוען כתובת…'}
-            pinColor="#ff7a00"
+            pinColor={theme.colors.secondary}
           />
         )}
       </MapView>
 
+      {/* Attribution */}
       <View style={styles.attribution}>
         <Text style={styles.attrText}>© OpenStreetMap contributors</Text>
       </View>
 
-      <View style={styles.topBadge}>
-        <Text style={styles.badgeText}>{query ? `חיפוש: ${query}` : 'סביב המיקום הנוכחי'}</Text>
-        <Text style={[styles.badgeText, { marginTop: 4 }]}>
-          מרכז חיפוש: {searchCenter.latitude.toFixed(5)}, {searchCenter.longitude.toFixed(5)}
-        </Text>
-        {!!timeBadge && <Text style={[styles.badgeText, { marginTop: 4 }]}>טווח: {timeBadge}</Text>}
-      </View>
-
-      <View style={styles.filtersBar}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, alignItems:'center' }}>
-          <Text style={styles.groupLabel}>מחיר:</Text>
+      {/* סרגל פילטרים עליון – RTL + מיתוג + "נקה סינון" + מונה תוצאות */}
+      <View style={styles.filtersBar} pointerEvents="box-none">
+        <LinearGradient
+          colors={['rgba(10,12,18,0.65)', 'rgba(10,12,18,0.35)']}
+          start={{ x: 0, y: 1 }} end={{ x: 1, y: 0 }}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filtersContent}
+        >
+          <Text style={styles.groupLabel} numberOfLines={1}>מחיר:</Text>
           {GROUP_PRICES.map(v => (
-            <Chip key={`p-${v}`} label={`עד ₪${v}`} active={(maxPrice ?? filtersFromAdvanced?.maxPrice) === v} onPress={() => setMaxPrice((maxPrice ?? null) === v ? null : v)} />
+            <Chip
+              key={`p-${v}`}
+              label={`עד ₪${v}`}
+              active={(maxPrice ?? filtersFromAdvanced?.maxPrice) === v}
+              onPress={() => setMaxPrice((maxPrice ?? null) === v ? null : v)}
+            />
           ))}
-          <Text style={[styles.groupLabel, { marginStart: 12 }]}>מרחק:</Text>
+
+          <Text style={[styles.groupLabel, { marginStart: 12 }]} numberOfLines={1}>מרחק:</Text>
           {GROUP_DISTANCES.map(v => (
-            <Chip key={`d-${v}`} label={`עד ${v} ק״מ`} active={(maxDistance ?? filtersFromAdvanced?.maxDistance) === v} onPress={() => setMaxDistance((maxDistance ?? null) === v ? null : v)} />
+            <Chip
+              key={`d-${v}`}
+              label={`עד ${v} ק״מ`}
+              active={(maxDistance ?? filtersFromAdvanced?.maxDistance) === v}
+              onPress={() => setMaxDistance((maxDistance ?? null) === v ? null : v)}
+            />
           ))}
-          <Text style={[styles.groupLabel, { marginStart: 12 }]}>מיון:</Text>
+
+          <Text style={[styles.groupLabel, { marginStart: 12 }]} numberOfLines={1}>מיון:</Text>
           <Chip label="מרחק" active={sortBy==='distance'} onPress={() => setSortBy('distance')} />
           <Chip label="מחיר" active={sortBy==='price'} onPress={() => setSortBy('price')} />
 
           <View style={{ width: 12 }} />
           <View style={styles.ownerToggle}>
-            <Text style={styles.ownerToggleText}>הצג חניות מבעלי חניה</Text>
+            <Text style={styles.ownerToggleText} numberOfLines={1}>הצג חניות מבעלי חניה</Text>
             <Switch value={showOwnerListings} onValueChange={setShowOwnerListings} />
+          </View>
+
+          <TouchableOpacity onPress={clearFilters} activeOpacity={0.9} style={styles.clearBtn}>
+            <Ionicons name="close-circle" size={16} color="#fff" />
+            <Text style={styles.clearBtnText} numberOfLines={1}>נקה סינון</Text>
+          </TouchableOpacity>
+
+          <View style={styles.countPill}>
+            <Text style={styles.countPillText} numberOfLines={1}>{spots.length} תוצאות</Text>
           </View>
         </ScrollView>
       </View>
 
-      <TouchableOpacity style={styles.fab} onPress={recenter} activeOpacity={0.9}>
+      {/* באדג׳ טווח זמן (אם קיים) */}
+      {!!timeBadge && (
+        <View style={styles.timeBadge}>
+          <Ionicons name="time-outline" size={14} color="#fff" style={{ marginStart: 6 }} />
+          <Text style={styles.timeBadgeText} numberOfLines={1}>{timeBadge}</Text>
+        </View>
+      )}
+
+      {/* כפתור מיקום מחדש – עבר לצד שמאל */}
+      <TouchableOpacity style={styles.fab} onPress={recenter} activeOpacity={0.9} accessibilityRole="button" accessibilityLabel="חזרה למרכז">
+        <LinearGradient
+          colors={[theme.colors.gradientStart, theme.colors.gradientEnd]}
+          start={{ x: 0, y: 1 }} end={{ x: 1, y: 0 }}
+          style={StyleSheet.absoluteFillObject}
+        />
         <Ionicons name="locate" size={22} color="#fff" />
       </TouchableOpacity>
 
       {viewportDirty && (
         <View style={styles.searchViewportBar}>
           <Text style={styles.searchViewportText}>האזור במפה השתנה</Text>
-          <TouchableOpacity style={styles.searchViewportBtn} onPress={searchByViewport}>
+          <TouchableOpacity style={styles.searchViewportBtn} onPress={searchByViewport} activeOpacity={0.9}>
             <Text style={styles.searchViewportBtnText}>חפש באזור הנראה</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      <View style={styles.cardsWrap}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12 }}>
+      {/* כרטיסיות תוצאות בתחתית */}
+      <View style={styles.cardsWrap} pointerEvents="box-none">
+        <ScrollView
+          ref={cardsScrollRef}
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.cardsContent}
+        >
           {spots.length === 0 ? (
-            <View style={[styles.card, { width: 260, alignItems: 'center' }]}>
+            <View style={[styles.card, { width: CARD_WIDTH, alignItems: 'center' }]}>
               <Text style={styles.cardTitle}>לא נמצאו חניות בתנאי הסינון</Text>
-              <Text style={styles.cardLine}>נסה להרחיב מחיר/מרחק או להפעיל חניות מבעלי חניה</Text>
+              <Text style={styles.cardLine}>נסו להרחיב מחיר/מרחק או להפעיל חניות מבעלי חניה</Text>
             </View>
           ) : (
             spots.map(spot => {
               const liked = favorites.includes(spot.id);
               const thumb = spot.images?.[0]?.uri;
+              const isActive = spot.id === selectedId;
               return (
-                <View key={spot.id} style={[styles.card, spot.id === selectedId && styles.cardActive]}>
+                <View
+                  key={spot.id}
+                  style={[styles.card, isActive && styles.cardActive, { width: CARD_WIDTH }]}
+                  accessible
+                  accessibilityRole="summary"
+                  accessibilityLabel={`${spot.title || spot.address}. מחיר לשעה ${spot.price} שקלים. מרחק ${spot.distanceKm.toFixed(2)} קילומטרים.`}
+                >
+                  {isActive && (
+                    <LinearGradient
+                      colors={[`${theme.colors.gradientStart}33`, `${theme.colors.gradientEnd}33`]}
+                      start={{ x: 0, y: 1 }} end={{ x: 1, y: 0 }}
+                      style={styles.cardGlow}
+                    />
+                  )}
+
                   {!!thumb && <Image source={{ uri: thumb }} style={styles.cardImg} />}
-                  <View style={{ flexDirection:'row', justifyContent:'space-between', alignItems:'center' }}>
-                    <Text style={styles.cardTitle}>{spot.title || spot.address}</Text>
-                    <TouchableOpacity onPress={() => toggleFavorite(spot)}>
-                      <Ionicons name={liked ? 'heart' : 'heart-outline'} size={20} color={liked ? '#ff4d6d' : '#999'} />
-                    </TouchableOpacity>
+
+                  {/* כותרת לשמאל; תגית + לב בצד ימין */}
+                  <View style={styles.cardHeaderRow}>
+                    <Text style={styles.cardTitle} numberOfLines={1}>{spot.title || spot.address}</Text>
+                    <View style={styles.badgesRow}>
+                      {/* תגית מקור */}
+                      {spot.source === 'owner' ? (
+                        <View style={styles.ownerBadge}><Text style={styles.ownerBadgeText}>בעל חניה</Text></View>
+                      ) : (
+                        <View style={styles.demoBadge}><Text style={styles.demoBadgeText}>דמו</Text></View>
+                      )}
+                      {/* הלב — הימני ביותר */}
+                      <TouchableOpacity
+                        onPress={() => toggleFavorite(spot)}
+                        hitSlop={{ top:6, bottom:6, left:6, right:6 }}
+                        accessibilityRole="button"
+                        accessibilityLabel={liked ? 'הסר ממועדפים' : 'הוסף למועדפים'}
+                        style={{ marginStart: 8 }}
+                      >
+                        <Ionicons name={liked ? 'heart' : 'heart-outline'} size={20} color={liked ? '#ff4d6d' : '#9AA3AF'} />
+                      </TouchableOpacity>
+                    </View>
                   </View>
 
-                  <Text style={styles.cardLine}>₪{spot.price} לשעה • {spot.distanceKm.toFixed(2)} ק״מ{spot.source === 'owner' ? ' • בעל חניה' : ''}</Text>
+                  {/* נתוני כרטיסייה לשמאל */}
+                  <Text style={styles.cardLine}>
+                    ₪{spot.price} לשעה • {spot.distanceKm.toFixed(2)} ק״מ{spot.source === 'owner' ? ' • בעל חניה' : ''}
+                  </Text>
 
-                  <View style={{ flexDirection:'row', gap:8, marginTop:8 }}>
-                    <TouchableOpacity style={[styles.cardBtn, { flex:1 }]} onPress={() => onSelectSpot(spot)}>
+                  <View style={styles.cardButtonsRow}>
+                    <TouchableOpacity
+                      style={[styles.cardBtn, { flex:1 }]}
+                      onPress={() => onSelectSpot(spot)}
+                      activeOpacity={0.9}
+                      accessibilityRole="button"
+                      accessibilityLabel="הצג במפה"
+                    >
                       <Ionicons name="map" size={16} color="#fff" />
-                      <Text style={styles.cardBtnText}>הצג במפה</Text>
+                      <Text style={styles.cardBtnText} numberOfLines={1}>הצג במפה</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
@@ -459,20 +586,26 @@ export default function SearchResultsScreen({ route, navigation }) {
                           ...spot,
                           title: spot.title || spot.address,
                           ownerListingId: spot.ownerListingId ?? null,
-                          availability: spot.availability ?? null,     // <<< מעבירים הלאה
-                          requireApproval: !!spot.requireApproval,     // <<< מעבירים הלאה
+                          availability: spot.availability ?? null,
+                          requireApproval: !!spot.requireApproval,
                         }
                       })}
+                      activeOpacity={0.9}
+                      accessibilityRole="button"
+                      accessibilityLabel="הזמן עכשיו"
                     >
-                      <Text style={styles.cardBtnOutlineText}>הזמן עכשיו</Text>
+                      <Text style={styles.cardBtnOutlineText} numberOfLines={1}>הזמן עכשיו</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
                       style={[styles.cardBtnWaze, { flex:1 }]}
                       onPress={() => openWaze(spot.latitude, spot.longitude, spot.title || spot.address || 'Zpoto')}
+                      activeOpacity={0.9}
+                      accessibilityRole="button"
+                      accessibilityLabel="פתח ניווט בוויז"
                     >
-                      <Ionicons name="navigate" size={16} color="#0a7a3e" />
-                      <Text style={styles.cardBtnWazeText}>וויז</Text>
+                      <Ionicons name="navigate" size={16} color={theme.colors.success} />
+                      <Text style={styles.cardBtnWazeText} numberOfLines={1}>וויז</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -481,52 +614,179 @@ export default function SearchResultsScreen({ route, navigation }) {
           )}
         </ScrollView>
       </View>
+
+      {/* פעולה לנקודה שנבחרה בלונג-פרס */}
+      {pickedPoint && (
+        <View style={styles.pickHint}>
+          <LinearGradient
+            colors={['rgba(10,12,18,0.65)', 'rgba(10,12,18,0.35)']}
+            start={{ x: 0, y: 1 }} end={{ x: 1, y: 0 }}
+            style={StyleSheet.absoluteFillObject}
+          />
+          <Text style={styles.pickText} numberOfLines={1}>
+            {reverseLoading ? 'מביא כתובת…' : (pickedPoint.address || 'נקודה שנבחרה')}
+          </Text>
+          <TouchableOpacity onPress={searchHere} style={styles.pickBtn} activeOpacity={0.9} accessibilityRole="button">
+            <Text style={styles.pickBtnText} numberOfLines={1}>חפש כאן</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container:{ flex:1, backgroundColor:'#000' },
-  map:{ width:Dimensions.get('window').width, height:Dimensions.get('window').height },
+function makeStyles(theme, cardWidth) {
+  const { colors } = theme;
+  return StyleSheet.create({
+    container:{ flex:1, backgroundColor:'#000', direction:'rtl', writingDirection:'rtl' },
+    map:{ width:Dimensions.get('window').width, height:Dimensions.get('window').height },
 
-  center:{ flex:1, justifyContent:'center', alignItems:'center', backgroundColor:'#fff' },
+    center:{ flex:1, justifyContent:'center', alignItems:'center', backgroundColor:'#fff' },
 
-  attribution:{ position:'absolute', bottom:8, left:10, backgroundColor:'rgba(0,0,0,0.45)', paddingHorizontal:8, paddingVertical:4, borderRadius:8 },
-  attrText:{ color:'#fff', fontSize:11 },
+    attribution:{
+      position:'absolute', bottom:8, right:10,
+      backgroundColor:'rgba(0,0,0,0.45)', paddingHorizontal:8, paddingVertical:4, borderRadius:8
+    },
+    attrText:{ color:'#fff', fontSize:11, writingDirection:'rtl', textAlign:'right' },
 
-  topBadge:{ position:'absolute', top:16, left:16, right:16, backgroundColor:'rgba(0,0,0,0.6)', padding:10, borderRadius:12, alignItems:'center' },
-  badgeText:{ color:'#fff', fontWeight:'600' },
+    // Filters
+    filtersBar:{
+      position:'absolute', top:16, left:12, right:12,
+      paddingVertical:8, borderRadius:999, overflow:'hidden',
+      borderWidth:1, borderColor:'rgba(255,255,255,0.16)',
+    },
+    filtersContent:{
+      paddingHorizontal: 12, alignItems:'center', flexDirection:'row-reverse',
+    },
+    groupLabel:{ color:'#e9f7ff', fontWeight:'800', marginStart:6, alignSelf:'center', textAlign:'right', writingDirection:'rtl' },
 
-  filtersBar:{ position:'absolute', top:64, left:0, right:0 },
-  groupLabel:{ color:'#fff', fontWeight:'700', marginRight:6, alignSelf:'center' },
-  chip:{ paddingHorizontal:10, paddingVertical:8, borderRadius:999, borderWidth:1, borderColor:'#7fdcff', backgroundColor:'rgba(255,255,255,0.1)', marginRight:8 },
-  chipActive:{ backgroundColor:'#00C6FF', borderColor:'#00C6FF' },
-  chipText:{ color:'#e9f7ff', fontWeight:'600' },
-  chipTextActive:{ color:'#fff' },
+    // Time badge (optional)
+    timeBadge:{
+      position:'absolute', top:64, right:16,
+      backgroundColor:'rgba(0,0,0,0.45)', paddingVertical:6, paddingHorizontal:10,
+      borderRadius:999, borderWidth:1, borderColor:'rgba(255,255,255,0.18)', flexDirection:'row-reverse', alignItems:'center'
+    },
+    timeBadgeText:{ color:'#fff', fontWeight:'800', textAlign:'right', writingDirection:'rtl' },
 
-  ownerToggle:{ flexDirection:'row', alignItems:'center', gap:8, backgroundColor:'rgba(255,255,255,0.12)', paddingHorizontal:10, paddingVertical:8, borderRadius:999, borderWidth:1, borderColor:'rgba(127,220,255,0.6)' },
-  ownerToggleText:{ color:'#e9f7ff', fontWeight:'700', marginEnd:6 },
+    // chips
+    chipWrapper:{ marginStart:8, borderRadius:999 },
+    chip:{
+      paddingHorizontal:14, paddingVertical:10, borderRadius:999,
+      minHeight:40, justifyContent:'center', alignItems:'center'
+    },
+    chipIdle:{
+      borderWidth:1, borderColor:colors.primary, backgroundColor:'rgba(255,255,255,0.08)',
+      marginStart:8
+    },
+    chipActive:{
+      shadowColor:'#000', shadowOpacity:0.18, shadowRadius:12, shadowOffset:{ width:0, height:6 }, elevation:3
+    },
+    chipText:{ color:'#e9f7ff', fontWeight:'700', textAlign:'right', writingDirection:'rtl' },
+    chipTextActive:{ color:'#fff', fontWeight:'800', textAlign:'right', writingDirection:'rtl' },
 
-  fab:{ position:'absolute', right:18, bottom:160, width:48, height:48, borderRadius:24, alignItems:'center', justifyContent:'center', backgroundColor:'#00C6FF', elevation:4, shadowColor:'#000', shadowOpacity:0.2, shadowRadius:6, shadowOffset:{ width:0, height:3 } },
+    ownerToggle:{
+      flexDirection:'row-reverse', alignItems:'center', gap:8,
+      backgroundColor:'rgba(255,255,255,0.12)',
+      paddingHorizontal:12, paddingVertical:8, borderRadius:999,
+      borderWidth:1, borderColor:'rgba(127,220,255,0.6)'
+    },
+    ownerToggleText:{ color:'#e9f7ff', fontWeight:'700', marginStart:6, textAlign:'right', writingDirection:'rtl' },
 
-  searchViewportBar:{ position:'absolute', top:108, left:12, right:12, backgroundColor:'#fff7e6', borderRadius:12, borderWidth:1, borderColor:'#ffd79a', padding:10, flexDirection:'row', alignItems:'center', gap:10, shadowColor:'#000', shadowOpacity:0.08, shadowRadius:8, shadowOffset:{ width:0, height:4 } },
-  searchViewportText:{ color:'#7a4d00', fontWeight:'700', flex:1 },
-  searchViewportBtn:{ backgroundColor:'#ffb74d', paddingVertical:10, paddingHorizontal:12, borderRadius:10 },
-  searchViewportBtnText:{ color:'#4a2a00', fontWeight:'800' },
+    clearBtn:{
+      flexDirection:'row-reverse', alignItems:'center', gap:6,
+      backgroundColor:'rgba(255,255,255,0.14)', paddingHorizontal:12, paddingVertical:8,
+      borderRadius:999, marginStart:8, borderWidth:1, borderColor:'rgba(255,255,255,0.22)'
+    },
+    clearBtnText:{ color:'#fff', fontWeight:'800', textAlign:'right', writingDirection:'rtl' },
 
-  cardsWrap:{ position:'absolute', bottom:22, left:0, right:0 },
-  card:{ width:300, marginRight:12, backgroundColor:'#fff', borderRadius:14, padding:12, shadowColor:'#000', shadowOpacity:0.1, shadowRadius:8, shadowOffset:{ width:0, height:4 }, elevation:2 },
-  cardActive:{ borderWidth:2, borderColor:'#00C6FF' },
-  cardImg:{ width:'100%', height:120, borderRadius:10, marginBottom:8 },
-  cardTitle:{ fontSize:16, fontWeight:'700', marginBottom:4 },
-  cardLine:{ fontSize:14, color:'#333' },
+    countPill:{
+      marginStart:8, backgroundColor:'rgba(0,0,0,0.45)', paddingHorizontal:10, paddingVertical:8,
+      borderRadius:999, borderWidth:1, borderColor:'rgba(255,255,255,0.18)'
+    },
+    countPillText:{ color:'#fff', fontWeight:'800', textAlign:'right', writingDirection:'rtl' },
 
-  cardBtn:{ flexDirection:'row', alignItems:'center', gap:6, backgroundColor:'#00C6FF', paddingVertical:10, borderRadius:10, justifyContent:'center' },
-  cardBtnText:{ color:'#fff', fontWeight:'700' },
+    // recenter FAB — עבר לשמאל
+    fab:{
+      position:'absolute', left:18, bottom:Platform.select({ ios: 160, android: 150 }), width:56, height:56, borderRadius:28,
+      alignItems:'center', justifyContent:'center',
+      overflow:'hidden',
+      shadowColor:colors.gradientStart, shadowOpacity:0.45, shadowRadius:16, shadowOffset:{ width:0, height:8 }, elevation:6
+    },
 
-  cardBtnOutline:{ backgroundColor:'#fff', paddingVertical:10, borderRadius:10, borderWidth:1, borderColor:'#00C6FF', alignItems:'center', justifyContent:'center' },
-  cardBtnOutlineText:{ color:'#00C6FF', fontWeight:'700' },
+    // viewport dirty bar
+    searchViewportBar:{
+      position:'absolute', top:72, left:12, right:12,
+      backgroundColor:'#fff7e6', borderRadius:12, borderWidth:1, borderColor:'#ffd79a',
+      padding:10, flexDirection:'row-reverse', alignItems:'center', gap:10,
+      shadowColor:'#000', shadowOpacity:0.08, shadowRadius:8, shadowOffset:{ width:0, height:4 }
+    },
+    searchViewportText:{ color:'#7a4d00', fontWeight:'800', flex:1, textAlign:'right', writingDirection:'rtl' },
+    searchViewportBtn:{ backgroundColor:'#ffb74d', paddingVertical:10, paddingHorizontal:12, borderRadius:10 },
+    searchViewportBtnText:{ color:'#4a2a00', fontWeight:'900', textAlign:'right', writingDirection:'rtl' },
 
-  cardBtnWaze:{ backgroundColor:'#e8fff2', paddingVertical:10, borderRadius:10, borderWidth:1, borderColor:'#b9f5cf', alignItems:'center', justifyContent:'center', flexDirection:'row', gap:6 },
-  cardBtnWazeText:{ color:'#0a7a3e', fontWeight:'800' },
-});
+    // bottom cards
+    cardsWrap:{ position:'absolute', bottom:22, left:0, right:0 },
+    cardsContent:{ paddingHorizontal: 12, flexDirection:'row-reverse' },
+    card:{
+      width: cardWidth, marginStart:12, backgroundColor:'#fff', borderRadius:14, padding:12,
+      shadowColor:'#000', shadowOpacity:0.1, shadowRadius:8, shadowOffset:{ width:0, height:4 }, elevation:2,
+      borderWidth:1, borderColor:'#ecf1f7', overflow:'hidden'
+    },
+    cardGlow:{ ...StyleSheet.absoluteFillObject, borderRadius:14 },
+
+    cardActive:{ borderColor:colors.primary },
+    cardImg:{ width:'100%', height:120, borderRadius:10, marginBottom:8, backgroundColor:'#f2f4f7' },
+
+    // כותרת לשמאל; תגיות+לב בימין
+    cardHeaderRow:{ flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
+    badgesRow:{ flexDirection:'row', alignItems:'center', justifyContent:'flex-end' },
+
+    ownerBadge:{
+      backgroundColor:'#e6fff4', borderColor:'#b9f5cf', borderWidth:1,
+      paddingHorizontal:8, paddingVertical:4, borderRadius:999
+    },
+    ownerBadgeText:{ color:colors.success, fontWeight:'800', textAlign:'right', writingDirection:'rtl' },
+    demoBadge:{
+      backgroundColor:'#eef3ff', borderColor:'#d6e1ff', borderWidth:1,
+      paddingHorizontal:8, paddingVertical:4, borderRadius:999
+    },
+    demoBadgeText:{ color:colors.primary, fontWeight:'800', textAlign:'right', writingDirection:'rtl' },
+
+    // מיושרים לשמאל
+    cardTitle:{ fontSize:16, fontWeight:'800', marginBottom:4, color:'#0b0f14', textAlign:'left' },
+    cardLine:{ fontSize:14, color:'#333', textAlign:'left' },
+
+    cardButtonsRow:{ flexDirection:'row-reverse', alignItems:'stretch', gap:6, marginTop:8 },
+    cardBtn:{
+      flexDirection:'row-reverse', alignItems:'center', justifyContent:'center',
+      gap:6, backgroundColor:colors.primary, paddingVertical:12, paddingHorizontal:12,
+      borderRadius:10, minHeight:44, minWidth:0
+    },
+    cardBtnText:{ color:'#fff', fontWeight:'800', textAlign:'right', includeFontPadding:false },
+
+    cardBtnOutline:{
+      backgroundColor:'#fff', paddingVertical:12, paddingHorizontal:12, borderRadius:10,
+      borderWidth:1, borderColor:colors.primary, alignItems:'center', justifyContent:'center',
+      minHeight:44, minWidth:0
+    },
+    cardBtnOutlineText:{ color:colors.primary, fontWeight:'800', textAlign:'right', includeFontPadding:false },
+
+    cardBtnWaze:{
+      backgroundColor:'#e8fff2', paddingVertical:12, paddingHorizontal:12, borderRadius:10,
+      borderWidth:1, borderColor:'#b9f5cf', alignItems:'center', justifyContent:'center',
+      flexDirection:'row-reverse', gap:6, minHeight:44, minWidth:0
+    },
+    cardBtnWazeText:{ color:colors.success, fontWeight:'800', textAlign:'right', includeFontPadding:false },
+
+    // long-press "search here"
+    pickHint:{
+      position:'absolute', left:12, right:12, bottom:96,
+      padding:10, borderRadius:12, overflow:'hidden',
+      borderWidth:1, borderColor:'rgba(255,255,255,0.16)',
+      flexDirection:'row-reverse', alignItems:'center', gap:10
+    },
+    pickText:{ flex:1, color:'#fff', fontWeight:'700', textAlign:'right' },
+    pickBtn:{ backgroundColor:colors.primary, paddingVertical:8, paddingHorizontal:12, borderRadius:10 },
+    pickBtnText:{ color:'#fff', fontWeight:'800', textAlign:'right' },
+  });
+}

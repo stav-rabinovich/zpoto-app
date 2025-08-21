@@ -1,0 +1,51 @@
+// [SERVER] prisma/schema.prisma
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum OwnerAppStatus {
+  NEW
+  REVIEW
+  APPROVED
+  REJECTED
+}
+
+model OwnerApplication {
+  id        String         @id @default(cuid())
+  fullName  String
+  phone     String
+  address   String
+  lat       Float
+  lng       Float
+  docsUrl   String?
+  status    OwnerAppStatus @default(NEW)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+enum ListingRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model ListingRequest {
+  id           String                @id @default(cuid())
+  title        String
+  address      String
+  description  String?
+  vehicleTypes Json                  // array of strings
+  pricePerHour Int
+  photos       Json                  // array of URIs/base64 (לשלב מתקדם)
+  lat          Float?
+  lng          Float?
+  status       ListingRequestStatus  @default(PENDING)
+  submittedAt  DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+}

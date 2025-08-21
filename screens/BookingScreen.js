@@ -1,15 +1,39 @@
 // screens/BookingScreen.js
+// RTL מלא. בחירת התחלה וסיום (פאנל גלגלים ייעודי, החלקה ימ/שמ ליום קודם/הבא), בלי קיצורי 15/30.
+// נשמרו כללי מינימום שעה, חפיפות, התראות, ועוד.
+
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Platform, Alert,
-  ScrollView, KeyboardAvoidingView, TextInput, Keyboard, Image
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  Platform,
+  Alert,
+  ScrollView,
+  KeyboardAvoidingView,
+  TextInput,
+  Keyboard,
+  Image,
+  I18nManager,
+  Modal,
+  FlatList,
+  PanResponder,
 } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import dayjs from 'dayjs';
+import 'dayjs/locale/he';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
-import { scheduleBookingNotifications, cancelBookingNotifications } from '../utils/notify';
+import { scheduleBookingNotifications, cancelBookingNotifications } from '../../utils/notify';
+import { useTheme } from '@shopify/restyle';
+import ZpButton from '../components/ui/ZpButton';
+import { LinearGradient } from 'expo-linear-gradient';
+
+dayjs.locale('he');
+
+// ודא ש-RTL מאופשר (בעיקר לאנדרואיד)
+try { I18nManager.allowRTL(true); } catch {}
 
 const PROFILE_KEY = 'profile';
 const VEHICLES_KEY = 'vehicles';
@@ -42,22 +66,257 @@ function hasOverlap(bookings, startISO, endISO, excludeId = null) {
     return s < be && e > bs;
   });
 }
+const roundTo5 = (d) => {
+  const dt = new Date(d);
+  const m = dt.getMinutes();
+  const rounded = Math.round(m / 5) * 5;
+  dt.setMinutes(rounded, 0, 0);
+  return dt;
+};
+
+// ===== WheelPicker כללי עם Snap =====
+const ITEM_H = 40;
+function WheelPicker({
+  data, value, onChange, height = ITEM_H * 5, style, textStyle,
+}) {
+  const listRef = React.useRef(null);
+  const selectedIndex = Math.max(0, data.findIndex(d => d.value === value));
+  const snapTo = (index) => {
+    const clamped = Math.max(0, Math.min(index, data.length - 1));
+    listRef.current?.scrollToOffset({ offset: clamped * ITEM_H, animated: true });
+    onChange?.(data[clamped].value);
+  };
+  React.useEffect(() => {
+    const id = setTimeout(() => {
+      listRef.current?.scrollToOffset({ offset: selectedIndex * ITEM_H, animated: false });
+    }, 0);
+    return () => clearTimeout(id);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const onScrollEnd = (e) => {
+    const offset = e.nativeEvent.contentOffset.y;
+    const index = Math.round(offset / ITEM_H);
+    snapTo(index);
+  };
+  const renderItem = ({ item }) => {
+    const isActive = item.value === value;
+    return (
+      <View style={{ height: ITEM_H, justifyContent: 'center', alignItems: 'flex-end', alignSelf: 'stretch', paddingHorizontal: 12 }}>
+        <Text style={[{ fontSize: 16, color: isActive ? '#111827' : '#94A3B8', fontWeight: isActive ? '800' : '600', textAlign: 'right', writingDirection: 'rtl' }, textStyle]}>
+          {item.label}
+        </Text>
+      </View>
+    );
+  };
+  return (
+    <View style={[{ height, overflow: 'hidden' }, style]}>
+      <View
+        pointerEvents="none"
+        style={{ position: 'absolute', top: (height - ITEM_H) / 2, height: ITEM_H, left: 0, right: 0,
+                 borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#E2E8F0', zIndex: 1 }}
+      />
+      <FlatList
+        ref={listRef}
+        data={data}
+        keyExtractor={(_, i) => String(i)}
+        renderItem={renderItem}
+        showsVerticalScrollIndicator={false}
+        snapToInterval={ITEM_H}
+        decelerationRate="fast"
+        onMomentumScrollEnd={onScrollEnd}
+        getItemLayout={(_, index) => ({ length: ITEM_H, offset: ITEM_H * index, index })}
+        contentContainerStyle={{ paddingTop: (height - ITEM_H) / 2, paddingBottom: (height - ITEM_H) / 2 }}
+      />
+    </View>
+  );
+}
+
+// ===== עזר לפאנל =====
+const roundTo5local = (d) => { const x = new Date(d); x.setMinutes(Math.round(x.getMinutes()/5)*5, 0, 0); return x; };
+const clampToMin = (date, min) => (!min || date >= min) ? date : new Date(min);
+
+const daysArray = (baseMin, span = 180) => {
+  const out = [];
+  const startDay = baseMin ? new Date(baseMin) : new Date();
+  startDay.setHours(0,0,0,0);
+  for (let i=0; i<=span; i++){
+    const d = new Date(startDay);
+    d.setDate(d.getDate() + i);
+    out.push({ value: d.getTime(), label: dayjs(d).format('DD/MM ddd') });
+  }
+  return out;
+};
+const hoursArray = () => Array.from({ length: 24 }, (_, h) => ({ value: h, label: String(h).padStart(2,'0') }));
+const minutesArray = (step = 5) => Array.from({ length: 60/step }, (_, i) => {
+  const m = i*step;
+  return { value: m, label: String(m).padStart(2,'0') };
+});
+
+// ===== הפאנל התחתון לבחירת תאריך/שעה =====
+function WheelsDateTimePanel({ visible, initial, onClose, onConfirm, minimumDate, title='בחרו תאריך ושעה' }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
+
+  const gradStart = theme.colors?.gradientStart ?? theme.colors.primary;
+  const gradEnd   = theme.colors?.gradientEnd ?? theme.colors.primary;
+
+  const min = minimumDate ? roundTo5local(new Date(minimumDate)) : null;
+  const init = clampToMin(roundTo5local(initial), min);
+
+  const [selDay, setSelDay]   = useState(new Date(init.getFullYear(), init.getMonth(), init.getDate(), 0, 0, 0, 0).getTime());
+  const [selHour, setSelHour] = useState(init.getHours());
+  const [selMin, setSelMin]   = useState(init.getMinutes());
+
+  useEffect(() => {
+    if (!visible) return;
+    const i = clampToMin(roundTo5local(initial), min);
+    const d0 = new Date(i); d0.setHours(0,0,0,0);
+    setSelDay(d0.getTime());
+    setSelHour(i.getHours());
+    setSelMin(i.getMinutes());
+  }, [visible, initial, minimumDate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isMinDay = !!min && new Date(selDay).getTime() === new Date(min.getFullYear(),min.getMonth(),min.getDate(),0,0,0,0).getTime();
+  const minHour  = isMinDay ? min.getHours() : 0;
+  const minMin   = (isMinDay && selHour === minHour) ? min.getMinutes() : 0;
+
+  const dayData = daysArray(min);
+  const hourData = hoursArray().map(it => ({
+    ...it, label: (isMinDay && it.value < minHour) ? `· ${String(it.value).padStart(2,'0')}` : it.label
+  }));
+  const minuteData = minutesArray(5).map(it => ({
+    ...it, label: (isMinDay && selHour === minHour && it.value < minMin) ? `· ${String(it.value).padStart(2,'0')}` : it.label
+  }));
+
+  // חיצים + החלקה ימ/שמ לשינוי יום
+  const swipeResponder = React.useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 14 && Math.abs(g.dy) < 10,
+      onPanResponderRelease: (_, g) => {
+        const i = dayData.findIndex(d => d.value === selDay);
+        if (g.dx > 30 && i > 0) setSelDay(dayData[i - 1].value);               // ימינה = יום קודם
+        else if (g.dx < -30 && i < dayData.length - 1) setSelDay(dayData[i + 1].value); // שמאלה = יום הבא
+      },
+    })
+  ).current;
+
+  const compose = () => {
+    let dt = new Date(selDay);
+    dt.setHours(selHour, selMin, 0, 0);
+    dt = roundTo5local(dt);
+    dt = clampToMin(dt, min);
+    return dt;
+  };
+
+  const headerStr = dayjs(compose()).format('dddd • DD/MM/YYYY • HH:mm');
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalSheet}>
+          <LinearGradient colors={[gradStart, gradEnd]} start={{ x:0,y:1 }} end={{ x:1,y:0 }} style={styles.modalHeaderGrad}>
+            <View style={styles.dragHandle} />
+            <Text style={styles.modalTitle}>{title}</Text>
+            <Text style={styles.modalSubtitle}>{headerStr}</Text>
+          </LinearGradient>
+
+          <View style={styles.dayRow} {...swipeResponder.panHandlers}>
+            {/* ימני = יום קודם */}
+            <TouchableOpacity
+              onPress={() => {
+                const i = dayData.findIndex(d => d.value === selDay);
+                if (i > 0) setSelDay(dayData[i - 1].value);
+              }}
+              style={styles.arrowBtn}
+              activeOpacity={0.9}
+            >
+              <Ionicons name="chevron-back" size={20} color={theme.colors.text} />
+            </TouchableOpacity>
+
+            <View style={{ flex:1, alignItems:'center' }}>
+              <WheelPicker
+                data={dayData}
+                value={selDay}
+                onChange={(val) => {
+                  setSelDay(val);
+                  if (isMinDay && selHour < minHour) setSelHour(minHour);
+                  if (isMinDay && selHour === minHour && selMin < minMin) setSelMin(minMin);
+                }}
+                height={ITEM_H * 5}
+              />
+            </View>
+
+            {/* שמאלי = יום הבא */}
+            <TouchableOpacity
+              onPress={() => {
+                const i = dayData.findIndex(d => d.value === selDay);
+                if (i < dayData.length - 1) setSelDay(dayData[i + 1].value);
+              }}
+              style={styles.arrowBtn}
+              activeOpacity={0.9}
+            >
+              <Ionicons name="chevron-forward" size={20} color={theme.colors.text} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.hmWrapWheels}>
+            <View style={styles.hmColWheel}>
+              <Text style={styles.hmLabel}>שעה</Text>
+              <WheelPicker
+                data={hourData}
+                value={Math.max(selHour, minHour)}
+                onChange={(h) => {
+                  if (isMinDay && h < minHour) h = minHour;
+                  setSelHour(h);
+                  if (isMinDay && h === minHour && selMin < minMin) setSelMin(minMin);
+                }}
+              />
+            </View>
+
+            <View style={styles.hmColWheel}>
+              <Text style={styles.hmLabel}>דקות</Text>
+              <WheelPicker
+                data={minuteData}
+                value={Math.max(selMin, (isMinDay && selHour === minHour) ? minMin : 0)}
+                onChange={(m) => {
+                  if (isMinDay && selHour === minHour && m < minMin) m = minMin;
+                  setSelMin(m);
+                }}
+              />
+            </View>
+          </View>
+
+          <View style={styles.modalFooter}>
+            <TouchableOpacity onPress={onClose} style={[styles.modalBtn, styles.modalBtnGhost, { marginStart: 8 }]} activeOpacity={0.9}>
+              <Text style={styles.modalBtnGhostText}>ביטול</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => onConfirm(compose())} style={[styles.modalBtn, styles.modalBtnPrimary]} activeOpacity={0.9}>
+              <Text style={styles.modalBtnPrimaryText}>אישור</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
 export default function BookingScreen({ route, navigation }) {
+  const theme = useTheme();
+  const styles = makeStyles(theme);
+
   const params = route?.params || {};
-  const spot = params.spot || params.parkingSpot || null;
+  const spot = params.spot || params.parkingSpot || null; // תמיכה בשני שמות פרופס
   const editingId = params.bookingId || null;
 
   const pricePerHour = typeof spot?.price === 'number' ? spot.price : 10;
 
   const [start, setStart] = useState(() => {
     const s = params.initialStart ? new Date(params.initialStart) : new Date();
-    s.setMinutes(0, 0, 0);
-    return s;
+    s.setSeconds(0, 0);
+    return roundTo5(s);
   });
   const [end, setEnd] = useState(() => {
     const e = params.initialEnd ? new Date(params.initialEnd) : new Date();
-    e.setHours(e.getHours() + 1, 0, 0, 0);
+    e.setHours(e.getHours() + 1, 0, 0, 0); // ברירת מחדל: שעה אחרי ההתחלה
     return e;
   });
 
@@ -66,8 +325,10 @@ export default function BookingScreen({ route, navigation }) {
   const [selectedVehicleId, setSelectedVehicleId] = useState(null);
   const [plate, setPlate] = useState('');
   const [carDesc, setCarDesc] = useState('');
-  const [showStartPicker, setShowStartPicker] = useState(false);
-  const [showEndPicker, setShowEndPicker] = useState(false);
+
+  // פאנל גלגלים
+  const [panelVisible, setPanelVisible] = useState(false);
+  const [panelMode, setPanelMode] = useState('start'); // 'start' | 'end'
 
   useEffect(() => {
     (async () => {
@@ -102,6 +363,8 @@ export default function BookingScreen({ route, navigation }) {
     })();
   }, []);
 
+  const MIN_MS = 60 * 60 * 1000; // מינימום שעה
+
   const { hours, total, invalid } = useMemo(() => {
     const diffMs = end - start;
     const h = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60)));
@@ -111,8 +374,6 @@ export default function BookingScreen({ route, navigation }) {
   const now = new Date();
   const isActive = spot && start <= now && now < end;
   const timeLeft = isActive ? end - now : 0;
-
-  const bumpEnd = (mins) => setEnd(prev => new Date(prev.getTime() + mins * 60 * 1000));
 
   const upsertBooking = async (booking) => {
     const raw = await AsyncStorage.getItem(BOOKINGS_KEY);
@@ -127,10 +388,36 @@ export default function BookingScreen({ route, navigation }) {
     await AsyncStorage.setItem(BOOKINGS_KEY, JSON.stringify(list));
   };
 
+  const openPanel = (mode) => {
+    setPanelMode(mode);
+    setPanelVisible(true);
+  };
+
+  const handlePanelConfirm = (picked) => {
+    if (panelMode === 'start') {
+      setStart(roundTo5(picked));
+      if (end - picked < MIN_MS) {
+        const e = new Date(picked.getTime() + MIN_MS);
+        setEnd(roundTo5(e));
+      }
+    } else {
+      if (picked - start < MIN_MS) {
+        const e = new Date(start.getTime() + MIN_MS);
+        setEnd(roundTo5(e));
+      } else {
+        setEnd(roundTo5(picked));
+      }
+    }
+    setPanelVisible(false);
+  };
+
   const confirm = useCallback(async () => {
     if (!spot) { navigation.goBack(); return; }
-    if (invalid) { Alert.alert('שגיאה', 'שעת הסיום חייבת להיות אחרי שעת ההתחלה.'); return; }
     if (!plate.trim()) { Alert.alert('שגיאה', 'נא להזין מספר רכב.'); return; }
+    if (end - start < MIN_MS) {
+      Alert.alert('שגיאה', 'הסיום חייב להיות לפחות שעה אחרי ההתחלה.');
+      return;
+    }
 
     try {
       const raw = await AsyncStorage.getItem(BOOKINGS_KEY);
@@ -145,7 +432,6 @@ export default function BookingScreen({ route, navigation }) {
       await AsyncStorage.setItem('plate', plate.trim());
       await AsyncStorage.setItem('carDesc', (carDesc || '').trim());
 
-      // בדיקת מצב אישור החניה (אם זו חניית Owner)
       let approvalMode = 'auto';
       try {
         if (spot?.ownerListingId) {
@@ -180,8 +466,8 @@ export default function BookingScreen({ route, navigation }) {
         carDesc: (carDesc || '').trim(),
         vehicleId: selectedVehicle ? selectedVehicle.id : null,
         paymentMethod,
-        start: startISO,
-        end: endISO,
+        start: new Date(start).toISOString(),
+        end: new Date(end).toISOString(),
         hours,
         total,
         alerted30: false,
@@ -193,7 +479,6 @@ export default function BookingScreen({ route, navigation }) {
         ? { ...bookingBase, id: editingId }
         : { ...bookingBase, id: `b-${Date.now()}`, createdAt: new Date().toISOString() };
 
-      // התראות רק בהזמנה מאושרת
       if (booking.status === 'confirmed') {
         try {
           const notifIds = await scheduleBookingNotifications(booking);
@@ -206,16 +491,9 @@ export default function BookingScreen({ route, navigation }) {
       Keyboard.dismiss();
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-      if (booking.status === 'pending') {
-        Alert.alert(
-          'הזמנה נשלחה לאישור',
-          `ההזמנה ממתינה לאישור בעל/ת החניה.\nחניה: ${booking.spot.title}\nכתובת: ${booking.spot.address || '—'}\nמס׳ רכב: ${booking.plate}\nרכב: ${booking.carDesc || 'לא צוין'}\nמתאריך: ${dayjs(start).format('DD/MM/YYYY HH:mm')}\nעד: ${dayjs(end).format('DD/MM/YYYY HH:mm')}\nמשך: ${hours} שעות\nסה״כ משוער: ₪${total}`,
-          [{ text: 'סגור', onPress: () => navigation.navigate('Bookings') }]
-        );
-      } else {
-        Alert.alert(
-          editingId ? 'הזמנה עודכנה' : 'הזמנה בוצעה (דמו)',
-          `חניה: ${booking.spot.title}
+      Alert.alert(
+        editingId ? 'הזמנה עודכנה' : (booking.status === 'pending' ? 'הזמנה נשלחה לאישור' : 'הזמנה בוצעה (דמו)'),
+        `חניה: ${booking.spot.title}
 כתובת: ${booking.spot.address || '—'}
 מס׳ רכב: ${booking.plate}
 רכב: ${booking.carDesc || 'לא צוין'}
@@ -224,19 +502,15 @@ export default function BookingScreen({ route, navigation }) {
 עד: ${dayjs(end).format('DD/MM/YYYY HH:mm')}
 משך: ${hours} שעות
 סה״כ: ₪${total}`,
-          [{ text: 'סגור', onPress: () => navigation.navigate('Bookings') }]
-        );
-      }
+        [{ text: 'סגור', onPress: () => navigation.navigate('Bookings') }]
+      );
     } catch (e) {}
-  }, [spot, plate, carDesc, start, end, hours, total, invalid, navigation, pricePerHour, editingId, vehicles, selectedVehicleId, paymentMethod]);
+  }, [spot, plate, carDesc, start, end, hours, total, navigation, pricePerHour, editingId, vehicles, selectedVehicleId, paymentMethod]);
 
   if (!spot) {
     return (
       <View style={styles.center}>
-        <Text>לא התקבלה חניה</Text>
-        <TouchableOpacity style={styles.button} onPress={() => navigation.goBack()}>
-          <Text style={styles.buttonText}>חזרה</Text>
-        </TouchableOpacity>
+        <Text style={styles.centerText}>לא התקבלה חניה</Text>
       </View>
     );
   }
@@ -244,174 +518,281 @@ export default function BookingScreen({ route, navigation }) {
   const images = spot.images || [];
 
   return (
-    <>
-      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.select({ ios: 'padding' })}>
-        <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-          <Text style={styles.header}>פרטי הזמנה</Text>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.select({ ios: 'padding' })}>
+      <ScrollView
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        style={{ direction: 'rtl' }}
+      >
+        {/* כרטיס מידע על החניה */}
+        <View style={styles.card}>
+          {images.length > 0 && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }} contentContainerStyle={{ flexDirection: 'row-reverse' }}>
+              {images.map((img, idx) => (
+                <Image key={`${img?.uri || 'img'}-${idx}`} source={{ uri: img.uri }} style={styles.heroImg} />
+              ))}
+            </ScrollView>
+          )}
 
-          <View style={styles.card}>
-            {images.length > 0 && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom:10 }}>
-                {images.map((img, idx) => (
-                  <Image key={`${img.uri}-${idx}`} source={{ uri: img.uri }} style={styles.heroImg} />
-                ))}
-              </ScrollView>
-            )}
+          {/* כותרת שם החניה — במרכז */}
+          <Text style={styles.title}>{spot.title || spot.address || 'חניה'}</Text>
 
-            <Text style={styles.title}>{spot.title || spot.address || 'חניה'}</Text>
-            <Text style={styles.line}>כתובת: {spot.address || '—'}</Text>
-            {!!spot.distanceKm && <Text style={styles.line}>מרחק: {Number(spot.distanceKm).toFixed(2)} ק״מ</Text>}
-            <Text style={styles.line}>מחיר לשעה: ₪{pricePerHour}</Text>
+          <Text style={styles.line}>כתובת: {spot.address || '—'}</Text>
+          {!!spot.distanceKm && <Text style={styles.line}>מרחק: {Number(spot.distanceKm).toFixed(2)} ק״מ</Text>}
+          <Text style={styles.line}>מחיר לשעה: ₪{pricePerHour}</Text>
 
-            {isActive && (
-              <View style={styles.activeBadge}>
-                <Text style={styles.activeText}>פעיל עכשיו • נותר: {msToHhMm(timeLeft)}</Text>
-              </View>
-            )}
-            <Text style={[styles.hint, { marginTop: 6 }]}>
-              {spot.ownerListingId ? 'ייתכן וההזמנה תדרוש אישור בעל/ת החניה.' : 'חניית דמו – אישור מיידי.'}
-            </Text>
-          </View>
-
-          <View style={styles.card}>
-            <Text style={styles.section}>בחר תאריך ושעות</Text>
-
-            <View style={styles.row}>
-              <View style={styles.col}>
-                <Text style={styles.label}>התחלה</Text>
-                <TouchableOpacity style={styles.pickerBtn} onPress={() => setShowStartPicker(true)}>
-                  <Text style={styles.pickerText}>{dayjs(start).format('DD/MM/YYYY HH:mm')}</Text>
-                </TouchableOpacity>
-              </View>
-              <View style={styles.col}>
-                <Text style={styles.label}>סיום</Text>
-                <TouchableOpacity style={styles.pickerBtn} onPress={() => setShowEndPicker(true)}>
-                  <Text style={styles.pickerText}>{dayjs(end).format('DD/MM/YYYY HH:mm')}</Text>
-                </TouchableOpacity>
-              </View>
+          {isActive && (
+            <View style={styles.activeBadge}>
+              <Ionicons name="time-outline" size={14} color={theme.colors.success} style={{ marginStart: 6 }} />
+              <Text style={styles.activeText}>פעיל עכשיו • נותר: {msToHhMm(timeLeft)}</Text>
             </View>
+          )}
 
-            {showStartPicker && (
-              <DateTimePicker
-                value={start}
-                mode="datetime"
-                is24Hour
-                onChange={(_, date) => {
-                  setShowStartPicker(Platform.OS === 'ios');
-                  if (date) {
-                    const s = new Date(date);
-                    if (s >= end) {
-                      const newEnd = new Date(s);
-                      newEnd.setHours(newEnd.getHours() + 1, 0, 0, 0);
-                      setEnd(newEnd);
-                    }
-                    setStart(s);
-                  }
-                }}
-              />
-            )}
+          <Text style={[styles.hint, { marginTop: 6 }]}>
+            {spot.ownerListingId ? 'ייתכן וההזמנה תדרוש אישור בעל/ת החניה.' : 'חניית דמו – אישור מיידי.'}
+          </Text>
+        </View>
 
-            {showEndPicker && (
-              <DateTimePicker
-                value={end}
-                mode="datetime"
-                is24Hour
-                minimumDate={start}
-                onChange={(_, date) => {
-                  setShowEndPicker(Platform.OS === 'ios');
-                  if (date) setEnd(new Date(date));
-                }}
-              />
-            )}
+        {/* בחירת זמנים – התחלה/סיום (כפתור פותח פאנל גלגלים) */}
+        <View style={styles.card}>
+          <Text style={styles.section}>בחרו תאריך ושעה</Text>
 
-            <View style={{ flexDirection:'row', gap:8, marginTop:10 }}>
-              <TouchableOpacity style={styles.quickBtn} onPress={() => bumpEnd(30)}>
-                <Text style={styles.quickBtnText}>+30 דק׳</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.quickBtn} onPress={() => bumpEnd(60)}>
-                <Text style={styles.quickBtnText}>+60 דק׳</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.quickBtn} onPress={() => bumpEnd(-30)}>
-                <Text style={styles.quickBtnText}>-30 דק׳</Text>
+          {/* התחלה */}
+          <View style={{ marginTop: 6, alignItems: 'flex-start' }}>
+            <View style={styles.rowHeader}>
+              <Ionicons name="play" size={14} color={theme.colors.subtext} style={{ marginEnd: 6 }} />
+              <Text style={styles.labelStrong}>התחלה</Text>
+            </View>
+            <View style={styles.fieldsRow}>
+              <TouchableOpacity style={styles.fieldButton} onPress={() => openPanel('start')} activeOpacity={0.9}>
+                <Ionicons name="calendar-outline" size={16} style={styles.fieldIcon} />
+                <Text style={styles.fieldButtonText}>{dayjs(start).format('DD/MM/YYYY • HH:mm')}</Text>
               </TouchableOpacity>
             </View>
-
-            <Text style={styles.hint}>החיוב לפי שעות שימוש, עיגול מעלה לשעה הקרובה (מינימום שעה).</Text>
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.section}>הרכב להזמנה</Text>
-
-            <Text style={styles.label}>מספר רכב</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="לדוגמה: 12-345-67"
-              value={plate}
-              onChangeText={setPlate}
-              keyboardType="numbers-and-punctuation"
-            />
-            <Text style={styles.label}>תיאור רכב (לא חובה)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="לדוגמה: מאזדה 3 לבנה"
-              value={carDesc}
-              onChangeText={setCarDesc}
-            />
+          {/* סיום */}
+          <View style={{ marginTop: 12, alignItems: 'flex-start' }}>
+            <View style={styles.rowHeader}>
+              <Ionicons name="square" size={12} color={theme.colors.subtext} style={{ marginEnd: 6 }} />
+              <Text style={styles.labelStrong}>סיום</Text>
+            </View>
+            <View style={styles.fieldsRow}>
+              <TouchableOpacity style={styles.fieldButton} onPress={() => openPanel('end')} activeOpacity={0.9}>
+                <Ionicons name="time-outline" size={16} style={styles.fieldIcon} />
+                <Text style={styles.fieldButtonText}>{dayjs(end).format('DD/MM/YYYY • HH:mm')}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
-          <View style={styles.card}>
-            <Text style={styles.section}>תשלום</Text>
-            <Text style={styles.line}>אמצעי תשלום: {paymentLabel(paymentMethod)}</Text>
-            <Text style={styles.hint}>אפשר לערוך את ברירת המחדל במסך ״הפרופיל שלי״.</Text>
+          {/* הוסרה תיבת הטווח */}
+          <Text style={[styles.hint, { marginTop: theme.spacing.xs }]}>
+            מינימום שעה בין התחלה לסיום. החיוב לפי שעות שימוש (עיגול מעלה).
+          </Text>
+        </View>
+
+        {/* פרטי רכב */}
+        <View style={styles.card}>
+          <Text style={styles.section}>הרכב להזמנה</Text>
+
+          <Text style={styles.label}>מספר רכב</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="לדוגמה: 12-345-67"
+            value={plate}
+            onChangeText={setPlate}
+            keyboardType="numbers-and-punctuation"
+            placeholderTextColor={theme.colors.subtext}
+          />
+
+        <Text style={styles.label}>תיאור רכב (לא חובה)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="לדוגמה: מאזדה 3 לבנה"
+            value={carDesc}
+            onChangeText={setCarDesc}
+            placeholderTextColor={theme.colors.subtext}
+          />
+        </View>
+
+        {/* סיכום — עכשיו מעל התשלום, כולל כותרת */}
+        <View style={styles.summary}>
+          <Text style={styles.section}>סיכום ההזמנה</Text>
+
+          <View style={styles.summaryItem}>
+            <Ionicons name="play" size={16} style={{ marginEnd: 6 }} />
+            <Text style={styles.summaryText}>התחלה: {dayjs(start).format('DD/MM/YYYY HH:mm')}</Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Ionicons name="square" size={14} style={{ marginEnd: 6 }} />
+            <Text style={styles.summaryText}>סיום: {dayjs(end).format('DD/MM/YYYY HH:mm')}</Text>
           </View>
 
-          <View style={styles.summary}>
+          <View style={styles.summaryDivider} />
+
+          <View style={styles.summaryItem}>
+            <Ionicons name="hourglass-outline" size={16} style={{ marginEnd: 6 }} />
             <Text style={styles.summaryText}>סה״כ שעות: {hours}</Text>
+          </View>
+          <View style={styles.summaryItem}>
+            <Ionicons name="cash-outline" size={16} style={{ marginEnd: 6 }} />
             <Text style={styles.summaryText}>סה״כ לתשלום: ₪{total}</Text>
           </View>
+        </View>
 
-          <TouchableOpacity
-            style={[styles.button, (invalid || !plate.trim()) && { opacity: 0.6 }]}
-            disabled={invalid || !plate.trim()}
-            onPress={confirm}
-          >
-            <Text style={styles.buttonText}>{editingId ? 'שמור שינויים' : 'שלח הזמנה'}</Text>
-          </TouchableOpacity>
+        {/* תשלום — הועבר לתחתית העמוד (לפני הכפתור) */}
+        <View style={styles.card}>
+          <Text style={styles.section}>תשלום</Text>
+          <Text style={styles.line}>אמצעי תשלום: {paymentLabel(paymentMethod)}</Text>
+          <Text style={styles.hint}>אפשר לערוך את ברירת המחדל במסך ״הפרופיל שלי״.</Text>
+        </View>
 
-          <TouchableOpacity style={styles.buttonGhost} onPress={() => navigation.goBack()}>
-            <Text style={styles.buttonGhostText}>חזרה</Text>
-          </TouchableOpacity>
+        {/* פעולות */}
+        <ZpButton
+          title={editingId ? 'שמור שינויים' : 'שלח הזמנה'}
+          onPress={confirm}
+          disabled={invalid || !plate.trim()}
+          style={{ opacity: (invalid || !plate.trim()) ? 0.6 : 1 }}
+          textStyle={{ textAlign: 'left' }}
+        />
 
-          <View style={{ height: 20 }} />
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </>
+        <View style={{ height: theme.spacing.lg }} />
+      </ScrollView>
+
+      {/* פאנל גלגלים */}
+      <WheelsDateTimePanel
+        visible={panelVisible}
+        initial={panelMode === 'start' ? start : end}
+        minimumDate={panelMode === 'start' ? new Date() : new Date(start.getTime() + MIN_MS)}
+        onClose={() => setPanelVisible(false)}
+        onConfirm={handlePanelConfirm}
+        title={panelMode === 'start' ? 'בחרו התחלה' : 'בחרו סיום'}
+      />
+    </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  container:{ padding:20, backgroundColor:'#f6f9fc' },
-  center:{ flex:1, justifyContent:'center', alignItems:'center', backgroundColor:'#fff' },
-  header:{ fontSize:22, fontWeight:'800', marginBottom:12, textAlign:'center' },
-  card:{ backgroundColor:'#fff', borderRadius:14, padding:14, marginBottom:12, shadowColor:'#000', shadowOpacity:0.06, shadowRadius:8, shadowOffset:{ width:0, height:3 }, elevation:2 },
-  title:{ fontSize:18, fontWeight:'700', marginBottom:6 },
-  line:{ fontSize:15, marginVertical:2 },
-  hint:{ fontSize:12, color:'#6c7a89' },
-  section:{ fontSize:16, fontWeight:'700', marginBottom:10 },
-  row:{ flexDirection:'row', gap:12 }, col:{ flex:1 },
-  label:{ fontSize:13, color:'#555', marginTop:6, marginBottom:6 },
-  pickerBtn:{ paddingVertical:12, paddingHorizontal:14, borderRadius:10, borderWidth:1, borderColor:'#e3e9f0', backgroundColor:'#fafbff' },
-  pickerText:{ fontSize:15 },
-  input:{ height:48, borderRadius:10, borderWidth:1, borderColor:'#e3e9f0', backgroundColor:'#fff', paddingHorizontal:12, marginBottom:10, fontSize:15 },
-  summary:{ backgroundColor:'#eef8ff', borderColor:'#d6ecff', borderWidth:1, borderRadius:12, padding:12, marginTop:4, marginBottom:12 },
-  summaryText:{ fontSize:16, fontWeight:'600' },
-  button:{ backgroundColor:'#00C6FF', paddingVertical:14, borderRadius:12, alignItems:'center' },
-  buttonText:{ color:'#fff', fontSize:16, fontWeight:'800' },
-  buttonGhost:{ marginTop:10, paddingVertical:12, borderRadius:12, alignItems:'center', borderWidth:1, borderColor:'#00C6FF', backgroundColor:'#fff' },
-  buttonGhostText:{ color:'#00C6FF', fontSize:15, fontWeight:'700' },
-  quickBtn:{ paddingVertical:10, paddingHorizontal:12, backgroundColor:'#eaf7ff', borderRadius:10, borderWidth:1, borderColor:'#cfefff' },
-  quickBtnText:{ color:'#007acc', fontWeight:'700' },
-  activeBadge:{ marginTop:6, alignSelf:'flex-start', backgroundColor:'#e8fff2', borderColor:'#b9f5cf', borderWidth:1, borderRadius:8, paddingHorizontal:10, paddingVertical:6 },
-  activeText:{ color:'#0a7a3e', fontWeight:'700' },
-  heroImg:{ width:200, height:120, borderRadius:10, marginRight:8 },
-});
+function makeStyles(theme) {
+  const { colors, spacing, borderRadii } = theme;
+  const textBase = { textAlign: 'left', writingDirection: 'rtl', color: colors.text };
+  return StyleSheet.create({
+    container:{ padding: spacing.lg, backgroundColor: colors.bg, direction:'rtl' },
+    center:{ flex:1, justifyContent:'center', alignItems:'center', backgroundColor: colors.bg, direction:'rtl' },
+    centerText:{ ...textBase, marginBottom: spacing.md },
+
+    // (הכותרת הראשית הוסרה מה־UI; נשארת למקרה עתידי)
+    header:{ color: colors.text, fontSize:22, fontWeight:'800', marginBottom: spacing.md, textAlign:'center', writingDirection:'rtl' },
+
+    // Card בסיסי
+    card:{
+      backgroundColor: colors.surface,
+      borderRadius: borderRadii.md,
+      padding: spacing.lg,
+      marginBottom: spacing.md,
+      shadowColor:'#000', shadowOpacity:0.06, shadowRadius:12, shadowOffset:{ width:0, height:6 }, elevation:2,
+      borderWidth:1, borderColor: colors.border,
+      direction:'rtl'
+    },
+
+    // טקסטים שמאלה
+    section:{ ...textBase, fontSize:16, fontWeight:'800', marginBottom: 6 },
+    title:{ ...textBase, textAlign:'center', fontSize:18, fontWeight:'800', marginBottom:6 },
+    line:{ ...textBase, fontSize:15, marginVertical:2 },
+    hint:{ textAlign:'left', writingDirection:'rtl', color: colors.subtext, fontSize:12 },
+
+    // Inputs
+    label:{ textAlign:'left', writingDirection:'rtl', fontSize:13, color: colors.subtext, marginTop:6, marginBottom:6 },
+    labelStrong:{ ...textBase, fontSize:14, fontWeight:'800' },
+    input:{
+      height:48, borderRadius: borderRadii.sm,
+      borderWidth:1, borderColor: colors.border,
+      backgroundColor: colors.surface,
+      paddingHorizontal:12, fontSize:15, marginBottom:8,
+      color: colors.text, textAlign:'left', writingDirection:'rtl'
+    },
+
+    // אזור בחירת זמן — שמאלה
+    rowHeader:{ flexDirection:'row', alignItems:'center', marginBottom: 4 },
+    fieldsRow:{ flexDirection:'row', gap: 8, marginTop: 6 },
+    fieldButton:{
+      flex:1,
+      height:48,
+      borderRadius: borderRadii.sm,
+      borderWidth:1,
+      borderColor: colors.border,
+      backgroundColor:'#F7F9FF',
+      alignItems:'flex-start',
+      justifyContent:'center',
+      paddingHorizontal:12
+    },
+    fieldButtonText:{ ...textBase, fontSize:16, fontWeight:'800' },
+    fieldIcon:{ position:'absolute', right:12, color: colors.subtext },
+
+    // Summary — מעוצב מעט יותר מזמין
+    summary:{
+      backgroundColor:'#F7F9FF',
+      borderColor: colors.border,
+      borderWidth:1,
+      borderRadius: borderRadii.md,
+      padding: spacing.lg,
+      marginTop: 4,
+      marginBottom: spacing.md,
+      shadowColor:'#000', shadowOpacity:0.04, shadowRadius:10, shadowOffset:{ width:0, height:4 }, elevation:1,
+    },
+    summaryDivider:{
+      height:1, backgroundColor:'#E6ECF5', marginVertical:8, alignSelf:'stretch'
+    },
+    summaryItem:{ flexDirection:'row', alignItems:'center', marginBottom: 6 },
+    summaryText:{ ...textBase, fontSize:16, fontWeight:'700' },
+
+    // Active badge
+    activeBadge:{
+      marginTop:6, alignSelf:'flex-start',
+      backgroundColor:'#e8fff2', borderColor:'#b9f5cf', borderWidth:1,
+      borderRadius: 999, paddingHorizontal:10, paddingVertical:6, flexDirection:'row-reverse', alignItems:'center'
+    },
+    activeText:{ color: colors.success, fontWeight:'800', textAlign:'right', writingDirection:'rtl' },
+
+    // Images
+    heroImg:{ width: 200, height: 120, borderRadius: borderRadii.sm, marginStart:8, backgroundColor: colors.bg },
+
+    // ===== Styles לפאנל =====
+    modalBackdrop:{ flex:1, backgroundColor:'rgba(0,0,0,0.45)', justifyContent:'flex-end' },
+    modalSheet:{
+      backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20,
+      overflow:'hidden', borderColor: colors.border, borderTopWidth: 1,
+      shadowColor:'#000', shadowOpacity:0.12, shadowRadius:16, shadowOffset:{ width:0, height:-6 }, elevation:10
+    },
+    modalHeaderGrad:{ paddingTop: 10, paddingBottom: 14, paddingHorizontal: spacing.lg },
+    dragHandle:{ alignSelf:'center', width: 42, height: 5, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.75)', marginBottom: 8 },
+    modalTitle:{ textAlign:'right', color:'#fff', fontSize:16, fontWeight:'800' },
+    modalSubtitle:{ textAlign:'right', color:'rgba(255,255,255,0.9)', fontSize:12, marginTop: 4 },
+
+    dayRow:{
+      flexDirection:'row-reverse', alignItems:'center', justifyContent:'space-between',
+      paddingHorizontal: spacing.lg, paddingVertical: spacing.md,
+      backgroundColor:'#F6F8FF', borderTopWidth:1, borderBottomWidth:1, borderColor:'#E2E8F0'
+    },
+    arrowBtn:{
+      width:44, height:44, borderRadius:12, alignItems:'center', justifyContent:'center',
+      backgroundColor:'#FFFFFF', borderWidth:1, borderColor:'#E2E8F0'
+    },
+
+    hmWrapWheels:{
+      flexDirection:'row-reverse', justifyContent:'space-between',
+      paddingHorizontal: spacing.lg, paddingVertical: spacing.lg, backgroundColor:'#FFFFFF'
+    },
+    hmColWheel:{ flex:1, alignItems:'center' },
+    hmLabel:{ color: colors.subtext, fontSize:13, fontWeight:'700', marginBottom: 6 },
+
+    modalFooter:{
+      paddingHorizontal: spacing.lg, paddingBottom: spacing.lg, paddingTop: spacing.sm,
+      flexDirection: 'row-reverse', backgroundColor:'#FFFFFF'
+    },
+    modalBtn:{ flex:1, height:48, borderRadius: 12, alignItems:'center', justifyContent:'center', borderWidth:1 },
+    modalBtnGhost:{ backgroundColor: '#FFFFFF', borderColor: '#E2E8F0' },
+    modalBtnGhostText:{ color: colors.text, fontWeight:'800' },
+    modalBtnPrimary:{ backgroundColor: colors.primary, borderColor: colors.primary },
+    modalBtnPrimaryText:{ color:'#fff', fontWeight:'800' },
+  });
+}
