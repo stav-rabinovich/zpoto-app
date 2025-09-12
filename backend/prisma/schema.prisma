@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  password  String
+  createdAt DateTime  @default(now())
+
+  parkings  Parking[]
+  bookings  Booking[]
+}
+
+model Parking {
+  id         Int       @id @default(autoincrement())
+  title      String
+  address    String
+  lat        Float
+  lng        Float
+  priceHr    Float
+  isActive   Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+
+  ownerId    Int
+  owner      User      @relation(fields: [ownerId], references: [id])
+
+  bookings   Booking[]
+}
+
+model Booking {
+  id         Int       @id @default(autoincrement())
+  startTime  DateTime
+  endTime    DateTime
+  status     String    @default("PENDING")
+  createdAt  DateTime  @default(now())
+
+  // קשרים
+  userId     Int
+  user       User      @relation(fields: [userId], references: [id])
+
+  parkingId  Int
+  parking    Parking   @relation(fields: [parkingId], references: [id])
+
+  // 📌 קיבוע מחיר בזמן ההזמנה (Nullable בשביל מיגרציה חלקה)
+  priceHrCentsAtBooking Int?
+  totalPriceCents       Int?
+
+  @@index([userId])
+  @@index([parkingId, startTime, endTime])
+}
