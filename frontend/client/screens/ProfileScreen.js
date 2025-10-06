@@ -9,6 +9,9 @@ import { useTheme } from '@shopify/restyle';
 import * as Location from 'expo-location';
 import ZpButton from '../components/ui/ZpButton';
 import { osmAutocomplete } from '../utils/osm';
+import { useAuth } from '../contexts/AuthContext';
+import { getUserProfile, updateUserProfile, getUserStats, validatePhoneNumber, validateName, getDefaultAvatar } from '../services/api/profile';
+import { getUserVehicles, createVehicle, updateVehicle, deleteVehicle, setDefaultVehicle, formatLicensePlate, validateLicensePlate } from '../services/api/vehicles';
 
 const PROFILE_KEY = 'profile';
 const VEHICLES_KEY = 'vehicles';
@@ -37,13 +40,17 @@ const normLabel = (s='') => s.trim().toLowerCase();
 export default function ProfileScreen() {
   const theme = useTheme();
   const styles = makeStyles(theme);
+  const { user, isAuthenticated } = useAuth();
 
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   // פרופיל בסיסי
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [payment, setPayment] = useState('card');
+  const [stats, setStats] = useState(null);
 
   // רכבים
   const [vehicles, setVehicles] = useState([]);
@@ -60,65 +67,221 @@ export default function ProfileScreen() {
   const suggestTimer = useRef(null);
 
   const load = useCallback(async () => {
+    if (!isAuthenticated) {
+      setLoading(false);
+      return;
+    }
+
     try {
-      const [rawProfile, rawVehicles, rawPlaces] = await Promise.all([
-        AsyncStorage.getItem(PROFILE_KEY),
-        AsyncStorage.getItem(VEHICLES_KEY),
-        AsyncStorage.getItem(SAVED_PLACES_KEY),
+      // טעינה מהשרת
+      const [profileResult, vehiclesResult, statsResult, rawPlaces] = await Promise.all([
+        getUserProfile(),
+        getUserVehicles(),
+        getUserStats(),
+        AsyncStorage.getItem(SAVED_PLACES_KEY), // מקומות שמורים עדיין מקומיים
       ]);
-      if (rawProfile) {
-        const p = JSON.parse(rawProfile);
-        setName(p.name || '');
-        setEmail(p.email || '');
-        setPayment(p.payment || 'card');
+
+      // עדכון פרופיל
+      if (profileResult.success && profileResult.data) {
+        const profile = profileResult.data;
+        setName(profile.name || '');
+        setEmail(profile.email || '');
+        setPhone(profile.phone || '');
+      } else if (user) {
+        // fallback לנתוני המשתמש מה-context
+        setEmail(user.email || '');
+        setName(user.name || '');
       }
-      setVehicles(rawVehicles ? JSON.parse(rawVehicles) : []);
+
+      // עדכון רכבים
+      if (vehiclesResult.success) {
+        setVehicles(vehiclesResult.data);
+      } else {
+        console.error('Failed to load vehicles:', vehiclesResult.error);
+        setVehicles([]);
+      }
+
+      // עדכון סטטיסטיקות
+      if (statsResult.success) {
+        setStats(statsResult.data);
+      }
+
+      // מקומות שמורים (עדיין מקומיים)
       setSavedPlaces(rawPlaces ? JSON.parse(rawPlaces) : []);
+    } catch (error) {
+      console.error('Failed to load profile data:', error);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAuthenticated, user]);
 
   useEffect(() => { load(); }, [load]);
 
   const saveProfile = useCallback(async () => {
+    if (!isAuthenticated) {
+      Alert.alert('שגיאה', 'יש להתחבר כדי לשמור את הפרופיל.');
+      return;
+    }
+
+    // ולידציות
     if (!emailValid(email)) {
       Alert.alert('שגיאה', 'כתובת אימייל לא תקינה.');
       return;
     }
-    const profile = { name: name.trim(), email: email.trim(), payment };
-    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
-    Alert.alert('נשמר', 'הפרופיל עודכן בהצלחה.');
-  }, [name, email, payment]);
+
+    const nameValidation = validateName(name.trim());
+    if (!nameValidation.isValid) {
+      Alert.alert('שגיאה', nameValidation.error);
+      return;
+    }
+
+    if (phone && !validatePhoneNumber(phone)) {
+      Alert.alert('שגיאה', 'מספר טלפון לא תקין.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const result = await updateUserProfile({
+        name: name.trim() || null,
+        phone: phone.trim() || null,
+      });
+
+      if (result.success) {
+        // שמירה מקומית גם (לתשלום)
+        const localProfile = { name: name.trim(), email: email.trim(), payment };
+        await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(localProfile));
+        
+        Alert.alert('נשמר', 'הפרופיל עודכן בהצלחה.');
+      } else {
+        Alert.alert('שגיאה', result.error || 'לא ניתן לשמור את הפרופיל.');
+      }
+    } catch (error) {
+      console.error('Save profile error:', error);
+      Alert.alert('שגיאה', 'אירעה שגיאה בשמירת הפרופיל.');
+    } finally {
+      setSaving(false);
+    }
+  }, [name, email, phone, payment, isAuthenticated]);
 
   const addVehicle = useCallback(async () => {
+    if (!isAuthenticated) {
+      Alert.alert('שגיאה', 'יש להתחבר כדי להוסיף רכב.');
+      return;
+    }
+
     const plate = newPlate.trim();
     const desc = newDesc.trim();
-    if (!plate) { Alert.alert('שגיאה', 'נא להזין מספר רכב.'); return; }
-    const norm = normalizePlate(plate);
-    const exists = vehicles.some(v => normalizePlate(v.plate) === norm);
-    if (exists) { Alert.alert('שגיאה', 'מספר רכב כבר קיים.'); return; }
-    const v = { id: `v-${Date.now()}`, plate, desc, isDefault: vehicles.length === 0 };
-    const next = [v, ...vehicles];
-    setVehicles(next);
-    await AsyncStorage.setItem(VEHICLES_KEY, JSON.stringify(next));
-    setNewPlate(''); setNewDesc('');
-  }, [newPlate, newDesc, vehicles]);
-
-  const removeVehicle = useCallback(async (id) => {
-    let next = vehicles.filter(v => v.id !== id);
-    if (!next.find(v => v.isDefault) && next.length > 0) {
-      next = next.map((v, i) => i === 0 ? { ...v, isDefault: true } : { ...v, isDefault: false });
+    
+    if (!plate) { 
+      Alert.alert('שגיאה', 'נא להזין מספר רכב.'); 
+      return; 
     }
-    setVehicles(next);
-    await AsyncStorage.setItem(VEHICLES_KEY, JSON.stringify(next));
-  }, [vehicles]);
 
-  const setDefaultVehicle = useCallback(async (id) => {
-    const next = vehicles.map(v => ({ ...v, isDefault: v.id === id }));
-    setVehicles(next);
-    await AsyncStorage.setItem(VEHICLES_KEY, JSON.stringify(next));
-  }, [vehicles]);
+    if (!validateLicensePlate(plate)) {
+      Alert.alert('שגיאה', 'מספר רכב לא תקין.');
+      return;
+    }
+
+    // בדיקה אם הרכב כבר קיים
+    const formattedPlate = formatLicensePlate(plate);
+    const exists = vehicles.some(v => 
+      formatLicensePlate(v.licensePlate) === formattedPlate
+    );
+    
+    if (exists) { 
+      Alert.alert('שגיאה', 'מספר רכב כבר קיים.'); 
+      return; 
+    }
+
+    setSaving(true);
+    try {
+      const result = await createVehicle({
+        licensePlate: formattedPlate,
+        description: desc || null,
+        isDefault: vehicles.length === 0
+      });
+
+      if (result.success) {
+        setVehicles(prev => [result.data, ...prev]);
+        setNewPlate(''); 
+        setNewDesc('');
+        Alert.alert('נוסף', 'הרכב נוסף בהצלחה.');
+      } else {
+        Alert.alert('שגיאה', result.error || 'לא ניתן להוסיף את הרכב.');
+      }
+    } catch (error) {
+      console.error('Add vehicle error:', error);
+      Alert.alert('שגיאה', 'אירעה שגיאה בהוספת הרכב.');
+    } finally {
+      setSaving(false);
+    }
+  }, [newPlate, newDesc, vehicles, isAuthenticated]);
+
+  const removeVehicle = useCallback(async (vehicleId) => {
+    if (!isAuthenticated) {
+      Alert.alert('שגיאה', 'יש להתחבר כדי למחוק רכב.');
+      return;
+    }
+
+    Alert.alert(
+      'מחיקת רכב',
+      'האם אתה בטוח שברצונך למחוק את הרכב?',
+      [
+        { text: 'ביטול', style: 'cancel' },
+        {
+          text: 'מחק',
+          style: 'destructive',
+          onPress: async () => {
+            setSaving(true);
+            try {
+              const result = await deleteVehicle(vehicleId);
+              
+              if (result.success) {
+                setVehicles(prev => prev.filter(v => v.id !== vehicleId));
+                Alert.alert('נמחק', 'הרכב נמחק בהצלחה.');
+              } else {
+                Alert.alert('שגיאה', result.error || 'לא ניתן למחוק את הרכב.');
+              }
+            } catch (error) {
+              console.error('Remove vehicle error:', error);
+              Alert.alert('שגיאה', 'אירעה שגיאה במחיקת הרכב.');
+            } finally {
+              setSaving(false);
+            }
+          }
+        }
+      ]
+    );
+  }, [isAuthenticated]);
+
+  const setDefaultVehicleHandler = useCallback(async (vehicleId) => {
+    if (!isAuthenticated) {
+      Alert.alert('שגיאה', 'יש להתחבר כדי לשנות רכב ברירת מחדל.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const result = await setDefaultVehicle(vehicleId);
+      
+      if (result.success) {
+        // עדכון מקומי
+        setVehicles(prev => prev.map(v => ({ 
+          ...v, 
+          isDefault: v.id === vehicleId 
+        })));
+        Alert.alert('עודכן', 'רכב ברירת המחדל שונה בהצלחה.');
+      } else {
+        Alert.alert('שגיאה', result.error || 'לא ניתן לשנות רכב ברירת מחדל.');
+      }
+    } catch (error) {
+      console.error('Set default vehicle error:', error);
+      Alert.alert('שגיאה', 'אירעה שגיאה בשינוי רכב ברירת המחדל.');
+    } finally {
+      setSaving(false);
+    }
+  }, [isAuthenticated]);
 
   const defaultVehicle = useMemo(() => vehicles.find(v => v.isDefault) || null, [vehicles]);
 
@@ -238,13 +401,24 @@ export default function ProfileScreen() {
 
         <Text style={styles.label}>אימייל (לחשבוניות)</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { backgroundColor: theme.colors.border, color: theme.colors.subtext }]}
           placeholder="you@example.com"
           placeholderTextColor={theme.colors.subtext}
           value={email}
           onChangeText={setEmail}
           keyboardType="email-address"
           autoCapitalize="none"
+          editable={false}
+        />
+
+        <Text style={styles.label}>מספר טלפון</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="לדוגמה: 050-123-4567"
+          placeholderTextColor={theme.colors.subtext}
+          value={phone}
+          onChangeText={setPhone}
+          keyboardType="phone-pad"
         />
 
         <Text style={[styles.label, { marginTop: theme.spacing.xs }]}>אמצעי תשלום ברירת מחדל</Text>
@@ -267,7 +441,12 @@ export default function ProfileScreen() {
           })}
         </View>
 
-        <ZpButton title="שמור פרופיל" onPress={saveProfile} style={{ marginTop: theme.spacing.lg }} />
+        <ZpButton 
+          title={saving ? "שומר..." : "שמור פרופיל"} 
+          onPress={saveProfile} 
+          disabled={saving}
+          style={{ marginTop: theme.spacing.lg }} 
+        />
       </View>
 
       {/* מקומות שמורים */}
@@ -410,14 +589,14 @@ export default function ProfileScreen() {
 
               {/* תוכן */}
               <View style={{ flex:1 }}>
-                <Text style={styles.vehicleTitle}>{v.plate}</Text>
-                {!!v.desc && <Text style={styles.vehicleDesc}>{v.desc}</Text>}
+                <Text style={styles.vehicleTitle}>{v.licensePlate || v.plate}</Text>
+                {!!(v.description || v.desc) && <Text style={styles.vehicleDesc}>{v.description || v.desc}</Text>}
                 {v.isDefault && <Text style={styles.defaultBadge}>ברירת מחדל</Text>}
               </View>
 
               {/* קבע כברירת מחדל — גרסה עדינה ונעימה */}
               {!v.isDefault && (
-                <TouchableOpacity style={styles.setDefaultBtn} onPress={() => setDefaultVehicle(v.id)} activeOpacity={0.9}>
+                <TouchableOpacity style={styles.setDefaultBtn} onPress={() => setDefaultVehicleHandler(v.id)} activeOpacity={0.9}>
                   <Text style={styles.setDefaultBtnText}>קבעו כברירת מחדל</Text>
                 </TouchableOpacity>
               )}
@@ -445,8 +624,9 @@ export default function ProfileScreen() {
             onChangeText={setNewDesc}
           />
           <ZpButton
-            title="הוסיפו רכב"
+            title={saving ? "מוסיף..." : "הוסיפו רכב"}
             onPress={addVehicle}
+            disabled={saving}
             leftIcon={<Ionicons name="add" size={18} color="#fff" style={{ marginEnd: 8 }} />}
           />
         </View>
@@ -457,8 +637,33 @@ export default function ProfileScreen() {
         <View style={styles.defaultSummaryCard}>
           <Ionicons name="car-sport" size={20} color={theme.colors.primary} style={{ marginRight:8 }} />
           <Text style={styles.defaultSummaryText}>
-            רכב ברירת מחדל: {defaultVehicle.plate}{defaultVehicle.desc ? ` – ${defaultVehicle.desc}` : ''}
+            רכב ברירת מחדל: {defaultVehicle.licensePlate || defaultVehicle.plate}{(defaultVehicle.description || defaultVehicle.desc) ? ` – ${defaultVehicle.description || defaultVehicle.desc}` : ''}
           </Text>
+        </View>
+      )}
+
+      {/* סטטיסטיקות משתמש */}
+      {!!stats && (
+        <View style={styles.card}>
+          <View style={styles.headerRow}>
+            <Ionicons name="stats-chart-outline" size={16} color="#fff" style={styles.cardIconWrap} />
+            <Text style={styles.section}>הסטטיסטיקות שלי</Text>
+          </View>
+          
+          <View style={styles.statsGrid}>
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>{stats.bookings?.total || 0}</Text>
+              <Text style={styles.statLabel}>הזמנות</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>{stats.vehicles?.total || 0}</Text>
+              <Text style={styles.statLabel}>רכבים</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statNumber}>₪{stats.spending?.total?.toFixed(0) || 0}</Text>
+              <Text style={styles.statLabel}>הוצאות</Text>
+            </View>
+          </View>
         </View>
       )}
 
@@ -668,6 +873,29 @@ function makeStyles(theme) {
       fontSize:16,
       textAlign:'left',
       writingDirection:'ltr'
+    },
+
+    // סטטיסטיקות
+    statsGrid: {
+      flexDirection: 'row',
+      justifyContent: 'space-around',
+      marginTop: spacing.md,
+    },
+    statItem: {
+      alignItems: 'center',
+      flex: 1,
+    },
+    statNumber: {
+      fontSize: 24,
+      fontWeight: '800',
+      color: colors.primary,
+      textAlign: 'center',
+    },
+    statLabel: {
+      fontSize: 12,
+      color: colors.subtext,
+      textAlign: 'center',
+      marginTop: spacing.xs,
     },
   });
 }

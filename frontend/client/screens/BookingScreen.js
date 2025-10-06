@@ -29,6 +29,10 @@ import { scheduleBookingNotifications, cancelBookingNotifications } from '../uti
 import { useTheme } from '@shopify/restyle';
 import ZpButton from '../components/ui/ZpButton';
 import { LinearGradient } from 'expo-linear-gradient';
+import api from '../utils/api';
+import { useAuth } from '../contexts/AuthContext';
+import { createBooking } from '../services/api/bookings';
+import NetworkStatus from '../components/NetworkStatus';
 
 dayjs.locale('he');
 
@@ -302,6 +306,7 @@ function WheelsDateTimePanel({ visible, initial, onClose, onConfirm, minimumDate
 export default function BookingScreen({ route, navigation }) {
   const theme = useTheme();
   const styles = makeStyles(theme);
+  const { token } = useAuth();
 
   const params = route?.params || {};
   const spot = params.spot || params.parkingSpot || null; // תמיכה בשני שמות פרופס
@@ -376,16 +381,125 @@ export default function BookingScreen({ route, navigation }) {
   const timeLeft = isActive ? end - now : 0;
 
   const upsertBooking = async (booking) => {
-    const raw = await AsyncStorage.getItem(BOOKINGS_KEY);
-    const list = raw ? JSON.parse(raw) : [];
-    if (booking.id) {
-      const idx = list.findIndex(b => b.id === booking.id);
-      if (idx !== -1) list[idx] = booking;
-      else list.unshift(booking);
-    } else {
-      list.unshift(booking);
+    let serverSuccess = false;
+    
+    try {
+      // בדיקה אם המשתמש מחובר
+      if (!isAuthenticated) {
+        throw new Error('המשתמש לא מחובר - נדרשת התחברות');
+      }
+      
+      if (!token) {
+        throw new Error('לא נמצא טוקן אימות - נדרשת התחברות מחדש');
+      }
+      
+      // שליחה לשרת באמצעות השירות החדש
+      if (booking.spot?.parkingId || booking.spot?.id) {
+        // חיפוש ה-parking ID האמיתי
+        let parkingId;
+        
+        if (booking.spot.parkingId) {
+          parkingId = parseInt(booking.spot.parkingId);
+        } else if (booking.spot.id && booking.spot.id.startsWith('parking-')) {
+          // אם ה-ID הוא 'parking-15', נחלץ את 15
+          const numericId = booking.spot.id.replace('parking-', '');
+          parkingId = parseInt(numericId);
+        } else {
+          parkingId = parseInt(booking.spot.id);
+        }
+        
+        if (isNaN(parkingId)) {
+          throw new Error(`מזהה חניה לא תקין: ${booking.spot.id}`);
+        }
+        
+        const serverBooking = {
+          parkingId: parkingId,
+          startTime: booking.start,
+          endTime: booking.end,
+          status: booking.status === 'confirmed' ? 'CONFIRMED' : 'PENDING'
+        };
+        
+        console.log('🚀 Creating booking on server:', serverBooking);
+        console.log('🔍 Token available:', !!token);
+        console.log('🔍 Token value:', token ? `${token.substring(0, 20)}...` : 'null');
+        console.log('🔍 User authenticated:', !!isAuthenticated);
+        
+        const result = await createBooking(serverBooking);
+        console.log('📨 Server response:', result);
+        
+        if (result.success) {
+          console.log('✅ Server booking created successfully:', result.data);
+          booking.serverId = result.data.id;
+          serverSuccess = true;
+          
+          // הודעת הצלחה
+          Alert.alert(
+            'הזמנה נשלחה בהצלחה! ✅',
+            'ההזמנה נשמרה בשרת ותוצג בכל המכשירים שלך.'
+          );
+        } else {
+          throw new Error(result.error);
+        }
+      } else {
+        throw new Error('לא נמצא מזהה חניה תקין');
+      }
+    } catch (error) {
+      console.error('❌ Failed to send booking to server:', error);
+      
+      // הודעה מותאמת אישית לסוגי שגיאות שונים
+      if (error.message.includes('מחובר') || error.message.includes('טוקן')) {
+        Alert.alert(
+          'נדרשת התחברות 🔐', 
+          `${error.message}\n\nההזמנה נשמרה מקומית. להתחבר ולסנכרן?`,
+          [
+            { text: 'לא עכשיו', style: 'cancel' },
+            { 
+              text: 'התחבר', 
+              onPress: () => navigation.navigate('Login')
+            }
+          ]
+        );
+      } else if (error.message.includes('חיבור') || error.message.includes('Network') || error.message.includes('timeout')) {
+        Alert.alert(
+          'בעיית חיבור 🌐', 
+          `לא ניתן להתחבר לשרת כרגע.\n\nההזמנה נשמרה מקומית ותסונכרן אוטומטי כשהחיבור יחזור.`,
+          [
+            { text: 'הבנתי', style: 'default' }
+          ]
+        );
+      } else {
+        Alert.alert(
+          'שגיאה בשליחה לשרת', 
+          `${error.message}\n\nההזמנה נשמרה מקומית ותישלח כשהבעיה תיפתר.`
+        );
+      }
     }
-    await AsyncStorage.setItem(BOOKINGS_KEY, JSON.stringify(list));
+    
+    // שמירה מקומית (תמיד - כגיבוי או כפתרון זמני)
+    try {
+      const raw = await AsyncStorage.getItem(BOOKINGS_KEY);
+      const list = raw ? JSON.parse(raw) : [];
+      
+      // סמן אם ההזמנה נשלחה לשרת בהצלחה
+      booking.syncedToServer = serverSuccess;
+      booking.lastSyncAttempt = new Date().toISOString();
+      
+      if (booking.id) {
+        const idx = list.findIndex(b => b.id === booking.id);
+        if (idx !== -1) list[idx] = booking;
+        else list.unshift(booking);
+      } else {
+        list.unshift(booking);
+      }
+      
+      await AsyncStorage.setItem(BOOKINGS_KEY, JSON.stringify(list));
+      console.log('💾 Booking saved locally');
+    } catch (localError) {
+      console.error('❌ Failed to save booking locally:', localError);
+      Alert.alert('שגיאה קריטית', 'לא ניתן לשמור את ההזמנה גם לא מקומית');
+    }
+    
+    return serverSuccess;
   };
 
   const openPanel = (mode) => {
@@ -418,6 +532,8 @@ export default function BookingScreen({ route, navigation }) {
       Alert.alert('שגיאה', 'הסיום חייב להיות לפחות שעה אחרי ההתחלה.');
       return;
     }
+
+    let serverSyncSuccess = false;
 
     try {
       const raw = await AsyncStorage.getItem(BOOKINGS_KEY);
@@ -486,13 +602,16 @@ export default function BookingScreen({ route, navigation }) {
         } catch {}
       }
 
-      await upsertBooking(booking);
+      serverSyncSuccess = await upsertBooking(booking);
 
       Keyboard.dismiss();
       await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
+      const syncStatus = serverSyncSuccess ? '✅ נשמרה בשרת' : '📱 נשמרה מקומית';
+      const statusText = editingId ? 'הזמנה עודכנה' : (booking.status === 'pending' ? 'הזמנה נשלחה לאישור' : 'הזמנה בוצעה');
+      
       Alert.alert(
-        editingId ? 'הזמנה עודכנה' : (booking.status === 'pending' ? 'הזמנה נשלחה לאישור' : 'הזמנה בוצעה (דמו)'),
+        `${statusText} ${syncStatus}`,
         `חניה: ${booking.spot.title}
 כתובת: ${booking.spot.address || '—'}
 מס׳ רכב: ${booking.plate}
@@ -501,7 +620,7 @@ export default function BookingScreen({ route, navigation }) {
 מתאריך: ${dayjs(start).format('DD/MM/YYYY HH:mm')}
 עד: ${dayjs(end).format('DD/MM/YYYY HH:mm')}
 משך: ${hours} שעות
-סה״כ: ₪${total}`,
+סה״כ: ₪${total}${!serverSyncSuccess ? '\n\n💡 ההזמנה תסונכרן לשרת כשתתחבר' : ''}`,
         [{ text: 'סגור', onPress: () => navigation.navigate('Bookings') }]
       );
     } catch (e) {}
@@ -524,6 +643,9 @@ export default function BookingScreen({ route, navigation }) {
         keyboardShouldPersistTaps="handled"
         style={{ direction: 'rtl' }}
       >
+        {/* מצב חיבור לשרת */}
+        <NetworkStatus showDetails={true} />
+        
         {/* כרטיס מידע על החניה */}
         <View style={styles.card}>
           {images.length > 0 && (

@@ -1,28 +1,46 @@
 // screens/OwnerDashboardScreen.js
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, Image } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, Image, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import ZpButton from '../components/ui/ZpButton';
-
+import api from '../utils/api';
+import { useAuth } from '../contexts/AuthContext';
 export const LISTINGS_KEY = 'owner_listings';
 
 export default function OwnerDashboardScreen({ navigation }) {
   const theme = useTheme();
   const styles = makeStyles(theme);
+  const { isAuthenticated, token } = useAuth();
 
   const [listings, setListings] = useState([]);
+  const [loading, setLoading] = useState(false);
 
   const load = useCallback(async () => {
-    const raw = await AsyncStorage.getItem(LISTINGS_KEY);
-    const ls = raw ? JSON.parse(raw) : [];
-    ls.sort((a, b) => {
-      if (a.active !== b.active) return a.active ? -1 : 1;
-      return new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt);
-    });
-    setListings(ls);
-  }, []);
+    if (!token) {
+      Alert.alert('שגיאה', 'עליך להתחבר כדי לראות את החניות שלך');
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const response = await api.get('/api/owner/parkings', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const ls = response.data || [];
+      ls.sort((a, b) => {
+        if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
+        return new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt);
+      });
+      setListings(ls);
+    } catch (error) {
+      console.error('Load parkings error:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו לטעון את החניות שלך');
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
 
   useEffect(() => {
     const unsub = navigation.addListener('focus', load);
@@ -31,100 +49,182 @@ export default function OwnerDashboardScreen({ navigation }) {
   }, [navigation, load]);
 
   const toggleActive = async (id) => {
-    const raw = await AsyncStorage.getItem(LISTINGS_KEY);
-    const list = raw ? JSON.parse(raw) : [];
-    const i = list.findIndex(x => x.id === id);
-    if (i === -1) return;
-    list[i] = { ...list[i], active: !list[i].active, updatedAt: new Date().toISOString() };
-    await AsyncStorage.setItem(LISTINGS_KEY, JSON.stringify(list));
-    setListings(list);
+    try {
+      const parking = listings.find(x => x.id === id);
+      if (!parking) return;
+      
+      await api.patch(`/api/owner/parkings/${id}`, {
+        isActive: !parking.isActive
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      // עדכון מקומי
+      setListings(prev => prev.map(p => 
+        p.id === id ? { ...p, isActive: !p.isActive } : p
+      ));
+    } catch (error) {
+      console.error('Toggle active error:', error);
+      Alert.alert('שגיאה', 'לא הצלחנו לעדכן את הסטטוס');
+    }
   };
 
   const removeListing = (id) => {
-    Alert.alert('למחוק חניה?', undefined, [
+    Alert.alert('למחוק חניה?', 'פעולה זו לא ניתנת לביטול', [
       { text: 'בטל', style: 'cancel' },
       { text: 'מחק', style: 'destructive', onPress: async () => {
-          const raw = await AsyncStorage.getItem(LISTINGS_KEY);
-          const list = raw ? JSON.parse(raw) : [];
-          const next = list.filter(x => x.id !== id);
-          await AsyncStorage.setItem(LISTINGS_KEY, JSON.stringify(next));
-          setListings(next);
+          try {
+            await api.delete(`/api/owner/parkings/${id}`, {
+              headers: { Authorization: `Bearer ${token}` }
+            });
+            setListings(prev => prev.filter(x => x.id !== id));
+          } catch (error) {
+            console.error('Delete error:', error);
+            Alert.alert('שגיאה', 'לא הצלחנו למחוק את החניה');
+          }
         }
       }
     ]);
   };
 
+  const toggleApprovalMode = async (parkingId) => {
+    try {
+      const currentParking = listings.find(p => p.id === parkingId);
+      const newMode = currentParking.approvalMode === 'AUTO' ? 'MANUAL' : 'AUTO';
+      
+      const response = await api.patch(`/api/owner/parkings/${parkingId}/approval-mode`, {
+        approvalMode: newMode
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      if (response.data) {
+        // עדכון הרשימה
+        setListings(prev => prev.map(p => 
+          p.id === parkingId ? { ...p, approvalMode: newMode } : p
+        ));
+        
+        Alert.alert(
+          'עודכן בהצלחה',
+          `מצב האישור שונה ל${newMode === 'AUTO' ? 'אוטומטי' : 'ידני'}`
+        );
+      }
+    } catch (error) {
+      console.error('Toggle approval mode error:', error);
+      Alert.alert('שגיאה', 'לא ניתן לשנות את מצב האישור');
+    }
+  };
+
   const renderListing = ({ item }) => {
     const thumb = Array.isArray(item.images) && item.images[0]?.uri;
+    const isActive = item.isActive ?? item.active ?? false;
+    const isManualApproval = item.approvalMode === 'MANUAL';
 
     return (
-      <View style={[styles.card, item.active ? styles.cardActive : null]}>
-        {/* כותרת + אקשנים */}
-        <View style={styles.cardHeader}>
-          <Text style={styles.title} numberOfLines={1}>{item.title || 'חניה ללא שם'}</Text>
-
-          <View style={styles.actionsRow}>
-            <TouchableOpacity onPress={() => navigation.navigate('OwnerListingDetail', { id: item.id })} style={styles.iconBtn} activeOpacity={0.85}>
-              <Ionicons name="bar-chart" size={18} color={theme.colors.primary} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => navigation.navigate('OwnerListingForm', { id: item.id })} style={styles.iconBtn} activeOpacity={0.85}>
-              <Ionicons name="create-outline" size={18} color={theme.colors.text} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => toggleActive(item.id)} style={styles.iconBtn} activeOpacity={0.85}>
-              <Ionicons name={item.active ? 'toggle' : 'toggle-outline'} size={22} color={item.active ? theme.colors.success : theme.colors.subtext} />
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => removeListing(item.id)} style={styles.iconBtn} activeOpacity={0.85}>
-              <Ionicons name="trash-outline" size={18} color={theme.colors.error} />
-            </TouchableOpacity>
-          </View>
+      <View style={styles.card}>
+        {/* כותרת */}
+        <Text style={styles.title} numberOfLines={2}>{item.title || 'חניה ללא שם'}</Text>
+        
+        {!!thumb && <Image source={{ uri: thumb }} style={styles.thumb} />}
+        
+        <Text style={styles.line}>📍 {item.address || 'כתובת לא זמינה'}</Text>
+        
+        {/* מצב אישור */}
+        <View style={styles.approvalModeContainer}>
+          <Text style={styles.approvalModeLabel}>מצב אישור:</Text>
+          <TouchableOpacity
+            onPress={() => toggleApprovalMode(item.id)}
+            style={[styles.approvalModeButton, isManualApproval && styles.approvalModeButtonManual]}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.approvalModeText, isManualApproval && styles.approvalModeTextManual]}>
+              {isManualApproval ? '✋ ידני' : '⚡ אוטומטי'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {!!thumb && <Image source={{ uri: thumb }} style={styles.thumb} />}
-
-        {!!item.address && <Text style={styles.line}>כתובת: {item.address}</Text>}
-        <Text style={styles.line}>מחיר לשעה: ₪{item.price || 0}</Text>
-        {(item.latitude && item.longitude) && (
-          <Text style={styles.line}>מיקום: {item.latitude.toFixed(5)}, {item.longitude.toFixed(5)}</Text>
-        )}
-
-        <View style={styles.pillsRow}>
-          <Text style={[styles.statusPill, item.active ? styles.pillOn : styles.pillOff]}>
-            {item.active ? 'פעיל' : 'כבוי'}
-          </Text>
-          {item.approvalMode === 'manual' && (
-            <Text style={[styles.statusPill, styles.pillManual]}>אישור ידני מופעל</Text>
-          )}
+        {/* כפתורי ניהול */}
+        <View style={styles.actionsGrid}>
+          <TouchableOpacity 
+            onPress={() => navigation.navigate('OwnerPricing', { id: item.id })} 
+            style={styles.actionButton} 
+            activeOpacity={0.85}
+          >
+            <Ionicons name="pricetag" size={22} color={theme.colors.warning} />
+            <Text style={[styles.actionButtonText, { color: theme.colors.warning }]}>מחירון</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            onPress={() => navigation.navigate('OwnerAvailability', { id: item.id })} 
+            style={styles.actionButton} 
+            activeOpacity={0.85}
+          >
+            <Ionicons name="calendar" size={22} color={theme.colors.accent} />
+            <Text style={[styles.actionButtonText, { color: theme.colors.accent }]}>שעות</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            onPress={() => navigation.navigate('OwnerListingDetail', { id: item.id })} 
+            style={styles.actionButton} 
+            activeOpacity={0.85}
+          >
+            <Ionicons name="bar-chart" size={22} color={theme.colors.primary} />
+            <Text style={[styles.actionButtonText, { color: theme.colors.primary }]}>דוח</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            onPress={() => toggleActive(item.id)} 
+            style={[styles.actionButton, isActive && styles.actionButtonActive]} 
+            activeOpacity={0.85}
+          >
+            <Ionicons name={isActive ? 'toggle' : 'toggle-outline'} size={26} color={isActive ? theme.colors.success : theme.colors.subtext} />
+            <Text style={[styles.actionButtonText, { color: isActive ? theme.colors.success : theme.colors.subtext }]}>
+              {isActive ? 'פעיל' : 'כבוי'}
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
   };
 
+  if (loading) {
+    return (
+      <View style={styles.wrap}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={theme.colors.primary} />
+          <Text style={{ marginTop: 16, color: theme.colors.subtext }}>טוען חניות...</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.wrap}>
-      <Text style={styles.header}>ניהול החניות</Text>
-
-      {/* אקשנים עליונים */}
-      <View style={styles.topActions}>
+      <FlatList
+        data={listings}
+        keyExtractor={i => String(i.id)}
+        renderItem={renderListing}
+        ListHeaderComponent={
+          <Text style={styles.header}>ניהול החניות</Text>
+        }
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.empty}>אין עדיין חניות מאושרות</Text>
+            <Text style={styles.emptyHint}>הגש בקשה או המתן לאישור</Text>
+          </View>
+        }
+        contentContainerStyle={{ paddingBottom: 100 }}
+      />
+      
+      {/* כפתור הוסף חניה בתחתית */}
+      <View style={styles.floatingButtonContainer}>
         <ZpButton
           title="הוסף חניה"
           onPress={() => navigation.navigate('OwnerListingForm')}
           leftIcon={<Ionicons name="add" size={18} color="#fff" style={{ marginEnd: 6 }} />}
+          style={styles.floatingButton}
         />
-        <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('OwnerOverview')} activeOpacity={0.9}>
-          <Text style={styles.secondaryBtnText}>סקירה כללית</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.secondaryBtn} onPress={() => navigation.navigate('OwnerPending')} activeOpacity={0.9}>
-          <Text style={styles.secondaryBtnText}>בקשות בהמתנה</Text>
-        </TouchableOpacity>
       </View>
-
-      <FlatList
-        data={listings}
-        keyExtractor={i => i.id}
-        renderItem={renderListing}
-        ListEmptyComponent={<Text style={styles.empty}>אין עדיין חניות. לחץ "הוסף חניה".</Text>}
-        contentContainerStyle={{ paddingBottom: theme.spacing.xl }}
-      />
     </View>
   );
 }
@@ -135,7 +235,21 @@ function makeStyles(theme) {
     wrap:{ flex:1, backgroundColor: colors.bg, padding: spacing.lg },
     header:{ fontSize:20, fontWeight:'800', textAlign:'center', marginBottom: spacing.md, color: colors.text },
 
-    topActions:{ flexDirection:'row', gap: spacing.sm, marginBottom: spacing.md, alignItems:'center' },
+    floatingButtonContainer: {
+      position: 'absolute',
+      bottom: spacing.lg,
+      left: spacing.lg,
+      right: spacing.lg,
+      backgroundColor: 'transparent',
+    },
+    floatingButton: {
+      width: '100%',
+      shadowColor: '#000',
+      shadowOpacity: 0.2,
+      shadowRadius: 10,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 8,
+    },
 
     // כרטיס חניה
     card:{
@@ -148,14 +262,91 @@ function makeStyles(theme) {
     },
     cardActive:{ borderColor:'#b9f5cf', backgroundColor:'#f7fffb' },
 
-    cardHeader:{ flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom: spacing.xs },
-    actionsRow:{ flexDirection:'row', alignItems:'center' },
-    iconBtn:{ padding: 6, borderRadius: 8 },
+    actionsGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 10,
+      marginTop: spacing.md,
+    },
+    actionButton: {
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 12,
+      borderRadius: 12,
+      backgroundColor: colors.bg,
+      borderWidth: 2,
+      borderColor: colors.border,
+      flex: 1,
+      minWidth: '22%',
+      gap: 6,
+    },
+    actionButtonActive: {
+      backgroundColor: colors.success + '15',
+      borderColor: colors.success,
+    },
+    actionButtonText: {
+      fontSize: 12,
+      fontWeight: '700',
+      textAlign: 'center',
+    },
 
-    title:{ fontSize:16, fontWeight:'800', marginBottom: 2, color: colors.text },
-    line:{ fontSize:14, color: colors.text, marginVertical:2 },
-
-    pillsRow:{ flexDirection:'row', gap: 8, marginTop: spacing.sm },
+    title:{ fontSize:17, fontWeight:'800', marginBottom: spacing.sm, color: colors.text, textAlign: 'right' },
+    line:{ fontSize:14, color: colors.text, marginVertical:3, textAlign: 'right' },
+    
+    approvalModeContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginVertical: spacing.sm,
+      paddingVertical: spacing.xs,
+      paddingHorizontal: spacing.sm,
+      backgroundColor: colors.bg,
+      borderRadius: borderRadii.sm,
+    },
+    approvalModeLabel: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    approvalModeButton: {
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: borderRadii.sm,
+      backgroundColor: colors.primary,
+      borderWidth: 1,
+      borderColor: colors.primary,
+    },
+    approvalModeButtonManual: {
+      backgroundColor: colors.warning,
+      borderColor: colors.warning,
+    },
+    approvalModeText: {
+      fontSize: 12,
+      fontWeight: '700',
+      color: '#FFFFFF',
+    },
+    approvalModeTextManual: {
+      color: '#FFFFFF',
+    },
+    
+    emptyContainer: {
+      padding: spacing.xl,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    empty: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.text,
+      textAlign: 'center',
+      marginBottom: spacing.xs,
+    },
+    emptyHint: {
+      fontSize: 14,
+      color: colors.subtext,
+      textAlign: 'center',
+    },
 
     statusPill:{
       paddingVertical:4, paddingHorizontal:10,

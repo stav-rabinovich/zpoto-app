@@ -3,6 +3,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TextInput, Alert, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@shopify/restyle';
+import { useAuthContext } from '../contexts/ServerOnlyAuthContext';
+import api from '../utils/api';
 import ZpButton from '../components/ui/ZpButton';
 
 const PROFILE_KEY = 'profile';
@@ -17,6 +19,7 @@ function emailValid(email) {
 export default function OwnerApplyScreen({ navigation }) {
   const theme = useTheme();
   const styles = makeStyles(theme);
+  const { isAuthenticated, user } = useAuthContext();
 
   const [name, setName]   = useState('');
   const [email, setEmail] = useState('');
@@ -37,6 +40,9 @@ export default function OwnerApplyScreen({ navigation }) {
 
   const submit = useCallback(async () => {
     if (submitting) return;
+    
+    // אין צורך בהתחברות - בעלי חניות ממלאים טופס ללא התחברות
+
     if (!name.trim())  { Alert.alert('שגיאה', 'נא להזין שם מלא.'); return; }
     if (!emailValid(email)) { Alert.alert('שגיאה', 'אימייל לא תקין.'); return; }
     if (!phone.trim()) { Alert.alert('שגיאה', 'נא להזין טלפון.'); return; }
@@ -45,6 +51,7 @@ export default function OwnerApplyScreen({ navigation }) {
     try {
       setSubmitting(true);
 
+      // שמירה מקומית (לתצוגה מיידית)
       const profileRaw = await AsyncStorage.getItem(PROFILE_KEY);
       const prev = profileRaw ? JSON.parse(profileRaw) : {};
 
@@ -73,16 +80,28 @@ export default function OwnerApplyScreen({ navigation }) {
         AsyncStorage.setItem(OWNER_APP_KEY, JSON.stringify(application)),
       ]);
 
+      // שליחה לשרת - בקשה פשוטה עם פרטי הבעלים
+      await api.post('/api/owner/listing-requests', {
+        title: `חניה של ${name.trim()}`,
+        address: address.trim(),
+        lat: 32.0853, // ברירת מחדל - תל אביב (ניתן לשנות בעתיד)
+        lng: 34.7818,
+        priceHr: 15, // ברירת מחדל
+        description: `בקשה מ-${name.trim()}`,
+        phone: phone.trim()
+      });
+
       Alert.alert('הבקשה נשלחה', 'נעדכן אותך לאחר האישור.', [
         { text: 'אשר', onPress: () => navigation.replace('OwnerIntro') }
       ]);
     } catch (e) {
-      console.warn('owner apply error', e);
-      Alert.alert('שגיאה', 'לא ניתן לשלוח כעת, נסה שוב.');
+      console.error('owner apply error', e);
+      const errorMsg = e.response?.data?.error || 'לא ניתן לשלוח כעת, נסה שוב.';
+      Alert.alert('שגיאה', errorMsg);
     } finally {
       setSubmitting(false);
     }
-  }, [name, email, phone, address, navigation, submitting]);
+  }, [name, email, phone, address, navigation, submitting, isAuthenticated]);
 
   return (
     <KeyboardAvoidingView style={{ flex:1 }} behavior={Platform.select({ ios:'padding' })}>
@@ -110,12 +129,12 @@ export default function OwnerApplyScreen({ navigation }) {
             autoCapitalize="none"
           />
 
-          <Text style={styles.label}>טלפון</Text>
+          <Text style={styles.label}>טלפון <Text style={{ color: theme.colors.error }}>*</Text></Text>
           <TextInput
             style={styles.input}
             value={phone}
             onChangeText={setPhone}
-            placeholder="050-0000000"
+            placeholder="050-0000000 (חובה)"
             placeholderTextColor={theme.colors.subtext}
             keyboardType="phone-pad"
           />

@@ -44,12 +44,17 @@ enableScreens(true);
 
 const RText = createText();
 
+// Auth
+import { AuthProvider } from './contexts/ServerOnlyAuthContext';
+import LoginScreen from './screens/ServerOnlyLoginScreen';
+import RegisterScreen from './screens/ServerOnlyRegisterScreen';
+
 // מסכים
 import HomeScreen from './screens/HomeScreen';
 import SearchResultsScreen from './screens/SearchResultsScreen';
 import BookingScreen from './screens/BookingScreen';
 import BookingsScreen from './screens/BookingsScreen';
-import BookingDetailScreen from './screens/BookingDetailScreen';
+import BookingDetailScreen from './screens/BookingDetailScreenNew';
 import FavoritesScreen from './screens/FavoritesScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import AdvancedSearchScreen from './screens/AdvancedSearchScreen';
@@ -60,6 +65,9 @@ import OwnerListingFormScreen from './screens/OwnerListingFormScreen';
 import OwnerOverviewScreen from './screens/OwnerOverviewScreen';
 import OwnerPendingScreen from './screens/OwnerPendingScreen';
 import OwnerListingDetailScreen from './screens/OwnerListingDetailScreen';
+import OwnerAvailabilityScreen from './screens/OwnerAvailabilityScreen';
+import OwnerPricingScreen from './screens/OwnerPricingScreen';
+import OwnerApplyScreen from './screens/OwnerApplyScreen';
 
 // Stack (JS)
 const Stack = createStackNavigator();
@@ -192,27 +200,38 @@ export default function App() {
       <SafeAreaProvider>
         <StatusBar style="light" backgroundColor="transparent" translucent />
         <ThemeProvider theme={theme}>
-          <NavigationContainer ref={navigationRef} theme={navTheme}>
-            <View style={{ flex: 1 }}>
-              <Stack.Navigator screenOptions={screenOptions}>
-                <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Zpoto' }} />
-                <Stack.Screen name="SearchResults" component={SearchResultsScreen} options={{ title: 'תוצאות חיפוש' }} />
-                <Stack.Screen name="Booking" component={BookingScreen} options={{ title: 'הזמנה' }} />
-                <Stack.Screen name="Bookings" component={BookingsScreen} options={{ title: 'ההזמנות שלי' }} />
-                <Stack.Screen name="BookingDetail" component={BookingDetailScreen} options={{ title: 'פרטי הזמנה' }} />
-                <Stack.Screen name="Favorites" component={FavoritesScreen} options={{ title: 'מועדפים' }} />
-                <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: 'הפרופיל שלי' }} />
-                <Stack.Screen name="AdvancedSearch" component={AdvancedSearchScreen} options={{ title: 'חניה עתידית' }} />
+          <AuthProvider>
+            <NavigationContainer ref={navigationRef} theme={navTheme}>
+              <View style={{ flex: 1 }}>
+                <Stack.Navigator screenOptions={screenOptions} initialRouteName="Home">
+                  {/* Main Screens - Home הוא המסך הראשון */}
+                  <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Zpoto' }} />
+                  
+                  {/* Auth Screens - זמינים רק כשצריך */}
+                  <Stack.Screen name="Login" component={LoginScreen} options={{ title: 'התחברות', headerShown: false }} />
+                  <Stack.Screen name="Register" component={RegisterScreen} options={{ title: 'הרשמה', headerShown: false }} />
+                  <Stack.Screen name="SearchResults" component={SearchResultsScreen} options={{ title: 'תוצאות חיפוש' }} />
+                  <Stack.Screen name="Booking" component={BookingScreen} options={{ title: 'הזמנה' }} />
+                  <Stack.Screen name="Bookings" component={BookingsScreen} options={{ title: 'ההזמנות שלי' }} />
+                  <Stack.Screen name="BookingDetail" component={BookingDetailScreen} options={{ title: 'פרטי הזמנה' }} />
+                  <Stack.Screen name="Favorites" component={FavoritesScreen} options={{ title: 'מועדפים' }} />
+                  <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: 'הפרופיל שלי' }} />
+                  <Stack.Screen name="AdvancedSearch" component={AdvancedSearchScreen} options={{ title: 'חניה עתידית' }} />
 
-                <Stack.Screen name="OwnerIntro" component={OwnerIntroScreen} options={{ title: 'בעלי חניה' }} />
-                <Stack.Screen name="OwnerOverview" component={OwnerOverviewScreen} options={{ title: 'סקירה כללית' }} />
-                <Stack.Screen name="OwnerPending" component={OwnerPendingScreen} options={{ title: 'בקשות בהמתנה' }} />
-                <Stack.Screen name="OwnerDashboard" component={OwnerDashboardScreen} options={{ title: 'ניהול החניות' }} />
-                <Stack.Screen name="OwnerListingForm" component={OwnerListingFormScreen} options={{ title: 'טופס חניה' }} />
-                <Stack.Screen name="OwnerListingDetail" component={OwnerListingDetailScreen} options={{ title: 'דוח חניה' }} />
-              </Stack.Navigator>
-            </View>
-          </NavigationContainer>
+                  {/* Owner Screens */}
+                  <Stack.Screen name="OwnerIntro" component={OwnerIntroScreen} options={{ title: 'בעלי חניה' }} />
+                  <Stack.Screen name="OwnerApply" component={OwnerApplyScreen} options={{ title: 'הגשת בקשה' }} />
+                  <Stack.Screen name="OwnerOverview" component={OwnerOverviewScreen} options={{ title: 'סקירה כללית' }} />
+                  <Stack.Screen name="OwnerPending" component={OwnerPendingScreen} options={{ title: 'בקשות בהמתנה' }} />
+                  <Stack.Screen name="OwnerDashboard" component={OwnerDashboardScreen} options={{ title: 'ניהול החניות' }} />
+                  <Stack.Screen name="OwnerListingForm" component={OwnerListingFormScreen} options={{ title: 'טופס חניה' }} />
+                  <Stack.Screen name="OwnerListingDetail" component={OwnerListingDetailScreen} options={{ title: 'דוח חניה' }} />
+                  <Stack.Screen name="OwnerAvailability" component={OwnerAvailabilityScreen} options={{ title: 'זמינות חניה' }} />
+                  <Stack.Screen name="OwnerPricing" component={OwnerPricingScreen} options={{ title: 'עריכת מחירון' }} />
+                </Stack.Navigator>
+              </View>
+            </NavigationContainer>
+          </AuthProvider>
         </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>

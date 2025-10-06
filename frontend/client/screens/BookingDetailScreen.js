@@ -1,158 +1,147 @@
 // screens/BookingDetailScreen.js
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
-import * as bookingsRepo from '../data/bookingsRepo';
-import { BOOKING_STATUS } from '../data/bookingsRepo';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { useTheme } from '@shopify/restyle';
-import ZpButton from '../components/ui/ZpButton';
+import { useAuth } from '../contexts/AuthContext';
+import { getBooking, getStatusText, getStatusColor, formatBookingDate, isBookingActive, isBookingUpcoming, calculateBookingPrice } from '../services/api/bookings';
 
-export default function BookingDetailScreen({ route }) {
-  // תומך גם ב-id וגם ב-bookingId (מההתראות)
+export default function BookingDetailScreen({ route, navigation }) {
   const bookingId = route?.params?.id || route?.params?.bookingId;
-  const [b, setB] = useState(null);
-  const [ticker, setTicker] = useState(0); // ריענון לספירה לאחור
-
-  // טעינה ראשונית + טיקט לשעון
-  useEffect(() => {
-    let ok = true;
-    (async () => {
-      const x = await bookingsRepo.getById(bookingId);
-      if (ok) setB(x);
-    })();
-    const t = setInterval(() => setTicker(v => v + 1), 1000);
-    return () => { ok = false; clearInterval(t); };
-  }, [bookingId]);
-
-  // עדכון סטטוסים אוטומטי ברקע + ריענון תצוגה
-  useEffect(() => {
-    (async () => {
-      await bookingsRepo.sweepAndAutoTransition();
-      const x = await bookingsRepo.getById(bookingId);
-      setB(x);
-    })();
-  }, [ticker, bookingId]);
-
+  const [booking, setBooking] = useState(null);
+  const [loading, setLoading] = useState(true);
   const theme = useTheme();
   const styles = makeStyles(theme);
+  const { token } = useAuth();
 
-  if (!b) {
+  useEffect(() => {
+    loadBooking();
+  }, [bookingId]);
+
+  const loadBooking = async () => {
+    if (!bookingId) {
+      setLoading(false);
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const result = await getBooking(bookingId);
+      if (result.success) {
+        setBooking(result.data);
+      } else {
+        console.error('Failed to load booking:', result.error);
+        setBooking(null);
+      }
+    } catch (error) {
+      console.error('Load booking error:', error);
+      setBooking(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const formatDate = (dateString) => {
+    // שימוש בפונקציה מהשירות החדש
+    return formatBookingDate(dateString) || '-';
+  };
+
+  const calculateDuration = (start, end) => {
+    if (!start || !end) return '-';
+    const diff = new Date(end) - new Date(start);
+    const hours = Math.floor(diff / (1000 * 60 * 60));
+    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    return `${hours} שעות ו-${minutes} דקות`;
+  };
+
+  const getBookingStatusText = (status) => {
+    // שימוש בפונקציה מהשירות החדש
+    return getStatusText(status) || status;
+  };
+
+  if (loading) {
     return (
       <View style={styles.container}>
-        <View style={styles.card}>
-          <Text style={styles.header}>טוען…</Text>
-        </View>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
+        <Text style={styles.loadingText}>טוען פרטי הזמנה...</Text>
       </View>
     );
   }
 
-  const now = Date.now();
-  const startTs = b.startAt ? new Date(b.startAt).getTime() : null;
-  const endTs   = b.endAt   ? new Date(b.endAt).getTime()   : null;
-
-  const untilStart = startTs && now < startTs ? startTs - now : 0;
-  const untilEnd   = endTs   && now < endTs   ? endTs   - now : 0;
-
-  function fmt(v) {
-    if (!v) return '-';
-    const d = new Date(v);
-    const dd = d.toLocaleDateString('he-IL');
-    const tt = d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
-    return `${dd} ${tt}`;
-  }
-  function pretty(s) {
-    switch (s) {
-      case BOOKING_STATUS.PENDING:   return 'ממתינה לאישור';
-      case BOOKING_STATUS.APPROVED:  return 'מאושרת (עתידית)';
-      case BOOKING_STATUS.ACTIVE:    return 'פעילה';
-      case BOOKING_STATUS.COMPLETED: return 'הושלמה';
-      case BOOKING_STATUS.REJECTED:  return 'נדחתה';
-      case BOOKING_STATUS.CANCELED:  return 'בוטלה';
-      default: return String(s || '-');
-    }
-  }
-  function fmtCountdown(ms) {
-    if (!ms || ms <= 0) return '—';
-    const total = Math.floor(ms / 1000);
-    const h = String(Math.floor(total / 3600)).padStart(2, '0');
-    const m = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
-    const s = String(total % 60).padStart(2, '0');
-    return `${h}:${m}:${s}`;
+  if (!booking) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.errorText}>לא נמצאה הזמנה</Text>
+      </View>
+    );
   }
 
-  async function extend() {
-    const newEnd = new Date(new Date(b.endAt).getTime() + 30 * 60 * 1000);
-    const updated = await bookingsRepo.extend(b.id, newEnd.toISOString());
-    setB(updated);
-    Alert.alert('הוארך', 'ההזמנה הוארכה ב‑30 דקות');
-  }
-  async function finishNow() {
-    const updated = await bookingsRepo.finishNow(b.id);
-    setB(updated);
-    Alert.alert('הסתיים', `החיוב הסופי: ${bookingsRepo.calcTotalPrice(updated)} ₪`);
-  }
-
-  const isActive   = b.status === BOOKING_STATUS.ACTIVE;
-  const isApproved = b.status === BOOKING_STATUS.APPROVED;
+  const totalCost = booking.totalPriceCents ? (booking.totalPriceCents / 100).toFixed(2) : '0.00';
 
   return (
-    <View style={styles.container}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <View style={styles.card}>
-        <Text style={styles.header}>{b.title || 'הזמנה'}</Text>
+        <Text style={styles.header}>פרטי ההזמנה</Text>
 
-        <View style={styles.rowLine}>
-          <Text style={styles.rowLabel}>סטטוס</Text>
-          <Text
-            style={[
-              styles.statusPill,
-              isActive && styles.statusActive,
-              isApproved && styles.statusApproved,
-              b.status === BOOKING_STATUS.COMPLETED && styles.statusDone,
-              b.status === BOOKING_STATUS.REJECTED && styles.statusRejected,
-              b.status === BOOKING_STATUS.CANCELED && styles.statusCanceled,
-            ]}
-          >
-            {pretty(b.status)}
-          </Text>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>📍 מיקום החניה</Text>
+          <Text style={styles.value}>{booking.parking?.address || 'לא זמין'}</Text>
         </View>
 
-        <View style={styles.rowLine}>
-          <Text style={styles.rowLabel}>טווח</Text>
-          <Text style={styles.rowValue}>{fmt(b.startAt)}  —  {fmt(b.endAt)}</Text>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>💰 עלות כוללת</Text>
+          <Text style={styles.priceValue}>₪{totalCost}</Text>
         </View>
 
-        <View style={styles.rowLine}>
-          <Text style={styles.rowLabel}>חיוב משוער</Text>
-          <Text style={styles.priceValue}>{bookingsRepo.calcTotalPrice(b)} ₪</Text>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>⏱️ משך ההזמנה</Text>
+          <Text style={styles.value}>{calculateDuration(booking.startTime, booking.endTime)}</Text>
         </View>
 
-        {isApproved && (
-          <View style={styles.countWrap}>
-            <Text style={styles.countLabel}>מתחיל בעוד</Text>
-            <Text style={styles.countValue}>{fmtCountdown(untilStart)}</Text>
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>📅 תאריך התחלה</Text>
+          <Text style={styles.value}>{formatDate(booking.startTime)}</Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>📅 תאריך סיום</Text>
+          <Text style={styles.value}>{formatDate(booking.endTime)}</Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>🚗 מספר רכב</Text>
+          <Text style={styles.value}>{booking.vehicleNumber || 'לא צוין'}</Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>💳 אמצעי תשלום</Text>
+          <Text style={styles.value}>{booking.paymentMethod || 'כרטיס אשראי'}</Text>
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>📊 סטטוס</Text>
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(booking.status) }]}>
+            <Text style={styles.statusText}>{getBookingStatusText(booking.status)}</Text>
+          </View>
+        </View>
+
+        {/* אינדיקטורים נוספים */}
+        {isBookingActive(booking) && (
+          <View style={styles.activeIndicator}>
+            <Text style={styles.activeText}>🟢 ההזמנה פעילה כעת</Text>
           </View>
         )}
-        {isActive && (
-          <View style={styles.countWrap}>
-            <Text style={styles.countLabel}>נותר</Text>
-            <Text style={styles.countValue}>{fmtCountdown(untilEnd)}</Text>
-          </View>
-        )}
-
-        {isActive && (
-          <View style={styles.actions}>
-            {/* כפתור ראשי ממותג (גרדיאנט) */}
-            <ZpButton title="Extend +30m" onPress={extend} style={{ flex: 1 }} />
-
-            {/* כפתור מסוכן/סיום — סוליד אדום ממותג */}
-            <TouchableOpacity style={[styles.btn, styles.danger]} onPress={finishNow} activeOpacity={0.9}>
-              <Text style={styles.btnTxt}>Finish Now</Text>
-            </TouchableOpacity>
+        
+        {!isBookingActive(booking) && isBookingUpcoming(booking) && (
+          <View style={styles.upcomingIndicator}>
+            <Text style={styles.upcomingText}>⏰ הזמנה עתידית</Text>
           </View>
         )}
       </View>
-    </View>
+    </ScrollView>
   );
 }
+
+// הפונקציה מוחלפת בשירות החדש
 
 function makeStyles(theme) {
   const { colors, spacing, borderRadii } = theme;
@@ -160,7 +149,20 @@ function makeStyles(theme) {
     container: {
       flex: 1,
       backgroundColor: colors.bg,
-      padding: spacing.xl,
+    },
+    content: {
+      padding: spacing.lg,
+    },
+    loadingText: {
+      marginTop: spacing.md,
+      fontSize: 16,
+      color: colors.subtext,
+      textAlign: 'center',
+    },
+    errorText: {
+      fontSize: 16,
+      color: colors.error,
+      textAlign: 'center',
     },
     card: {
       backgroundColor: colors.surface,
@@ -175,50 +177,46 @@ function makeStyles(theme) {
       elevation: 3,
     },
     header: {
-      fontSize: 22,
-      fontWeight: '700',
+      fontSize: 24,
+      fontWeight: '800',
       color: colors.text,
+      marginBottom: spacing.lg,
+      textAlign: 'right',
+    },
+    section: {
       marginBottom: spacing.md,
-      textAlign: 'center',
+      paddingBottom: spacing.md,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
     },
-
-    rowLine: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: spacing.sm,
-    },
-    rowLabel: {
-      fontSize: 14,
-      color: colors.subtext,
-    },
-    rowValue: {
-      fontSize: 14,
-      color: colors.text,
-      textAlign: 'left',
-    },
-    priceValue: {
+    sectionTitle: {
       fontSize: 16,
       fontWeight: '700',
       color: colors.text,
+      marginBottom: spacing.xs,
+      textAlign: 'right',
     },
-
-    // סטטוס כ־Pill
-    statusPill: {
-      paddingVertical: 6,
-      paddingHorizontal: 10,
-      borderRadius: 999,
-      fontSize: 12,
-      overflow: 'hidden',
-      color: colors.text,
-      backgroundColor: colors.bg,
-      borderWidth: 1,
-      borderColor: colors.border,
+    value: {
+      fontSize: 15,
+      color: colors.subtext,
+      textAlign: 'right',
     },
-    statusApproved: {
-      color: colors.secondary,
-      borderColor: colors.secondary,
-      backgroundColor: '#F3F0FF',
+    priceValue: {
+      fontSize: 28,
+      fontWeight: '800',
+      color: colors.primary,
+      textAlign: 'right',
+    },
+    statusBadge: {
+      paddingVertical: 8,
+      paddingHorizontal: 16,
+      borderRadius: borderRadii.md,
+      alignSelf: 'flex-start',
+    },
+    statusText: {
+      color: '#FFFFFF',
+      fontSize: 14,
+      fontWeight: '700',
     },
     statusActive: {
       color: colors.primary,
@@ -282,6 +280,36 @@ function makeStyles(theme) {
     btnTxt: {
       color: '#fff',
       fontWeight: '700',
+    },
+    
+    // אינדיקטורים חדשים
+    activeIndicator: {
+      backgroundColor: '#E8F5E8',
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: borderRadii.md,
+      marginTop: spacing.md,
+      alignSelf: 'flex-start',
+    },
+    activeText: {
+      fontSize: 14,
+      color: '#2E7D32',
+      fontWeight: '600',
+      textAlign: 'right',
+    },
+    upcomingIndicator: {
+      backgroundColor: '#FFF3E0',
+      paddingHorizontal: spacing.md,
+      paddingVertical: spacing.sm,
+      borderRadius: borderRadii.md,
+      marginTop: spacing.md,
+      alignSelf: 'flex-start',
+    },
+    upcomingText: {
+      fontSize: 14,
+      color: '#F57C00',
+      fontWeight: '600',
+      textAlign: 'right',
     },
   });
 }

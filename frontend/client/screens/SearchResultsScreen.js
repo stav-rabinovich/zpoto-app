@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@shopify/restyle';
 import { osmReverse } from '../utils/osm';
 import { openWaze } from '../utils/nav';
+import api from '../utils/api';
 
 const OWNER_LISTINGS_KEY = 'owner_listings';
 const PREFS_KEY = 'search_prefs_v1';
@@ -178,63 +179,47 @@ export default function SearchResultsScreen({ route, navigation }) {
     if (typeof filtersFromAdvanced.maxDistance === 'number') setMaxDistance(filtersFromAdvanced.maxDistance);
   }, [filtersFromAdvanced]);
 
-  const demoSpots = useMemo(() => {
-    if (!searchCenter) return [];
-    const base = { lat: searchCenter.latitude, lng: searchCenter.longitude };
-    const deltas = [
-      { dx: 0.0015, dy: 0.0012, price: 12, address: 'דיזנגוף 100' },
-      { dx: -0.001, dy: 0.0018, price: 10, address: 'בן יהודה 45' },
-      { dx: 0.002,  dy: -0.0008, price: 15, address: 'אבן גבירול 90' },
-      { dx: -0.0016,dy: -0.0012, price: 9,  address: 'אלנבי 120' },
-      { dx: 0.0007, dy: -0.0019, price: 18, address: 'רוטשילד 22' },
-      { dx: -0.0022,dy: 0.0006, price: 11, address: 'יהודה הלוי 5' },
-    ].map((d, i) => {
-      const lat = base.lat + d.dy;
-      const lng = base.lng + d.dx;
-      return {
-        id: `demo-${i+1}`,
-        title: d.address,
-        address: d.address,
-        price: d.price,
-        latitude: lat,
-        longitude: lng,
-        distanceKm: haversineKm(base.lat, base.lng, lat, lng),
-        source: 'demo',
-        images: [],
-      };
-    });
-    return deltas;
-  }, [searchCenter]);
+  // חניות דמו - הוסרו! עכשיו רק נתונים אמיתיים מהשרת
+  const demoSpots = [];
 
   const [ownerSpots, setOwnerSpots] = useState([]);
   useEffect(() => {
     (async () => {
       try {
-        const raw = await AsyncStorage.getItem(OWNER_LISTINGS_KEY);
-        const list = raw ? JSON.parse(raw) : [];
         if (!searchCenter) { setOwnerSpots([]); return; }
         const baseLat = searchCenter.latitude;
         const baseLng = searchCenter.longitude;
 
+        // קריאה לשרת - חיפוש חניות ברדיוס 10 ק"מ
+        const response = await api.get('/api/parkings/search', {
+          params: {
+            lat: baseLat,
+            lng: baseLng,
+            radius: 10, // 10 ק"מ
+          }
+        });
+
+        const list = response.data?.data || [];
+
         const mapped = list
-          .filter(x => x.active && typeof x.latitude === 'number' && typeof x.longitude === 'number')
+          .filter(x => x.isActive && typeof x.lat === 'number' && typeof x.lng === 'number')
           .map(x => ({
-            id: `owner-${x.id}`,
-            ownerListingId: x.id,
+            id: `parking-${x.id}`,
+            parkingId: x.id,
             title: x.title || x.address || 'חניה',
             address: x.address || '',
-            price: typeof x.price === 'number' ? x.price : 10,
-            latitude: x.latitude,
-            longitude: x.longitude,
-            images: Array.isArray(x.images) ? x.images : [],
-            distanceKm: haversineKm(baseLat, baseLng, x.latitude, x.longitude),
-            source: 'owner',
-            availability: x.availability || null,
-            requireApproval: !!x.requireApproval,
+            price: typeof x.priceHr === 'number' ? x.priceHr : 10,
+            latitude: x.lat,
+            longitude: x.lng,
+            images: [],
+            distanceKm: haversineKm(baseLat, baseLng, x.lat, x.lng),
+            source: 'server',
+            available: x.available !== false,
           }));
 
         setOwnerSpots(mapped);
-      } catch {
+      } catch (error) {
+        console.error('Search error:', error);
         setOwnerSpots([]);
       }
     })();
@@ -423,11 +408,11 @@ export default function SearchResultsScreen({ route, navigation }) {
         <Text style={styles.attrText}>© OpenStreetMap contributors</Text>
       </View>
 
-      {/* סרגל פילטרים עליון – RTL + מיתוג + "נקה סינון" + מונה תוצאות */}
+      {/* סרגל פילטרים עליון - נקי ואינטואיטיבי */}
       <View style={styles.filtersBar} pointerEvents="box-none">
         <LinearGradient
-          colors={['rgba(10,12,18,0.65)', 'rgba(10,12,18,0.35)']}
-          start={{ x: 0, y: 1 }} end={{ x: 1, y: 0 }}
+          colors={['rgba(255,255,255,0.98)', 'rgba(255,255,255,0.95)']}
+          start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
           style={StyleSheet.absoluteFillObject}
         />
         <ScrollView
@@ -435,44 +420,60 @@ export default function SearchResultsScreen({ route, navigation }) {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.filtersContent}
         >
-          <Text style={styles.groupLabel} numberOfLines={1}>מחיר:</Text>
-          {GROUP_PRICES.map(v => (
-            <Chip
-              key={`p-${v}`}
-              label={`עד ₪${v}`}
-              active={(maxPrice ?? filtersFromAdvanced?.maxPrice) === v}
-              onPress={() => setMaxPrice((maxPrice ?? null) === v ? null : v)}
-            />
-          ))}
-
-          <Text style={[styles.groupLabel, { marginStart: 12 }]} numberOfLines={1}>מרחק:</Text>
-          {GROUP_DISTANCES.map(v => (
-            <Chip
-              key={`d-${v}`}
-              label={`עד ${v} ק״מ`}
-              active={(maxDistance ?? filtersFromAdvanced?.maxDistance) === v}
-              onPress={() => setMaxDistance((maxDistance ?? null) === v ? null : v)}
-            />
-          ))}
-
-          <Text style={[styles.groupLabel, { marginStart: 12 }]} numberOfLines={1}>מיון:</Text>
-          <Chip label="מרחק" active={sortBy==='distance'} onPress={() => setSortBy('distance')} />
-          <Chip label="מחיר" active={sortBy==='price'} onPress={() => setSortBy('price')} />
-
-          <View style={{ width: 12 }} />
-          <View style={styles.ownerToggle}>
-            <Text style={styles.ownerToggleText} numberOfLines={1}>הצג חניות מבעלי חניה</Text>
-            <Switch value={showOwnerListings} onValueChange={setShowOwnerListings} />
+          {/* מונה תוצאות */}
+          <View style={styles.countBadge}>
+            <Text style={styles.countBadgeText}>{spots.length}</Text>
+            <Text style={styles.countBadgeLabel}>חניות</Text>
           </View>
 
-          <TouchableOpacity onPress={clearFilters} activeOpacity={0.9} style={styles.clearBtn}>
-            <Ionicons name="close-circle" size={16} color="#fff" />
-            <Text style={styles.clearBtnText} numberOfLines={1}>נקה סינון</Text>
+          {/* מחיר */}
+          <View style={styles.filterSection}>
+            <Text style={styles.filterLabel}>💰</Text>
+            <View style={styles.filterGroup}>
+              {GROUP_PRICES.map(v => (
+                <Chip
+                  key={`p-${v}`}
+                  label={`₪${v}`}
+                  active={(maxPrice ?? filtersFromAdvanced?.maxPrice) === v}
+                  onPress={() => setMaxPrice((maxPrice ?? null) === v ? null : v)}
+                />
+              ))}
+            </View>
+          </View>
+
+          {/* מרחק */}
+          <View style={styles.filterSection}>
+            <Text style={styles.filterLabel}>📍</Text>
+            <View style={styles.filterGroup}>
+              {GROUP_DISTANCES.map(v => (
+                <Chip
+                  key={`d-${v}`}
+                  label={`${v}km`}
+                  active={(maxDistance ?? filtersFromAdvanced?.maxDistance) === v}
+                  onPress={() => setMaxDistance((maxDistance ?? null) === v ? null : v)}
+                />
+              ))}
+            </View>
+          </View>
+
+          {/* מיון */}
+          <TouchableOpacity 
+            onPress={() => setSortBy(sortBy === 'distance' ? 'price' : 'distance')}
+            style={styles.sortButton}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.sortButtonText}>
+              {sortBy === 'distance' ? '📍 מיון: מרחק' : '💰 מיון: מחיר'}
+            </Text>
+            <Ionicons name="swap-vertical" size={16} color={theme.colors.primary} />
           </TouchableOpacity>
 
-          <View style={styles.countPill}>
-            <Text style={styles.countPillText} numberOfLines={1}>{spots.length} תוצאות</Text>
-          </View>
+          {/* נקה */}
+          {(maxPrice || maxDistance) && (
+            <TouchableOpacity onPress={clearFilters} activeOpacity={0.8} style={styles.clearBtnNew}>
+              <Ionicons name="close-circle" size={18} color={theme.colors.error} />
+            </TouchableOpacity>
+          )}
         </ScrollView>
       </View>
 
@@ -581,15 +582,21 @@ export default function SearchResultsScreen({ route, navigation }) {
 
                     <TouchableOpacity
                       style={[styles.cardBtnOutline, { flex:1 }]}
-                      onPress={() => navigation.navigate('Booking', {
-                        spot: {
-                          ...spot,
-                          title: spot.title || spot.address,
-                          ownerListingId: spot.ownerListingId ?? null,
-                          availability: spot.availability ?? null,
-                          requireApproval: !!spot.requireApproval,
-                        }
-                      })}
+                      onPress={() => {
+                        console.log('🔍 Navigating with spot:', spot);
+                        console.log('🔍 Spot parkingId:', spot.parkingId, 'Type:', typeof spot.parkingId);
+                        navigation.navigate('Booking', {
+                          spot: {
+                            id: spot.id,
+                            parkingId: spot.parkingId, // ודא שזה מועבר
+                            ...spot,
+                            title: spot.title || spot.address,
+                            ownerListingId: spot.ownerListingId ?? null,
+                            availability: spot.availability ?? null,
+                            requireApproval: !!spot.requireApproval,
+                          }
+                        });
+                      }}
                       activeOpacity={0.9}
                       accessibilityRole="button"
                       accessibilityLabel="הזמן עכשיו"
@@ -649,16 +656,46 @@ function makeStyles(theme, cardWidth) {
     },
     attrText:{ color:'#fff', fontSize:11, writingDirection:'rtl', textAlign:'right' },
 
-    // Filters
+    // Filters - עיצוב חדש נקי
     filtersBar:{
       position:'absolute', top:16, left:12, right:12,
-      paddingVertical:8, borderRadius:999, overflow:'hidden',
-      borderWidth:1, borderColor:'rgba(255,255,255,0.16)',
+      paddingVertical:12, borderRadius:16, overflow:'hidden',
+      shadowColor:'#000', shadowOpacity:0.15, shadowRadius:12, shadowOffset:{ width:0, height:4 }, elevation:5,
     },
     filtersContent:{
-      paddingHorizontal: 12, alignItems:'center', flexDirection:'row-reverse',
+      paddingHorizontal: 16, alignItems:'center', flexDirection:'row-reverse', gap:12,
     },
-    groupLabel:{ color:'#e9f7ff', fontWeight:'800', marginStart:6, alignSelf:'center', textAlign:'right', writingDirection:'rtl' },
+    countBadge:{
+      backgroundColor: colors.primary,
+      paddingHorizontal:16, paddingVertical:8, borderRadius:12,
+      flexDirection:'column', alignItems:'center', marginLeft:8,
+    },
+    countBadgeText:{ color:'#fff', fontSize:20, fontWeight:'800', lineHeight:24 },
+    countBadgeLabel:{ color:'#fff', fontSize:11, fontWeight:'600', opacity:0.9 },
+    filterSection:{
+      flexDirection:'row-reverse', alignItems:'center', gap:8,
+    },
+    filterLabel:{
+      fontSize:20, marginLeft:4,
+    },
+    filterGroup:{
+      flexDirection:'row-reverse', gap:6,
+    },
+    sortButton:{
+      flexDirection:'row-reverse', alignItems:'center', gap:8,
+      paddingHorizontal:16, paddingVertical:10, borderRadius:10,
+      backgroundColor:'rgba(127,147,255,0.1)',
+      borderWidth:1.5, borderColor:colors.primary,
+    },
+    sortButtonText:{
+      color:colors.primary, fontWeight:'600', fontSize:13,
+    },
+    clearBtnNew:{
+      width:36, height:36, borderRadius:18,
+      backgroundColor:'rgba(239,68,68,0.1)',
+      justifyContent:'center', alignItems:'center',
+      marginRight:8,
+    },
 
     // Time badge (optional)
     timeBadge:{
@@ -668,21 +705,21 @@ function makeStyles(theme, cardWidth) {
     },
     timeBadgeText:{ color:'#fff', fontWeight:'800', textAlign:'right', writingDirection:'rtl' },
 
-    // chips
-    chipWrapper:{ marginStart:8, borderRadius:999 },
+    // chips - עיצוב חדש נקי
+    chipWrapper:{ borderRadius:10 },
     chip:{
-      paddingHorizontal:14, paddingVertical:10, borderRadius:999,
-      minHeight:40, justifyContent:'center', alignItems:'center'
+      paddingHorizontal:16, paddingVertical:8, borderRadius:10,
+      minHeight:36, justifyContent:'center', alignItems:'center'
     },
     chipIdle:{
-      borderWidth:1, borderColor:colors.primary, backgroundColor:'rgba(255,255,255,0.08)',
-      marginStart:8
+      borderWidth:1.5, borderColor:colors.border, backgroundColor:'rgba(255,255,255,0.7)',
     },
     chipActive:{
-      shadowColor:'#000', shadowOpacity:0.18, shadowRadius:12, shadowOffset:{ width:0, height:6 }, elevation:3
+      backgroundColor: colors.primary,
+      borderWidth:0,
     },
-    chipText:{ color:'#e9f7ff', fontWeight:'700', textAlign:'right', writingDirection:'rtl' },
-    chipTextActive:{ color:'#fff', fontWeight:'800', textAlign:'right', writingDirection:'rtl' },
+    chipText:{ color:colors.text, fontWeight:'600', fontSize:13 },
+    chipTextActive:{ color:'#fff', fontWeight:'700', fontSize:13 },
 
     ownerToggle:{
       flexDirection:'row-reverse', alignItems:'center', gap:8,

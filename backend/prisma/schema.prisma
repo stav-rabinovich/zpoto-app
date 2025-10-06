@@ -11,46 +11,174 @@ model User {
   id        Int       @id @default(autoincrement())
   email     String    @unique
   password  String
+  name      String?
+  phone     String?
+  role      String    @default("USER") // USER, ADMIN
   createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
-  parkings  Parking[]
-  bookings  Booking[]
+  // יחסים
+  bookings        Booking[]
+  listingRequests ListingRequest[]
+  chats           Chat[]
+  vehicles        Vehicle[]
+  savedPlaces     SavedPlace[]
+  recentSearches  RecentSearch[]
+  favorites       Favorite[]
+  paymentMethods  PaymentMethod[]
+  ownedParkings   Parking[] @relation("UserOwnedParkings")
 }
 
 model Parking {
-  id         Int       @id @default(autoincrement())
-  title      String
-  address    String
-  lat        Float
-  lng        Float
-  priceHr    Float
-  isActive   Boolean   @default(true)
-  createdAt  DateTime  @default(now())
+  id           Int       @id @default(autoincrement())
+  title        String
+  address      String?   // כתובת החניה (nullable)
+  lat          Float
+  lng          Float
+  priceHr      Float
+  isActive     Boolean   @default(true)
+  approvalMode String    @default("AUTO") // AUTO, MANUAL
+  availability String?   // JSON: { sunday: [0,6,12], monday: [6,12,18], ... }
+  pricing      String?   // JSON: { hour1: 15, hour2: 14, hour3: 13, ... }
+  createdAt    DateTime  @default(now())
 
-  ownerId    Int
-  owner      User      @relation(fields: [ownerId], references: [id])
+  ownerId      Int
+  owner        User      @relation(fields: [ownerId], references: [id], name: "UserOwnedParkings")
 
-  bookings   Booking[]
+  bookings     Booking[]
+  chats        Chat[]
+  favorites    Favorite[]
 }
 
 model Booking {
   id         Int       @id @default(autoincrement())
   startTime  DateTime
   endTime    DateTime
-  status     String    @default("PENDING")
+  status     String    @default("PENDING") // PENDING, CONFIRMED, CANCELED
+  totalPriceCents Int?
   createdAt  DateTime  @default(now())
 
-  // קשרים
   userId     Int
   user       User      @relation(fields: [userId], references: [id])
-
+  
   parkingId  Int
   parking    Parking   @relation(fields: [parkingId], references: [id])
-
-  // 📌 קיבוע מחיר בזמן ההזמנה (Nullable בשביל מיגרציה חלקה)
-  priceHrCentsAtBooking Int?
-  totalPriceCents       Int?
-
+  
   @@index([userId])
   @@index([parkingId, startTime, endTime])
+}
+
+model ListingRequest {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id])
+  
+  title       String
+  address     String
+  fullAddress String?   // כתובת מלאה (רחוב ומספר)
+  city        String?   // עיר
+  lat         Float
+  lng         Float
+  priceHr     Float
+  description String?
+  phone       String?   // מספר טלפון של בעל החניה
+  onboarding  String?   // JSON: נתוני אונבורדינג מלאים
+  
+  status          String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  rejectionReason String?
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([userId])
+  @@index([status])
+}
+
+model Chat {
+  id        Int       @id @default(autoincrement())
+  message   String
+  isFromUser Boolean  @default(true) // true = מלקוח, false = מאדמין
+  createdAt DateTime  @default(now())
+  
+  userId    Int
+  user      User      @relation(fields: [userId], references: [id])
+  
+  parkingId Int?      // אופציונלי - אם הצ'אט קשור לחניה מסוימת
+  parking   Parking?  @relation(fields: [parkingId], references: [id])
+  
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Vehicle {
+  id          Int       @id @default(autoincrement())
+  licensePlate String   // מספר רכב
+  make        String?   // יצרן (טויוטה, הונדה וכו')
+  model       String?   // דגם (קורולה, סיוויק וכו')
+  color       String?   // צבע
+  year        Int?      // שנת ייצור
+  description String?   // תיאור נוסף
+  isDefault   Boolean   @default(false) // רכב ברירת מחדל
+  createdAt   DateTime  @default(now())
+  
+  userId      Int
+  user        User      @relation(fields: [userId], references: [id])
+  
+  @@index([userId])
+  @@unique([userId, licensePlate]) // מספר רכב יחיד לכל משתמש
+}
+
+// מקומות שמורים
+model SavedPlace {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  name      String   // "בית", "עבודה", "חניה קבועה"
+  address   String
+  lat       Float
+  lng       Float
+  type      String   // "home", "work", "custom"
+  createdAt DateTime @default(now())
+  
+  @@index([userId])
+}
+
+// חיפושים אחרונים
+model RecentSearch {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+  query     String
+  lat       Float?
+  lng       Float?
+  createdAt DateTime @default(now())
+  
+  @@index([userId, createdAt])
+}
+
+// מועדפים
+model Favorite {
+  id        Int     @id @default(autoincrement())
+  userId    Int
+  user      User    @relation(fields: [userId], references: [id])
+  parkingId Int
+  parking   Parking @relation(fields: [parkingId], references: [id])
+  createdAt DateTime @default(now())
+  
+  @@unique([userId, parkingId])
+  @@index([userId])
+}
+
+// אמצעי תשלום
+model PaymentMethod {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  user        User     @relation(fields: [userId], references: [id])
+  type        String   // "credit_card", "paypal", "apple_pay"
+  name        String   // "ויזה ****1234"
+  isDefault   Boolean  @default(false)
+  metadata    String?  // JSON עם פרטים נוספים
+  createdAt   DateTime @default(now())
+  
+  @@index([userId])
 }

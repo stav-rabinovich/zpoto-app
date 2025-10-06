@@ -6,6 +6,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import { LinearGradient } from 'expo-linear-gradient';
 import ZpButton from '../components/ui/ZpButton';
+import api from '../utils/api';
+import { useAuthContext } from '../contexts/ServerOnlyAuthContext';
 
 const PROFILE_KEY = 'profile';
 
@@ -39,6 +41,7 @@ function KpiCard({ icon, label, value, colors }) {
 
 export default function OwnerIntroScreen({ navigation }) {
   const theme = useTheme();
+  const { user, token } = useAuthContext();
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('none'); // 'none' | 'pending' | 'approved'
   const [name, setName] = useState('');
@@ -108,7 +111,7 @@ export default function OwnerIntroScreen({ navigation }) {
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               <Ionicons name="construct-outline" size={14} color="#fff" style={{ marginEnd: 6 }} />
-              <Text style={[styles.devBtnText, { color: '#fff' }]}>אשר אותי (DEV)</Text>
+              <Text style={[styles.devBtnText, { color: '#fff' }]}>אשר זמנית (DEV)</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -189,7 +192,7 @@ export default function OwnerIntroScreen({ navigation }) {
 
             {/* שינוי טקסט הכפתור */}
             <ZpButton
-              title="צריך למצוא יעוד"
+              title="כניסה לממשק"
               onPress={() => navigation.navigate('OwnerOverview')}
               leftIcon={<Ionicons name="enter" size={18} color="#fff" style={{ marginEnd: 6 }} />}
               style={{ marginTop: theme.spacing.sm }}

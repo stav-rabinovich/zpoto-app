@@ -1,25 +1,54 @@
 // screens/BookingsScreen.js
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import * as bookingsRepo from '../data/bookingsRepo';
-import BookingLifecycleWatcher from '../components/BookingLifecycleWatcher';
-import { BOOKING_STATUS } from '../data/bookingsRepo';
 import { useTheme } from '@shopify/restyle';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../contexts/AuthContext';
+import { getUserBookings, getStatusText, getStatusColor, formatBookingDate, isBookingActive, isBookingUpcoming } from '../services/api/bookings';
+
+const BOOKING_STATUS = {
+  PENDING: 'PENDING',
+  CONFIRMED: 'CONFIRMED',
+  ACTIVE: 'ACTIVE',
+  COMPLETED: 'COMPLETED',
+  CANCELED: 'CANCELED',
+};
 
 export default function BookingsScreen() {
   const theme = useTheme();
   const styles = makeStyles(theme);
+  const { token } = useAuth();
 
   const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const navigation = useNavigation();
 
   const load = useCallback(async () => {
-    const bs = await bookingsRepo.getAll();
-    setBookings(bs.sort((a, b) => (new Date(b.startAt) - new Date(a.startAt))));
-  }, []);
+    if (!token) {
+      setBookings([]);
+      setLoading(false);
+      return;
+    }
+    
+    try {
+      const result = await getUserBookings();
+      if (result.success) {
+        // מיון לפי תאריך התחלה (חדש יותר קודם)
+        const sortedBookings = result.data.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+        setBookings(sortedBookings);
+      } else {
+        console.error('Failed to load bookings:', result.error);
+        setBookings([]);
+      }
+    } catch (error) {
+      console.error('Load bookings error:', error);
+      setBookings([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
 
   useEffect(() => {
     load();
@@ -27,17 +56,13 @@ export default function BookingsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      (async () => {
-        await bookingsRepo.sweepAndAutoTransition();
-        await load();
-      })();
+      load();
     }, [load])
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await bookingsRepo.sweepAndAutoTransition();
       await load();
     } finally {
       setRefreshing(false);
@@ -49,7 +74,11 @@ export default function BookingsScreen() {
   }
 
   const renderItem = ({ item }) => {
-    const price = bookingsRepo.calcTotalPrice(item);
+    const parking = item.parking || {};
+    const statusColor = getStatusColor(item.status);
+    const isActive = isBookingActive(item);
+    const isUpcoming = isBookingUpcoming(item);
+    
     return (
       <TouchableOpacity onPress={() => openBooking(item)} activeOpacity={0.85} style={styles.cardTap}>
         <View style={styles.card}>
@@ -58,29 +87,36 @@ export default function BookingsScreen() {
             <Text
               style={[
                 styles.statusPill,
-                item.status === BOOKING_STATUS.ACTIVE && styles.statusActive,
-                item.status === BOOKING_STATUS.APPROVED && styles.statusApproved,
-                item.status === BOOKING_STATUS.PENDING && styles.statusPending,
-                item.status === BOOKING_STATUS.COMPLETED && styles.statusDone,
-                item.status === BOOKING_STATUS.REJECTED && styles.statusRejected,
-                item.status === BOOKING_STATUS.CANCELED && styles.statusCanceled,
+                { backgroundColor: statusColor + '20', color: statusColor }
               ]}
               numberOfLines={1}
             >
               {prettyStatus(item.status)}
             </Text>
             {/* כותרת לשמאל */}
-            <Text style={styles.title} numberOfLines={1}>{item.title || 'הזמנה'}</Text>
+            <Text style={styles.title} numberOfLines={1}>{parking.title || 'הזמנה'}</Text>
           </View>
+          
+          {/* אינדיקטור להזמנה פעילה או עתידית */}
+          {isActive && (
+            <View style={styles.activeIndicator}>
+              <Text style={styles.activeText}>🟢 פעילה כעת</Text>
+            </View>
+          )}
+          {!isActive && isUpcoming && (
+            <View style={styles.upcomingIndicator}>
+              <Text style={styles.upcomingText}>⏰ עתידית</Text>
+            </View>
+          )}
 
           <View style={styles.rowLine}>
             <Ionicons name="calendar-outline" size={16} color={theme.colors.subtext} style={{ marginEnd: 6 }} />
-            <Text style={styles.rowText}>מתאריך: {fmt(item.startAt)} עד {fmt(item.endAt)}</Text>
+            <Text style={styles.rowText}>מתאריך: {fmt(item.startTime)} עד {fmt(item.endTime)}</Text>
           </View>
 
           <View style={styles.rowLine}>
-            <Ionicons name="cash-outline" size={16} color={theme.colors.subtext} style={{ marginEnd: 6 }} />
-            <Text style={styles.rowText}>חיוב משוער: {price} ₪</Text>
+            <Ionicons name="location-outline" size={16} color={theme.colors.subtext} style={{ marginEnd: 6 }} />
+            <Text style={styles.rowText}>{parking.address || 'כתובת לא זמינה'}</Text>
           </View>
 
           <View style={styles.ctaRow}>
@@ -92,10 +128,17 @@ export default function BookingsScreen() {
     );
   };
 
+  if (loading) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
+        <Text style={{ marginTop: 16, color: theme.colors.subtext }}>טוען הזמנות...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      <BookingLifecycleWatcher />
-
       {/* כותרת מרכזית */}
       <Text style={styles.header}>ההזמנות שלי</Text>
 
@@ -118,27 +161,13 @@ export default function BookingsScreen() {
 }
 
 function prettyStatus(s) {
-  switch (s) {
-    case BOOKING_STATUS.PENDING:   return 'ממתינה לאישור';
-    case BOOKING_STATUS.APPROVED:  return 'מאושרת (עתידית)';
-    case BOOKING_STATUS.ACTIVE:    return 'פעילה';
-    case BOOKING_STATUS.COMPLETED: return 'הושלמה';
-    case BOOKING_STATUS.REJECTED:  return 'נדחתה';
-    case BOOKING_STATUS.CANCELED:  return 'בוטלה';
-    default: return String(s || '-');
-  }
+  // שימוש בפונקציה מהשירות החדש
+  return getStatusText(s) || String(s || '-');
 }
 
 function fmt(v) {
-  if (!v) return '-';
-  try {
-    const d = new Date(v);
-    const dd = d.toLocaleDateString('he-IL');
-    const tt = d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
-    return `${dd} ${tt}`;
-  } catch {
-    return String(v);
-  }
+  // שימוש בפונקציה מהשירות החדש
+  return formatBookingDate(v) || '-';
 }
 
 function makeStyles(theme) {
@@ -198,6 +227,34 @@ function makeStyles(theme) {
 
     rowLine: { flexDirection: 'row', alignItems: 'center', marginTop: 6 },
     rowText: { fontSize: 13, color: colors.text },
+
+    // אינדיקטורים חדשים
+    activeIndicator: {
+      backgroundColor: '#E8F5E8',
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+      borderRadius: borderRadii.sm,
+      marginTop: spacing.xs,
+      alignSelf: 'flex-start',
+    },
+    activeText: {
+      fontSize: 12,
+      color: '#2E7D32',
+      fontWeight: '600',
+    },
+    upcomingIndicator: {
+      backgroundColor: '#FFF3E0',
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+      borderRadius: borderRadii.sm,
+      marginTop: spacing.xs,
+      alignSelf: 'flex-start',
+    },
+    upcomingText: {
+      fontSize: 12,
+      color: '#F57C00',
+      fontWeight: '600',
+    },
 
     ctaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: spacing.sm },
     link: { fontSize: 13, fontWeight: '700', color: colors.primary, marginEnd: 4 },

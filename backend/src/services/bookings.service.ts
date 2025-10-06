@@ -1,11 +1,29 @@
 import { prisma } from '../lib/prisma';
 
 /**
- * מחזיר את כל ההזמנות.
+ * מחזיר את כל ההזמנות - עם פרטי חניה ומשתמש.
  */
 export async function listBookings() {
   return prisma.booking.findMany({
     orderBy: { id: 'desc' },
+    include: {
+      parking: true,
+      user: {
+        select: { id: true, email: true },
+      },
+    },
+  });
+}
+/**
+ * מחזיר את ההזמנות של משתמש מסוים
+ */
+export async function listBookingsByUser(userId: number) {
+  return prisma.booking.findMany({
+    where: { userId },
+    orderBy: { id: 'desc' },
+    include: {
+      parking: true,
+    }
   });
 }
 
@@ -76,15 +94,25 @@ export async function createBooking(input: {
       startTime: input.startTime,
       endTime: input.endTime,
       status: input.status ?? 'PENDING',
-      priceHrCentsAtBooking: priceHrCents,
       totalPriceCents,
     },
   });
 }
 
-/** שליפה לפי מזהה */
+/** שליפה לפי מזהה - עם פרטי חניה */
 export async function getBooking(id: number) {
-  return prisma.booking.findUnique({ where: { id } });
+  return prisma.booking.findUnique({ 
+    where: { id },
+    include: {
+      parking: true,
+      user: {
+        select: {
+          id: true,
+          email: true,
+        }
+      }
+    }
+  });
 }
 
 /** עדכון סטטוס */

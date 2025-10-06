@@ -1,10 +1,12 @@
 // screens/OwnerListingDetailScreen.js
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Image } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
+import { useAuth } from '../contexts/AuthContext';
+import { getOwnerParkings, getOwnerBookings, updateBookingStatus, getBookingsByStatus, sortBookingsByDate, formatCurrency } from '../services/api/owner';
+import { getStatusText, getStatusColor, formatBookingDate } from '../services/api/bookings';
 
 const LISTINGS_KEY = 'owner_listings';
 const BOOKINGS_KEY  = 'bookings';
@@ -15,10 +17,12 @@ function overlaps(aStart, aEnd, bStart, bEnd){ return aStart < bEnd && aEnd > bS
 export default function OwnerListingDetailScreen({ route, navigation }) {
   const theme = useTheme();
   const styles = makeStyles(theme);
+  const { isAuthenticated } = useAuth();
 
-  const listingId = route?.params?.id;
-  const [listing, setListing] = useState(null);
+  const parkingId = route?.params?.id || route?.params?.parkingId;
+  const [parking, setParking] = useState(null);
   const [bookings, setBookings] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   const [from, setFrom] = useState(() => { const d=new Date(); d.setDate(d.getDate()-6); d.setHours(0,0,0,0); return d; });
   const [to, setTo] = useState(() => { const d=new Date(); d.setHours(23,59,59,999); return d; });
@@ -26,17 +30,43 @@ export default function OwnerListingDetailScreen({ route, navigation }) {
   const [showTo, setShowTo] = useState(false);
 
   const load = useCallback(async () => {
-    const [rawL, rawB] = await Promise.all([
-      AsyncStorage.getItem(LISTINGS_KEY),
-      AsyncStorage.getItem(BOOKINGS_KEY),
-    ]);
-    const ls = rawL ? JSON.parse(rawL) : [];
-    setListing(ls.find(x => x.id === listingId) || null);
+    if (!parkingId || !isAuthenticated) {
+      setLoading(false);
+      return;
+    }
 
-    const bs = rawB ? JSON.parse(rawB) : [];
-    bs.sort((a,b)=>new Date(b.start)-new Date(a.start));
-    setBookings(bs);
-  }, [listingId]);
+    setLoading(true);
+    try {
+      const [parkingsResult, bookingsResult] = await Promise.all([
+        getOwnerParkings(),
+        getOwnerBookings(),
+      ]);
+
+      // טעינת החניה
+      if (parkingsResult.success) {
+        const p = parkingsResult.data.find(x => x.id === parseInt(parkingId)) || null;
+        setParking(p);
+      } else {
+        console.error('Failed to load parkings:', parkingsResult.error);
+        setParking(null);
+      }
+
+      // טעינת הזמנות
+      if (bookingsResult.success) {
+        const sortedBookings = sortBookingsByDate(bookingsResult.data);
+        setBookings(sortedBookings);
+      } else {
+        console.error('Failed to load bookings:', bookingsResult.error);
+        setBookings([]);
+      }
+    } catch (error) {
+      console.error('Load error:', error);
+      setParking(null);
+      setBookings([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [parkingId, isAuthenticated]);
 
   useEffect(() => {
     const unsub = navigation.addListener('focus', load);
@@ -44,17 +74,17 @@ export default function OwnerListingDetailScreen({ route, navigation }) {
     return unsub;
   }, [navigation, load]);
 
-  const myBookings = useMemo(() => bookings.filter(b => b.ownerListingId === listingId), [bookings, listingId]);
+  const myBookings = useMemo(() => bookings.filter(b => b.parkingId === parseInt(parkingId)), [bookings, parkingId]);
   const confirmedInRange = useMemo(() => {
     return myBookings.filter(b => {
-      if (b.status !== 'confirmed') return false;
-      const s = new Date(b.start), e = new Date(b.end);
+      if (b.status !== 'CONFIRMED') return false;
+      const s = new Date(b.startTime), e = new Date(b.endTime);
       return overlaps(s,e,from,to);
     });
   }, [myBookings, from, to]);
 
   const totals = useMemo(() => {
-    const income = confirmedInRange.reduce((sum,b)=> sum + (b.total||0), 0);
+    const income = confirmedInRange.reduce((sum,b)=> sum + ((b.totalPriceCents||0) / 100), 0);
     return { income, count: confirmedInRange.length };
   }, [confirmedInRange]);
 
@@ -63,8 +93,8 @@ export default function OwnerListingDetailScreen({ route, navigation }) {
     const cur = new Date(from);
     while (cur <= to) { map[dateKey(cur)] = 0; cur.setDate(cur.getDate()+1); }
     confirmedInRange.forEach(b => {
-      const k = dateKey(new Date(b.end));
-      if (map[k] != null) map[k] += (b.total||0);
+      const k = dateKey(new Date(b.endTime));
+      if (map[k] != null) map[k] += ((b.totalPriceCents||0) / 100);
     });
     const arr = [];
     const c = new Date(from);
@@ -79,53 +109,49 @@ export default function OwnerListingDetailScreen({ route, navigation }) {
   const maxVal = Math.max(1, ...chart.map(p=>p.value));
 
   const renderBooking = ({ item }) => {
-    const s = new Date(item.start), e = new Date(item.end);
-    const isConfirmed = item.status === 'confirmed';
-    const isPending   = item.status === 'pending';
+    const s = new Date(item.startTime), e = new Date(item.endTime);
+    const statusColor = getStatusColor(item.status);
+    const statusText = getStatusText(item.status);
+    const hours = Math.ceil((e - s) / (1000 * 60 * 60));
+    const total = (item.totalPriceCents || 0) / 100;
+    
     return (
       <View style={styles.bCard}>
         <View style={styles.bHeader}>
-          <Text style={styles.bTitle} numberOfLines={1}>{item.spot?.title || 'חניה'}</Text>
+          <Text style={styles.bTitle} numberOfLines={1}>{item.user?.email || 'משתמש'}</Text>
           <Text
             style={[
               styles.statusPill,
-              isConfirmed && styles.statusOk,
-              isPending && styles.statusPending,
-              (!isConfirmed && !isPending) && styles.statusCancel
+              { backgroundColor: statusColor + '20', color: statusColor }
             ]}
           >
-            {isConfirmed ? 'מאושר' : isPending ? 'ממתין' : 'בוטל'}
+            {statusText}
           </Text>
         </View>
 
-        {!!item.spot?.address && <Text style={styles.line}>כתובת: {item.spot.address}</Text>}
-        <Text style={styles.line}>מ־{s.toLocaleString()} עד {e.toLocaleString()}</Text>
-        <Text style={styles.line}>משך: {item.hours} שעות • סה״כ: ₪{item.total}</Text>
+        <Text style={styles.line}>מ־{formatBookingDate(item.startTime)} עד {formatBookingDate(item.endTime)}</Text>
+        <Text style={styles.line}>משך: {hours} שעות • סה״כ: {formatCurrency(total)}</Text>
       </View>
     );
   };
-
-  const thumb = listing?.images?.[0]?.uri;
 
   return (
     <View style={styles.wrap}>
       <Text style={styles.header}>דוח חניה</Text>
 
-      {listing ? (
+      {parking ? (
         <View style={styles.card}>
-          {!!thumb && <Image source={{ uri: thumb }} style={styles.hero} />}
-
           <View style={styles.cardHeader}>
             <View style={styles.cardIconWrap}>
               <Ionicons name="business-outline" size={16} color="#fff" />
             </View>
-            <Text style={styles.title}>{listing.title || listing.address || 'חניה'}</Text>
+            <Text style={styles.title}>{parking.title || parking.address || 'חניה'}</Text>
           </View>
 
-          {!!listing.address && <Text style={styles.line}>כתובת: {listing.address}</Text>}
-          <Text style={styles.line}>מחיר לשעה: ₪{listing.price || 0}</Text>
-          {typeof listing.latitude === 'number' && typeof listing.longitude === 'number' && (
-            <Text style={styles.line}>מיקום: {listing.latitude.toFixed(5)}, {listing.longitude.toFixed(5)}</Text>
+          {!!parking.address && <Text style={styles.line}>כתובת: {parking.address}</Text>}
+          <Text style={styles.line}>מחיר לשעה: {formatCurrency(parking.priceHr || 0)}</Text>
+          {typeof parking.lat === 'number' && typeof parking.lng === 'number' && (
+            <Text style={styles.line}>מיקום: {parking.lat.toFixed(5)}, {parking.lng.toFixed(5)}</Text>
           )}
 
           {/* טווחים מהירים */}
@@ -169,7 +195,7 @@ export default function OwnerListingDetailScreen({ route, navigation }) {
           <View style={styles.summary}>
             <Ionicons name="cash-outline" size={16} color={theme.colors.text} style={{ marginEnd: 6 }} />
             <Text style={styles.summaryText}>
-              סה״כ הכנסות בטווח: ₪{totals.income} • {totals.count} הזמנות
+              סה״כ הכנסות בטווח: {formatCurrency(totals.income)} • {totals.count} הזמנות
             </Text>
           </View>
 

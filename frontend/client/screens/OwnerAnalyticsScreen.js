@@ -1,10 +1,10 @@
 // screens/OwnerAnalyticsScreen.js
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, ActivityIndicator } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
-import { getListingStats } from '../services/stats';
+import { useAuth } from '../contexts/AuthContext';
+import { getOwnerParkings, getParkingStats, formatCurrency, calculateOccupancyRate, calculateAverageHourlyRevenue } from '../services/api/owner';
 import BarChartMini from '../components/BarChartMini';
 
 const LISTINGS_KEY = 'owner_listings';
@@ -21,9 +21,10 @@ const fmtIL = (n) => new Intl.NumberFormat('he-IL').format(n || 0);
 export default function OwnerAnalyticsScreen({ route }) {
   const theme = useTheme();
   const styles = makeStyles(theme);
+  const { isAuthenticated } = useAuth();
 
-  const listingId = route?.params?.id;
-  const [listing, setListing] = useState(null);
+  const parkingId = route?.params?.id || route?.params?.parkingId;
+  const [parking, setParking] = useState(null);
   const [rangeKey, setRangeKey] = useState('30'); // 30 | 90 | 365
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState(null);
@@ -36,31 +37,52 @@ export default function OwnerAnalyticsScreen({ route }) {
     '365': isoDaysAgo(365),
   }), []);
 
-  const loadListing = useCallback(async () => {
-    if (!listingId) return;
-    const raw = await AsyncStorage.getItem(LISTINGS_KEY);
-    const list = raw ? JSON.parse(raw) : [];
-    const l = list.find(x => x.id === listingId) || null;
-    setListing(l);
-  }, [listingId]);
+  const loadParking = useCallback(async () => {
+    if (!parkingId || !isAuthenticated) return;
+    
+    try {
+      const result = await getOwnerParkings();
+      if (result.success) {
+        const p = result.data.find(x => x.id === parseInt(parkingId)) || null;
+        setParking(p);
+      } else {
+        console.error('Failed to load parkings:', result.error);
+        setParking(null);
+      }
+    } catch (error) {
+      console.error('Load parking error:', error);
+      setParking(null);
+    }
+  }, [parkingId, isAuthenticated]);
 
   const loadStats = useCallback(async () => {
-    if (!listingId) return;
+    if (!parkingId || !isAuthenticated) return;
     setLoading(true);
     try {
       const { from, to } = ranges[rangeKey];
-      const s = await getListingStats({ listingId, fromISO: from, toISO: to });
-      setStats(s);
-      setHiRevenueIdx(null);
-      setHiBookingsIdx(null);
-    } catch (e) {
+      const result = await getParkingStats(parkingId, { 
+        from, 
+        to,
+        days: parseInt(rangeKey)
+      });
+      
+      if (result.success) {
+        setStats(result.data);
+        setHiRevenueIdx(null);
+        setHiBookingsIdx(null);
+      } else {
+        console.error('Failed to load stats:', result.error);
+        setStats(null);
+      }
+    } catch (error) {
+      console.error('Load stats error:', error);
       setStats(null);
     } finally {
       setLoading(false);
     }
-  }, [listingId, rangeKey, ranges]);
+  }, [parkingId, rangeKey, ranges, isAuthenticated]);
 
-  useEffect(() => { loadListing(); }, [loadListing]);
+  useEffect(() => { loadParking(); }, [loadParking]);
   useEffect(() => { loadStats(); }, [loadStats]);
 
   const dailyRevenueData = useMemo(() => {
@@ -86,7 +108,7 @@ export default function OwnerAnalyticsScreen({ route }) {
   return (
     <View style={styles.wrap}>
       <Text style={styles.header}>סטטיסטיקות חניה</Text>
-      <Text style={styles.title}>{listing?.title || listing?.address || 'חניה'}</Text>
+      <Text style={styles.title}>{parking?.title || parking?.address || 'חניה'}</Text>
 
       {/* בחירת טווח (segmented) */}
       <View style={styles.tabs}>
@@ -119,7 +141,7 @@ export default function OwnerAnalyticsScreen({ route }) {
           <View style={styles.kpiRow}>
             <View style={styles.kpiCard}>
               <View style={styles.kpiIcon}><Ionicons name="cash-outline" size={16} color="#fff" /></View>
-              <Text style={styles.kpiNumber}>₪{fmtIL(kpis.revenue)}</Text>
+              <Text style={styles.kpiNumber}>{formatCurrency(kpis.revenue)}</Text>
               <Text style={styles.kpiLabel}>הכנסה בטווח</Text>
             </View>
             <View style={styles.kpiCard}>
@@ -138,19 +160,19 @@ export default function OwnerAnalyticsScreen({ route }) {
           <View style={styles.kpiRow}>
             <View style={styles.kpiCardSmall}>
               <Text style={styles.kpiMiniTitle}>ממוצע להזמנה</Text>
-              <Text style={[styles.kpiMiniNum, { color: theme.colors.success }]}>₪{fmtIL(kpis.avgRevPerBooking)}</Text>
+              <Text style={[styles.kpiMiniNum, { color: theme.colors.success }]}>{formatCurrency(kpis.avgRevPerBooking)}</Text>
             </View>
             <View style={styles.kpiCardSmall}>
               <Text style={styles.kpiMiniTitle}>שעות להזמנה</Text>
               <Text style={[styles.kpiMiniNum, { color: theme.colors.primary }]}>{fmtIL(kpis.avgHoursPerBooking)}</Text>
             </View>
             <View style={styles.kpiCardSmall}>
-              <Text style={styles.kpiMiniTitle}>₪ ב־30 יום</Text>
-              <Text style={[styles.kpiMiniNum, { color: theme.colors.success }]}>₪{fmtIL(kpis.last30Revenue)}</Text>
+              <Text style={styles.kpiMiniTitle}>תפוסה</Text>
+              <Text style={[styles.kpiMiniNum, { color: '#FF6B35' }]}>{calculateOccupancyRate(stats)}%</Text>
             </View>
             <View style={styles.kpiCardSmall}>
-              <Text style={styles.kpiMiniTitle}>הזמנות 30 יום</Text>
-              <Text style={[styles.kpiMiniNum, { color: '#7a4d00' }]}>{fmtIL(kpis.last30Bookings)}</Text>
+              <Text style={styles.kpiMiniTitle}>₪ לשעה</Text>
+              <Text style={[styles.kpiMiniNum, { color: theme.colors.success }]}>{formatCurrency(calculateAverageHourlyRevenue(stats))}</Text>
             </View>
           </View>
 

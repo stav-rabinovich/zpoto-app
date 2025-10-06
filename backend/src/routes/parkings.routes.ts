@@ -4,6 +4,41 @@ import { auth, AuthedRequest } from '../middlewares/auth';
 
 const r = Router();
 
+/**
+ * GET /api/parkings/search
+ * חיפוש חניות לפי מיקום וזמן
+ * Query params: lat, lng, radius (km), startTime (ISO), endTime (ISO)
+ */
+r.get('/search', async (req, res, next) => {
+  try {
+    const { lat, lng, radius, startTime, endTime } = req.query;
+
+    if (!lat || !lng) {
+      return res.status(400).json({ error: 'Missing required params: lat, lng' });
+    }
+
+    const params: any = {
+      lat: Number(lat),
+      lng: Number(lng),
+      radiusKm: radius ? Number(radius) : undefined,
+    };
+
+    if (startTime && endTime) {
+      params.startTime = new Date(String(startTime));
+      params.endTime = new Date(String(endTime));
+
+      if (isNaN(params.startTime.getTime()) || isNaN(params.endTime.getTime())) {
+        return res.status(400).json({ error: 'Invalid date format for startTime/endTime' });
+      }
+    }
+
+    const data = await svc.searchParkings(params);
+    res.json({ data });
+  } catch (e) {
+    next(e);
+  }
+});
+
 // GET /api/parkings — פתוח
 r.get('/', async (_req, res, next) => {
   try {
@@ -17,9 +52,8 @@ r.get('/', async (_req, res, next) => {
 // POST /api/parkings — מחייב התחברות, משייך ownerId מה-JWT
 r.post('/', auth, async (req: AuthedRequest, res, next) => {
   try {
-    const { title, address, lat, lng, priceHr } = req.body ?? {};
+    const { address, lat, lng, priceHr } = req.body ?? {};
     if (
-      typeof title !== 'string' ||
       typeof address !== 'string' ||
       typeof lat !== 'number' ||
       typeof lng !== 'number' ||
@@ -27,11 +61,10 @@ r.post('/', auth, async (req: AuthedRequest, res, next) => {
     ) {
       return res
         .status(400)
-        .json({ error: 'Invalid body: {title, address, lat, lng, priceHr}' });
+        .json({ error: 'Invalid body: {address, lat, lng, priceHr}' });
     }
 
     const data = await svc.createParking({
-      title,
       address,
       lat,
       lng,

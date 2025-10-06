@@ -356,9 +356,9 @@ export default function HomeScreen({ navigation }) {
                       onPress={() => navigation.navigate('Bookings')}
                       hitSlop={{ top:8, bottom:8, left:8, right:8 }}
                       accessibilityRole="button"
-                      accessibilityLabel="צפייה בהזמנות"
+                      accessibilityLabel="צ'אט עם התמיכה"
                     >
-                      <Ionicons name="list" size={20} color={theme.colors.success} />
+                      <Ionicons name="chatbubble-ellipses" size={20} color={theme.colors.success} />
                     </TouchableOpacity>
                   </View>
                   <Text style={styles.activeLine}>{activeBooking.spot?.title || 'חניה'}</Text>
@@ -366,11 +366,8 @@ export default function HomeScreen({ navigation }) {
                   <View style={{ flexDirection:'row', gap:8, marginTop:10 }}>
                     <TouchableOpacity
                       style={styles.extendBtn}
-                      onPress={() => navigation.navigate('Booking', {
-                        spot: activeBooking.spot,
-                        bookingId: activeBooking.id,
-                        initialStart: activeBooking.start,
-                        initialEnd: activeBooking.end
+                      onPress={() => navigation.navigate('BookingDetail', {
+                        id: activeBooking.id
                       })}
                       activeOpacity={0.9}
                     >

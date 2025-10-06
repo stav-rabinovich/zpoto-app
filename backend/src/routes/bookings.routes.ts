@@ -6,12 +6,12 @@ const r = Router();
 
 /**
  * GET /api/bookings
- * מחזיר את כל ההזמנות (כרגע ללא סינון).
- * אפשר להרחיב בהמשך לשאילתות (?me=1, ?parkingId=...)
+ * מחזיר את ההזמנות של המשתמש המחובר
  */
-r.get('/', async (_req, res, next) => {
+r.get('/', auth, async (req: AuthedRequest, res, next) => {
   try {
-    const data = await svc.listBookings();
+    const userId = req.userId!;
+    const data = await svc.listBookingsByUser(userId);
     res.json({ data });
   } catch (e) {
     next(e);
@@ -25,9 +25,11 @@ r.get('/', async (_req, res, next) => {
  */
 r.post('/', auth, async (req: AuthedRequest, res, next) => {
   try {
+    console.log('🔥 BOOKING REQUEST:', req.body, 'User ID:', req.userId);
     const { parkingId, startTime, endTime, status } = req.body ?? {};
 
     if (typeof parkingId !== 'number' || typeof startTime !== 'string' || typeof endTime !== 'string') {
+      console.log('❌ Invalid body types:', { parkingId: typeof parkingId, startTime: typeof startTime, endTime: typeof endTime });
       return res.status(400).json({ error: 'Invalid body: {parkingId:number, startTime:ISO string, endTime:ISO string, status?}' });
     }
 
@@ -37,6 +39,14 @@ r.post('/', auth, async (req: AuthedRequest, res, next) => {
       return res.status(400).json({ error: 'Invalid dates: startTime/endTime must be valid ISO strings' });
     }
 
+    console.log('🚀 Creating booking with:', {
+      userId: Number(req.userId),
+      parkingId,
+      startTime: start,
+      endTime: end,
+      status,
+    });
+    
     const data = await svc.createBooking({
       userId: Number(req.userId),
       parkingId,
@@ -45,6 +55,7 @@ r.post('/', auth, async (req: AuthedRequest, res, next) => {
       status,
     });
 
+    console.log('✅ Booking created successfully:', data);
     res.status(201).json({ data });
   } catch (e: any) {
     if (e?.message === 'INVALID_DATES') return res.status(400).json({ error: 'Invalid dates' });
@@ -58,12 +69,15 @@ r.post('/', auth, async (req: AuthedRequest, res, next) => {
  * GET /api/bookings/:id
  * שליפת הזמנה לפי מזהה
  */
-r.get('/:id', async (req, res, next) => {
+r.get('/:id', auth, async (req: AuthedRequest, res, next) => {
   try {
     const id = Number(req.params.id);
+    if (isNaN(id)) {
+      return res.status(400).json({ error: 'Invalid booking ID' });
+    }
     const data = await svc.getBooking(id);
     if (!data) return res.status(404).json({ error: 'Not found' });
-    res.json({ data });
+    res.json(data);
   } catch (e) {
     next(e);
   }
@@ -84,8 +98,13 @@ r.patch('/:id/status', auth, async (req: AuthedRequest, res, next) => {
 
     const current = await svc.getBooking(id);
     if (!current) return res.status(404).json({ error: 'Not found' });
-    if (current.userId !== Number(req.userId)) {
-      return res.status(403).json({ error: 'Forbidden: only the booking creator can change status' });
+    
+    // בדיקה שהמשתמש הוא יוצר ההזמנה או בעל החניה
+    const isBookingCreator = current.userId === Number(req.userId);
+    const isParkingOwner = current.parking?.ownerId === Number(req.userId);
+    
+    if (!isBookingCreator && !isParkingOwner) {
+      return res.status(403).json({ error: 'Forbidden: only the booking creator or parking owner can change status' });
     }
 
     const data = await svc.updateBookingStatus(id, status);
