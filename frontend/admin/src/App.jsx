@@ -1,7 +1,7 @@
 // [ADMIN] admin/src/App.jsx
 import { useEffect, useState } from "react";
 import axios from "axios";
-import Dashboard from "./DashboardNew";
+import Dashboard from "./Dashboard";
 const API = "http://localhost:4000";
 
 export default function App() {
@@ -11,7 +11,7 @@ export default function App() {
   const [loginError, setLoginError] = useState("");
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("requests"); // requests, users, parkings, stats
+  const [activeTab, setActiveTab] = useState("requests"); // requests, users, parkings, bookings, chat, coupons
   const [stats, setStats] = useState(null);
   const [users, setUsers] = useState([]);
   const [parkings, setParkings] = useState([]);
@@ -63,9 +63,10 @@ export default function App() {
 
   const loadParkings = async () => {
     try {
-      // טעינת חניות
-      const parkingsRes = await api.get("/api/parkings");
+      // טעינת חניות - דרך ה-admin API לנתונים מסונכרנים
+      const parkingsRes = await api.get("/api/admin/parkings");
       const parkingsData = Array.isArray(parkingsRes.data?.data) ? parkingsRes.data.data : (Array.isArray(parkingsRes.data) ? parkingsRes.data : []);
+      console.log('🏢 Loaded parkings from admin API:', parkingsData.length, parkingsData);
       setParkings(parkingsData);
       
       // טעינת הזמנות

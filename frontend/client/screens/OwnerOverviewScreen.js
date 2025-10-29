@@ -1,11 +1,10 @@
 // screens/OwnerOverviewScreen.js
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, FlatList } from 'react-native';
-import * as bookingsRepo from '../data/bookingsRepo';
-import { BOOKING_STATUS } from '../data/bookingsRepo';
-import BookingLifecycleWatcher from '../components/BookingLifecycleWatcher';
-import { LinearGradient } from 'expo-linear-gradient';
+import React, { useEffect, useState, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useAuth } from '../contexts/AuthContext';
+import api from '../utils/api';
+
 
 // צבעי Zpoto
 const ZPOTO = {
@@ -14,192 +13,273 @@ const ZPOTO = {
   border: '#C7DEFF',
 };
 
-const PRESETS = [
-  { key: '7d',  label: '7 ימים',  deltaDays: 7  },
-  { key: '30d', label: '30 ימים', deltaDays: 30 },
-  { key: '90d', label: '90 ימים', deltaDays: 90 },
-];
 
-export default function OwnerOverviewScreen() {
-  const [from, setFrom]   = useState(daysAgo(7));
-  const [to, setTo]       = useState(new Date());
+export default function OwnerOverviewScreen({ navigation }) {
+  const { user, isAuthenticated, isOwner, logout, handleUserBlocked, isLoggingOut, blockingInProgress } = useAuth();
   const [loading, setLoading] = useState(false);
-  const [all, setAll]         = useState([]);
-  const [kpi, setKpi]         = useState({ revenue: 0, completedCount: 0, approvedCount: 0, totalCount: 0 });
+  
+  // Commission data
+  const [commissionData, setCommissionData] = useState(null);
+  const [commissionsLoading, setCommissionsLoading] = useState(false);
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() + 1 };
+  });
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const items = await bookingsRepo.getAll();
-      setAll(items);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // Bookings data for the selected month
+  const [monthlyBookings, setMonthlyBookings] = useState([]);
+  const [bookingsLoading, setBookingsLoading] = useState(false);
 
-  async function recompute() {
-    const res = await bookingsRepo.kpis(from, to);
-    setKpi(res);
-  }
-
-  useEffect(() => { load(); }, [load]);
-
+  // בדיקת authentication
   useEffect(() => {
-    recompute();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [from, to, all.length]);
+    if (!isAuthenticated || !isOwner) {
+      console.log('❌ Owner access denied - redirecting to home');
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Home' }],
+      });
+      return;
+    }
+  }, [isAuthenticated, isOwner, navigation]);
 
-  const filtered = useMemo(
-    () => all.filter((b) => bookingsRepo.inRange(b, from, to)),
-    [all, from, to]
-  );
+  // טעינת עמלות חודשיות
+  const loadCommissions = useCallback(async () => {
+    if (!isAuthenticated || !user?.id) return;
+    
+    setCommissionsLoading(true);
+    try {
+      const response = await api.get(
+        `/api/commissions/owner/${user.id}/commissions?year=${selectedMonth.year}&month=${selectedMonth.month}`,
+        { headers: { Authorization: `Bearer ${user.token}` } }
+      );
+      
+      if (response.data.success) {
+        setCommissionData(response.data.data);
+        console.log('💰 Commission data loaded for overview:', response.data.data.summary);
+      }
+    } catch (error) {
+      console.log('💰 Error loading commissions for overview:', error.message);
+    } finally {
+      setCommissionsLoading(false);
+    }
+  }, [isAuthenticated, user, selectedMonth]);
 
-  const completed = useMemo(
-    () => filtered.filter((b) => b.status === BOOKING_STATUS.COMPLETED),
-    [filtered]
-  );
+  // טעינת הזמנות החודש
+  const loadMonthlyBookings = useCallback(async () => {
+    if (!isAuthenticated || !user?.id) return;
+    
+    setBookingsLoading(true);
+    try {
+      const response = await api.get('/api/owner/bookings');
+      
+      if (response.data && Array.isArray(response.data.data)) {
+        const allBookings = response.data.data;
+        
+        // סינון הזמנות לחודש הנבחר
+        const monthlyFiltered = allBookings.filter(booking => {
+          const bookingDate = new Date(booking.startTime);
+          return bookingDate.getFullYear() === selectedMonth.year && 
+                 bookingDate.getMonth() + 1 === selectedMonth.month;
+        });
+        
+        // מיון לפי תאריך (החדשות ראשונות)
+        monthlyFiltered.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+        
+        setMonthlyBookings(monthlyFiltered);
+        console.log(`📅 Loaded ${monthlyFiltered.length} bookings for ${selectedMonth.month}/${selectedMonth.year}`);
+      }
+    } catch (error) {
+      console.log('📅 Error loading monthly bookings:', error.message);
+      setMonthlyBookings([]);
+    } finally {
+      setBookingsLoading(false);
+    }
+  }, [isAuthenticated, user, selectedMonth]);
 
-  const approved = useMemo(
-    () => filtered.filter((b) => b.status === BOOKING_STATUS.APPROVED),
-    [filtered]
-  );
+  useEffect(() => { 
+    loadCommissions();
+    loadMonthlyBookings();
+  }, [loadCommissions, loadMonthlyBookings, selectedMonth]);
+
+  // אם המשתמש לא מחובר או לא בעל חניה, לא מציג כלום
+  if (!isAuthenticated || !isOwner) {
+    return null;
+  }
 
   return (
     <View style={styles.container}>
-      {/* מריץ אוטומציית סטטוסים ברקע */}
-      <BookingLifecycleWatcher />
-
       {/* כותרת במרכז */}
-      <Text style={styles.header}>סקירה כללית</Text>
+      <Text style={styles.header}>הכנסות חודשיות</Text>
 
-      {/* Presets – מילוי בגרדיאנט צבעי Zpoto */}
-      <View style={styles.presetRow}>
-        {PRESETS.map((p) => {
-          const active = isSameRange(from, to, p.deltaDays);
-          return (
-            <TouchableOpacity
-              key={p.key}
-              style={[styles.presetBtn, active && styles.presetBtnActive]}
-              onPress={() => {
-                setFrom(daysAgo(p.deltaDays));
-                setTo(new Date());
-              }}
-              activeOpacity={0.9}
+      {/* הכנסות חודשיות */}
+      <View style={styles.revenueSection}>
+        <View style={styles.revenueHeader}>
+          <View style={styles.monthSelector}>
+            <TouchableOpacity 
+              onPress={() => setSelectedMonth(prev => {
+                let newMonth = prev.month - 1;
+                let newYear = prev.year;
+                if (newMonth < 1) { newMonth = 12; newYear--; }
+                return { year: newYear, month: newMonth };
+              })}
+              style={styles.monthButton}
             >
-              {active ? (
-                <LinearGradient
-                  colors={[ZPOTO.primary, ZPOTO.primaryDark]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.presetGradient}
-                >
-                  <Text style={[styles.presetText, styles.presetTextActive]}>{p.label}</Text>
-                </LinearGradient>
-              ) : (
-                <Text style={styles.presetText}>{p.label}</Text>
-              )}
+              <Ionicons name="chevron-back" size={20} color={ZPOTO.primary} />
             </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {/* KPIs */}
-      {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator />
-          <Text>טוען נתונים…</Text>
-        </View>
-      ) : (
-        <>
-          <View style={styles.kpis}>
-            <Kpi title="הכנסה" value={formatCurrency(kpi.revenue)} />
-            <Kpi title="הזמנות שהושלמו" value={String(kpi.completedCount)} />
-            <Kpi title="הזמנות שאושרו" value={String(kpi.approvedCount)} />
-            <Kpi title="סה״כ הזמנות בטווח" value={String(kpi.totalCount)} />
+            
+            <Text style={styles.monthText}>
+              {new Date(selectedMonth.year, selectedMonth.month - 1).toLocaleDateString('he-IL', {
+                month: 'long',
+                year: 'numeric'
+              })}
+            </Text>
+            
+            <TouchableOpacity 
+              onPress={() => setSelectedMonth(prev => {
+                let newMonth = prev.month + 1;
+                let newYear = prev.year;
+                if (newMonth > 12) { newMonth = 1; newYear++; }
+                return { year: newYear, month: newMonth };
+              })}
+              style={styles.monthButton}
+            >
+              <Ionicons name="chevron-forward" size={20} color={ZPOTO.primary} />
+            </TouchableOpacity>
           </View>
+        </View>
 
-          {/* טיפ – עיצוב זהה ל-infoStrip שב-OwnerIntroScreen:
-              אייקון ראשון, ואז הטקסט עטוף וּמיושר לשמאל */}
-          <View style={styles.tipStrip}>
-            <Ionicons name="bulb-outline" size={16} color={ZPOTO.primary} style={styles.tipIcon} />
-            <View style={styles.tipTextWrap}>
-              <Text style={styles.tipStripText}>
-                טיפ: הורד מחיר ב־10% לשעות חלשות.
-              </Text>
+        {commissionsLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color={ZPOTO.primary} />
+            <Text style={styles.loadingText}>טוען נתוני הכנסות...</Text>
+          </View>
+        ) : commissionData ? (
+          <View style={styles.revenueCards}>
+            <View style={styles.mainRevenueCard}>
+              <Text style={styles.mainRevenueLabel}>נטו לתשלום</Text>
+              <Text style={styles.mainRevenueValue}>₪{commissionData.summary.totalNetOwnerILS}</Text>
+            </View>
+            
+            <View style={styles.secondaryCards}>
+              <View style={styles.secondaryCard}>
+                <Text style={styles.secondaryLabel}>עמלת זפוטו</Text>
+                <Text style={styles.secondaryValue}>₪{commissionData.summary.totalCommissionILS}</Text>
+              </View>
+              <View style={styles.secondaryCard}>
+                <Text style={styles.secondaryLabel}>הזמנות</Text>
+                <Text style={styles.secondaryValue}>{commissionData.summary.count}</Text>
+              </View>
             </View>
           </View>
-        </>
-      )}
-
-      {/* רשימת הזמנות בטווח */}
-      <Text style={styles.subHeader}>הזמנות בטווח הנבחר</Text>
-      <FlatList
-        data={[...filtered].sort((a, b) => (new Date(b.startAt) - new Date(a.startAt)))}
-        keyExtractor={(item) => String(item.id)}
-        renderItem={({ item }) => (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>{item.title || 'הזמנה'}</Text>
-            <Text style={styles.row}>סטטוס: {prettyStatus(item.status)}</Text>
-            <Text style={styles.row}>מתאריך: {fmt(item.startAt)} עד {fmt(item.endAt)}</Text>
-            <Text style={styles.row}>מחיר משוער: {bookingsRepo.calcTotalPrice(item)} ₪</Text>
+        ) : (
+          <View style={styles.emptyContainer}>
+            <Ionicons name="calendar-outline" size={48} color={ZPOTO.border} />
+            <Text style={styles.emptyText}>אין הכנסות לחודש זה</Text>
           </View>
         )}
-        contentContainerStyle={{ padding: 12, paddingBottom: 48 }}
-      />
+
+        {/* טיפ */}
+        <View style={styles.tipContainer}>
+          <Ionicons name="bulb-outline" size={16} color={ZPOTO.primary} />
+          <Text style={styles.tipText}>
+            טיפ: הורד מחיר ב־10% לשעות חלשות כדי למקסם תפוסה
+          </Text>
+        </View>
+      </View>
+
+      {/* הזמנות החודש */}
+      <View style={styles.bookingsSection}>
+        <Text style={styles.bookingsTitle}>הזמנות החודש</Text>
+        
+        {bookingsLoading ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="small" color={ZPOTO.primary} />
+            <Text style={styles.loadingText}>טוען הזמנות...</Text>
+          </View>
+        ) : monthlyBookings.length > 0 ? (
+          <View style={styles.bookingsList}>
+            {monthlyBookings.map((booking) => (
+              <View key={booking.id} style={styles.bookingCard}>
+                <View style={styles.bookingHeader}>
+                  <Text style={styles.bookingTitle}>
+                    {booking.parking?.title || booking.parking?.address || 'הזמנה'}
+                  </Text>
+                  <View style={[styles.statusBadge, { 
+                    backgroundColor: getStatusColor(booking.status) 
+                  }]}>
+                    <Text style={styles.statusText}>
+                      {getStatusText(booking.status)}
+                    </Text>
+                  </View>
+                </View>
+                
+                <View style={styles.bookingDetails}>
+                  <View style={styles.bookingRow}>
+                    <Ionicons name="calendar" size={14} color="#666" />
+                    <Text style={styles.bookingDetailText}>
+                      {formatBookingDate(booking.startTime, booking.endTime)}
+                    </Text>
+                  </View>
+                  
+                  <View style={styles.bookingRow}>
+                    <Ionicons name="cash" size={14} color="#666" />
+                    <Text style={styles.bookingDetailText}>
+                      ₪{((booking.totalPriceCents || 0) / 100).toFixed(2)}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : (
+          <View style={styles.emptyBookingsContainer}>
+            <Ionicons name="calendar-outline" size={32} color="#ccc" />
+            <Text style={styles.emptyBookingsText}>
+              אין הזמנות לחודש זה
+            </Text>
+          </View>
+        )}
+      </View>
     </View>
   );
 }
 
-function Kpi({ title, value }) {
-  return (
-    <View style={styles.kpiCard}>
-      <Text style={styles.kpiTitle}>{title}</Text>
-      <Text style={styles.kpiValue}>{value}</Text>
-    </View>
-  );
-}
-
-function prettyStatus(s) {
-  switch (s) {
-    case BOOKING_STATUS.PENDING:   return 'ממתינה לאישור';
-    case BOOKING_STATUS.APPROVED:  return 'מאושרת (עתידית)';
-    case BOOKING_STATUS.ACTIVE:    return 'פעילה';
-    case BOOKING_STATUS.COMPLETED: return 'הושלמה';
-    case BOOKING_STATUS.REJECTED:  return 'נדחתה';
-    case BOOKING_STATUS.CANCELED:  return 'בוטלה';
-    default: return String(s || '-');
+// פונקציות עזר
+const getStatusColor = (status) => {
+  switch (status) {
+    case 'CONFIRMED': return '#10b981';
+    case 'COMPLETED': return '#059669';
+    case 'PENDING': return '#f59e0b';
+    case 'REJECTED': return '#ef4444';
+    case 'CANCELED': return '#6b7280';
+    default: return '#6b7280';
   }
-}
+};
 
-function fmt(v) {
+const getStatusText = (status) => {
+  switch (status) {
+    case 'CONFIRMED': return 'מאושרת';
+    case 'COMPLETED': return 'הושלמה';
+    case 'PENDING': return 'ממתינה';
+    case 'REJECTED': return 'נדחתה';
+    case 'CANCELED': return 'בוטלה';
+    default: return status;
+  }
+};
+
+const formatBookingDate = (startTime, endTime) => {
   try {
-    const d = new Date(v);
-    const dd = d.toLocaleDateString('he-IL');
-    const tt = d.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
-    return `${dd} ${tt}`;
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    const startDate = start.toLocaleDateString('he-IL');
+    const startHour = start.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+    const endHour = end.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+    
+    return `${startDate} ${startHour} - ${endHour}`;
   } catch {
-    return '-';
+    return 'תאריך לא זמין';
   }
-}
-
-function formatCurrency(n) {
-  const val = Number(n || 0);
-  return val.toLocaleString('he-IL', { style: 'currency', currency: 'ILS', maximumFractionDigits: 0 });
-}
-
-function daysAgo(n) {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function isSameRange(from, to, deltaDays) {
-  const targetFrom = daysAgo(deltaDays).getTime();
-  const now = new Date();
-  const okTo = Math.abs(to.getTime() - now.getTime()) < 1000 * 60 * 5; // 5 דקות
-  return Math.abs(from.getTime() - targetFrom) < 1000 * 60 && okTo;
-}
+};
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#fff' },
@@ -207,71 +287,203 @@ const styles = StyleSheet.create({
   // כותרת ראשית – במרכז
   header: { fontSize: 20, fontWeight: '700', margin: 16, textAlign: 'center' },
 
-  // Presets
-  presetRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 16, marginBottom: 8 },
-  presetBtn: {
-    borderWidth: 1,
-    borderColor: ZPOTO.border,
-    borderRadius: 24,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#FFFFFF',
-    overflow: 'hidden',
-  },
-  presetBtnActive: {
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-    borderColor: 'transparent',
-    backgroundColor: 'transparent',
-  },
-  presetGradient: {
-    borderRadius: 24,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  presetText: { color: '#111827', fontWeight: '600', textAlign: 'left' },
-  presetTextActive: { color: '#fff' },
+  // Loading
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
 
-  center: { alignItems: 'center', justifyContent: 'center', paddingVertical: 24, gap: 6 },
-
-  // KPIs – פריסה 2x2; טקסטים לשמאל
-  kpis: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, paddingHorizontal: 16, marginBottom: 8 },
-  kpiCard: { flexBasis: '48%', backgroundColor: '#f7f7fb', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#ececf1' },
-  kpiTitle: { fontSize: 14, color: '#6b7280', marginBottom: 4, textAlign: 'left' },
-  kpiValue: { fontSize: 18, fontWeight: '700', textAlign: 'left' },
-
-  // טיפ – כמו infoStrip: אייקון + טקסט משמאלו, מיושר לשמאל
-  tipStrip: {
+  // הכנסות חודשיות
+  revenueSection: {
+    margin: 16,
+    backgroundColor: 'white',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  revenueHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  revenueTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#1a1a1a',
+  },
+  monthSelector: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    backgroundColor: `${ZPOTO.primary}08`,
     borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#ececf1',
-    backgroundColor: '#F8FAFF',
-    marginHorizontal: 16,
-    marginTop: 6,
-    marginBottom: 10,
+    padding: 4,
   },
-  tipIcon: { marginEnd: 8 },
-  tipTextWrap: { flex: 1, alignSelf: 'stretch' },
-  tipStripText: { fontSize: 13, color: '#4B5563', textAlign: 'left' },
-
-  // כותרת משנה – לשמאל
-  subHeader: { fontSize: 16, fontWeight: '700', marginHorizontal: 16, marginTop: 8, marginBottom: 4, textAlign: 'left' },
-
-  // כרטיסיות – הכל לשמאל
-  card: {
-    backgroundColor: '#f7f7fb',
+  monthButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: 'white',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  monthText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: ZPOTO.primary,
+    minWidth: 120,
+    textAlign: 'center',
+    marginHorizontal: 12,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#666',
+    marginTop: 12,
+  },
+  revenueCards: {
+    gap: 16,
+  },
+  mainRevenueCard: {
+    backgroundColor: `${ZPOTO.primary}10`,
     borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: `${ZPOTO.primary}20`,
+  },
+  mainRevenueLabel: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 8,
+  },
+  mainRevenueValue: {
+    fontSize: 36,
+    fontWeight: '800',
+    color: ZPOTO.primary,
+  },
+  secondaryCards: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  secondaryCard: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+  },
+  secondaryLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  secondaryValue: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#333',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#999',
+    marginTop: 12,
+  },
+  tipContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${ZPOTO.primary}05`,
+    borderRadius: 8,
     padding: 12,
-    marginHorizontal: 16,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#ececf1',
-    alignItems: 'flex-start',
+    marginTop: 20,
   },
-  cardTitle: { fontSize: 15, fontWeight: '600', marginBottom: 4, textAlign: 'left', alignSelf: 'flex-start' },
-  row: { fontSize: 13, color: '#333', textAlign: 'left', alignSelf: 'flex-start' },
+  tipText: {
+    fontSize: 14,
+    color: '#555',
+    marginStart: 8,
+    flex: 1,
+  },
+
+  // הזמנות החודש
+  bookingsSection: {
+    margin: 16,
+    marginTop: 8,
+  },
+  bookingsTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    marginBottom: 12,
+  },
+  bookingsList: {
+    gap: 8,
+  },
+  bookingCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  bookingHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  bookingTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1f2937',
+    flex: 1,
+    marginEnd: 8,
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'white',
+  },
+  bookingDetails: {
+    gap: 4,
+  },
+  bookingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  bookingDetailText: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  emptyBookingsContainer: {
+    alignItems: 'center',
+    paddingVertical: 32,
+  },
+  emptyBookingsText: {
+    fontSize: 14,
+    color: '#9ca3af',
+    marginTop: 8,
+  },
 });

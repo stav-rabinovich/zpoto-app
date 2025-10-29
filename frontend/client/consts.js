@@ -1,6 +1,6 @@
 
 const {
-    API_BASE = 'http://192.168.1.161:4000',
+    API_BASE = 'http://10.0.0.23:4000',
 } = process.env;
 
 export {

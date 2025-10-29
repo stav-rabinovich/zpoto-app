@@ -11,16 +11,33 @@ export async function openWaze(latitude, longitude, label = '') {
   try {
     const lat = fixed(latitude);
     const lon = fixed(longitude);
+    
+    console.log(`🗺️ Opening Waze navigation:`);
+    console.log(`   📍 Coordinates: ${lat}, ${lon}`);
+    console.log(`   🏷️ Label: ${label}`);
+    
     // פורמט deep link של Waze
     const appUrl = `waze://?ll=${lat},${lon}&navigate=yes${label ? `&q=${encodeURIComponent(label)}` : ''}`;
     const webUrl = `https://waze.com/ul?ll=${lat},${lon}&navigate=yes${label ? `&q=${encodeURIComponent(label)}` : ''}`;
 
+    console.log(`   📱 App URL: ${appUrl}`);
+    console.log(`   🌐 Web URL: ${webUrl}`);
+
     const supported = await Linking.canOpenURL('waze://');
+    console.log(`   ✅ Waze app available: ${supported ? 'YES' : 'NO'}`);
+    
     await Linking.openURL(supported ? appUrl : webUrl);
+    console.log(`   🚀 Navigation opened successfully`);
   } catch (e) {
+    console.warn(`   ❌ Waze failed, using fallback:`, e);
     // fallback עדין
     const webUrl = `https://waze.com/ul?ll=${latitude},${longitude}&navigate=yes`;
-    try { await Linking.openURL(webUrl); } catch {}
+    try { 
+      await Linking.openURL(webUrl); 
+      console.log(`   🔄 Fallback web URL opened`);
+    } catch (fallbackError) {
+      console.error(`   ❌ Fallback also failed:`, fallbackError);
+    }
   }
 }
 

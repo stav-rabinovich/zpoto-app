@@ -116,9 +116,54 @@ function num(n) {
   return Number.isFinite(v) ? v : undefined;
 }
 
+// פונקציה לתמצות כתובות - רק עיר, רחוב ומספר
+function formatIsraeliAddress(fullAddress, addressDetails = {}) {
+  if (!fullAddress) return '';
+  
+  const parts = [];
+  
+  // נוסיף מספר בית אם יש
+  if (addressDetails.house_number) {
+    parts.push(addressDetails.house_number);
+  }
+  
+  // נוסיף רחוב אם יש
+  if (addressDetails.road) {
+    parts.push(addressDetails.road);
+  }
+  
+  // נוסיף עיר - נבחר מכמה אפשרויות
+  const city = addressDetails.city || 
+               addressDetails.town || 
+               addressDetails.village || 
+               addressDetails.municipality ||
+               addressDetails.suburb;
+  
+  if (city) {
+    parts.push(city);
+  }
+  
+  // אם אין מספיק פרטים, נחזיר את הכתובת המקורית מקוצרת
+  if (parts.length === 0) {
+    // ננסה לחלץ מהכתובת המלאה רק את החלק הרלוונטי
+    const segments = fullAddress.split(',').map(s => s.trim());
+    return segments.slice(0, 3).join(', '); // רק 3 הרכיבים הראשונים
+  }
+  
+  return parts.join(', ');
+}
+
 // ========= Public API =========
 
-// 🔍 השלמה/חיפוש קל
+// גבולות ישראל (מדויק)
+const ISRAEL_BBOX = {
+  left: 34.2,    // מזרח
+  right: 35.9,   // מערב  
+  top: 33.4,     // צפון
+  bottom: 29.5   // דרום
+};
+
+// 🔍 השלמה/חיפוש קל (מוגבל לישראל)
 export async function osmAutocomplete(input, { aroundLocation = null, limit = 6, language = 'he' } = {}) {
   if (!input || input.trim().length < 2) return [];
   const params = new URLSearchParams({
@@ -127,12 +172,17 @@ export async function osmAutocomplete(input, { aroundLocation = null, limit = 6,
     addressdetails: '1',
     'accept-language': language,
     limit: String(limit),
+    countrycodes: 'il', // הגבלה לישראל
   });
 
+  // הוספת bbox לישראל תמיד
+  params.append('viewbox', `${ISRAEL_BBOX.left},${ISRAEL_BBOX.top},${ISRAEL_BBOX.right},${ISRAEL_BBOX.bottom}`);
+  params.append('bounded', '1');
+
+  // אם יש מיקום ספציפי, נוסיף גם אותו כprioritet
   if (aroundLocation?.latitude && aroundLocation?.longitude) {
-    const bb = bboxAround(aroundLocation, 8);
+    const bb = bboxAround(aroundLocation, 5); // רדיוס קטן יותר - 5 ק"מ
     params.append('viewbox', `${bb.left},${bb.top},${bb.right},${bb.bottom}`);
-    params.append('bounded', '1');
   }
 
   const url = `${BASE}/search?${params.toString()}`;
@@ -147,14 +197,37 @@ export async function osmAutocomplete(input, { aroundLocation = null, limit = 6,
   const out = arr.map((r) => {
     const osmTypeLetter = r.osm_type?.[0]?.toUpperCase() || 'N';
     const id = `${osmTypeLetter}-${r.osm_id}`;
+    
+    // שימוש בכתובת מתומצתת במקום הכתובת המלאה
+    const shortAddress = formatIsraeliAddress(r.display_name, r.address || {});
+    
+    // בדיקה אם יש שם של מקום מוכר (עסק, מסעדה וכו')
+    const businessName = r.address?.amenity || 
+                        r.address?.shop || 
+                        r.address?.name ||
+                        r.name ||
+                        (r.display_name && r.display_name.split(',')[0]?.trim());
+    
+    // אם יש שם עסק ברור, נציג אותו עם הכתובת
+    let displayText = shortAddress;
+    if (businessName && 
+        businessName !== shortAddress && 
+        businessName.length > 2 && 
+        !shortAddress.includes(businessName)) {
+      displayText = `${businessName} - ${shortAddress}`;
+    }
+    
     return {
       id,
       placeId: id,
-      description: r.display_name,
+      description: displayText,
+      display_name: displayText, // גם כאן לתאימות
+      businessName: businessName || null, // שמירת שם העסק בנפרד
       lat: num(r.lat),
       lon: num(r.lon),
       osmType: r.osm_type,
       osmId: r.osm_id,
+      fullAddress: r.display_name, // שמירת הכתובת המלאה למקרה הצורך
     };
   });
 
@@ -163,7 +236,7 @@ export async function osmAutocomplete(input, { aroundLocation = null, limit = 6,
   return out;
 }
 
-// 📌 Forward Geocoding פשוט
+// 📌 Forward Geocoding פשוט (מוגבל לישראל)
 export async function searchAddress(query, language = 'he', limit = 5) {
   if (!query || query.trim().length < 2) return [];
   const params = new URLSearchParams({
@@ -172,7 +245,12 @@ export async function searchAddress(query, language = 'he', limit = 5) {
     addressdetails: '1',
     'accept-language': language,
     limit: String(limit),
+    countrycodes: 'il', // הגבלה לישראל
   });
+
+  // הוספת bbox לישראל
+  params.append('viewbox', `${ISRAEL_BBOX.left},${ISRAEL_BBOX.top},${ISRAEL_BBOX.right},${ISRAEL_BBOX.bottom}`);
+  params.append('bounded', '1');
 
   const url = `${BASE}/search?${params.toString()}`;
   const key = cacheKey('search', { url });
@@ -184,9 +262,10 @@ export async function searchAddress(query, language = 'he', limit = 5) {
   if (!Array.isArray(data)) return [];
 
   const out = data.map((item) => ({
-    name: item.display_name,
+    name: formatIsraeliAddress(item.display_name, item.address || {}),
     latitude: num(item.lat),
     longitude: num(item.lon),
+    fullAddress: item.display_name, // שמירת הכתובת המלאה
   }));
 
   // TTL בינוני (30 דקות)
@@ -256,7 +335,8 @@ export async function osmReverse(latitude, longitude, language = 'he') {
 
   const out = {
     name: r.name || '',
-    address: r.display_name || '',
+    address: formatIsraeliAddress(r.display_name || '', r.address || {}),
+    fullAddress: r.display_name || '', // שמירת הכתובת המלאה
     latitude: lat,
     longitude: lon,
   };

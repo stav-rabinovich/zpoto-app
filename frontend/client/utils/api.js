@@ -1,5 +1,5 @@
 import axios from 'axios';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { API_BASE } from '../consts';
 
 // יצירת instance של axios
@@ -21,7 +21,7 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 api.interceptors.request.use(
   async (config) => {
     try {
-      const token = await AsyncStorage.getItem('userToken');
+      const token = await SecureStore.getItemAsync('userToken');
       console.log('🔍 API Request:', config.method?.toUpperCase(), config.url);
       console.log('🔑 Token exists:', !!token);
       console.log('🔑 Token preview:', token ? `${token.substring(0, 20)}...` : 'none');
@@ -29,8 +29,9 @@ api.interceptors.request.use(
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
         console.log('✅ Authorization header added');
+        console.log('🔑 Full header:', `Bearer ${token.substring(0, 20)}...`);
       } else {
-        console.log('⚠️ No token found in storage');
+        console.log('⚠️ No token found in storage - request will be anonymous');
       }
     } catch (error) {
       console.warn('❌ Failed to get token from storage:', error);
@@ -50,13 +51,36 @@ api.interceptors.response.use(
     return response;
   },
   async (error) => {
-    console.error('❌ API Error:', error.response?.status || 'Network Error', error.config?.url);
-    console.error('❌ Error data:', error.response?.data);
+    // בדיקה מיוחדת עבור בקשות שונות
+    const isLoginRequest = error.config?.url?.includes('/auth/login');
+    const isFavoritesRequest = error.config?.url?.includes('/api/favorites');
     
-    if (error.response?.status === 401) {
-      console.error('🔐 Authentication failed - token might be invalid');
-    } else if (error.response?.status === 404) {
-      console.error('🔍 Resource not found');
+    // עבור login requests - לא מדפיסים שגיאות (זה נורמלי שיכולות להיות סיסמאות שגויות או משתמש חסום)
+    if (isLoginRequest && (error.response?.status === 401 || error.response?.status === 403)) {
+      if (error.response?.status === 401) {
+        console.log('🔐 Login attempt failed - invalid credentials (this is normal)');
+      } else if (error.response?.status === 403) {
+        console.log('🚫 Login blocked - user is blocked by admin (this is normal)');
+      }
+    } 
+    // עבור favorites requests - שקט על 401, זה נורמלי למשתמשים אנונימיים
+    else if (isFavoritesRequest && error.response?.status === 401) {
+      console.log('🔄 Favorites API: Anonymous user fallback (this is normal)');
+    }
+    else {
+      // עבור בקשות אחרות - מדפיסים שגיאות כרגיל (חוץ מ-403 שזה חסימה)
+      if (error.response?.status !== 403) {
+        console.error('❌ API Error:', error.response?.status || 'Network Error', error.config?.url);
+        console.error('❌ Error data:', error.response?.data);
+      }
+      
+      if (error.response?.status === 401) {
+        console.error('🔐 Authentication failed - token might be invalid');
+      } else if (error.response?.status === 403) {
+        console.log('🚫 Access forbidden - user might be blocked');
+      } else if (error.response?.status === 404) {
+        console.error('🔍 Resource not found');
+      }
     }
     const config = error.config;
     
@@ -79,8 +103,13 @@ api.interceptors.response.use(
     }
     
     // טיפול בשגיאות ספציפיות
-    if (error.response?.status === 401) {
+    if (error.response?.status === 401 && !isLoginRequest) {
       console.warn('🔐 Unauthorized - token may be invalid');
+    } else if (error.response?.status === 403 && !isLoginRequest) {
+      console.log('🚫 User blocked - will be logged out');
+      // הוספת flag מיוחד לשגיאה שמאותת על חסימה
+      error.isUserBlocked = true;
+      error.message = 'המשתמש חסום על ידי המנהל';
     } else if (isNetworkError) {
       console.error('🌐 Network error:', error.message);
       error.message = 'בעיה בחיבור לשרת. בדוק את החיבור לאינטרנט.';

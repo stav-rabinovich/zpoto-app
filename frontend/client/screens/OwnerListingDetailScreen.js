@@ -7,6 +7,7 @@ import { useTheme } from '@shopify/restyle';
 import { useAuth } from '../contexts/AuthContext';
 import { getOwnerParkings, getOwnerBookings, updateBookingStatus, getBookingsByStatus, sortBookingsByDate, formatCurrency } from '../services/api/owner';
 import { getStatusText, getStatusColor, formatBookingDate } from '../services/api/bookings';
+import { setTimeInIsrael } from '../utils/timezone';
 
 const LISTINGS_KEY = 'owner_listings';
 const BOOKINGS_KEY  = 'bookings';
@@ -24,8 +25,16 @@ export default function OwnerListingDetailScreen({ route, navigation }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const [from, setFrom] = useState(() => { const d=new Date(); d.setDate(d.getDate()-6); d.setHours(0,0,0,0); return d; });
-  const [to, setTo] = useState(() => { const d=new Date(); d.setHours(23,59,59,999); return d; });
+  // 🔧 תוקן: משתמש בפונקציות העזר החדשות במקום המרות ידניות
+  const [from, setFrom] = useState(() => { 
+    const d = new Date(); 
+    const sixDaysAgo = new Date(d.getTime() - (6 * 24 * 60 * 60 * 1000));
+    return setTimeInIsrael(sixDaysAgo, 0, 0); 
+  });
+  const [to, setTo] = useState(() => { 
+    const d = new Date(); 
+    return setTimeInIsrael(d, 23, 59); 
+  });
   const [showFrom, setShowFrom] = useState(false);
   const [showTo, setShowTo] = useState(false);
 
@@ -90,18 +99,23 @@ export default function OwnerListingDetailScreen({ route, navigation }) {
 
   const chart = useMemo(() => {
     const map = {};
-    const cur = new Date(from);
-    while (cur <= to) { map[dateKey(cur)] = 0; cur.setDate(cur.getDate()+1); }
+    let cur = new Date(from);
+    // 🔧 תוקן: משתמש בחישוב מילישניות במקום המרה ידנית
+    while (cur <= to) { 
+      map[dateKey(cur)] = 0; 
+      cur = new Date(cur.getTime() + (24 * 60 * 60 * 1000)); // הוסף יום
+    }
     confirmedInRange.forEach(b => {
       const k = dateKey(new Date(b.endTime));
       if (map[k] != null) map[k] += ((b.totalPriceCents||0) / 100);
     });
     const arr = [];
-    const c = new Date(from);
+    let c = new Date(from);
     while (c <= to) {
       const k = dateKey(c);
       arr.push({ label: `${c.getDate()}/${c.getMonth()+1}`, value: map[k]||0 });
-      c.setDate(c.getDate()+1);
+      // 🔧 תוקן: משתמש בחישוב מילישניות במקום המרה ידנית
+      c = new Date(c.getTime() + (24 * 60 * 60 * 1000)); // הוסף יום
     }
     return arr;
   }, [from, to, confirmedInRange]);
@@ -158,14 +172,26 @@ export default function OwnerListingDetailScreen({ route, navigation }) {
           <View style={styles.quickRow}>
             <TouchableOpacity
               style={styles.rangeBtn}
-              onPress={() => { const d=new Date(); d.setDate(d.getDate()-6); d.setHours(0,0,0,0); setFrom(d); const e=new Date(); e.setHours(23,59,59,999); setTo(e); }}
+              onPress={() => { 
+                // 🔧 תוקן: משתמש בפונקציות העזר החדשות במקום המרות ידניות
+                const d = new Date(); 
+                const sixDaysAgo = new Date(d.getTime() - (6 * 24 * 60 * 60 * 1000));
+                setFrom(setTimeInIsrael(sixDaysAgo, 0, 0)); 
+                setTo(setTimeInIsrael(d, 23, 59)); 
+              }}
               activeOpacity={0.9}
             >
               <Text style={styles.rangeBtnText}>7 ימים</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.rangeBtn}
-              onPress={() => { const d=new Date(); d.setDate(d.getDate()-29); d.setHours(0,0,0,0); setFrom(d); const e=new Date(); e.setHours(23,59,59,999); setTo(e); }}
+              onPress={() => { 
+                // 🔧 תוקן: משתמש בפונקציות העזר החדשות במקום המרות ידניות
+                const d = new Date(); 
+                const thirtyDaysAgo = new Date(d.getTime() - (29 * 24 * 60 * 60 * 1000));
+                setFrom(setTimeInIsrael(thirtyDaysAgo, 0, 0)); 
+                setTo(setTimeInIsrael(d, 23, 59)); 
+              }}
               activeOpacity={0.9}
             >
               <Text style={styles.rangeBtnText}>30 ימים</Text>
@@ -185,10 +211,22 @@ export default function OwnerListingDetailScreen({ route, navigation }) {
           </View>
 
           {showFrom && (
-            <DateTimePicker value={from} mode="date" onChange={(_,d)=>{ setShowFrom(false); if(d){ d.setHours(0,0,0,0); setFrom(d);} }} />
+            <DateTimePicker value={from} mode="date" onChange={(_,d)=>{ 
+              setShowFrom(false); 
+              if(d){ 
+                // 🔧 תוקן: משתמש בפונקציית העזר החדשה במקום המרה ידנית
+                setFrom(setTimeInIsrael(d, 0, 0));
+              } 
+            }} />
           )}
           {showTo && (
-            <DateTimePicker value={to} mode="date" onChange={(_,d)=>{ setShowTo(false); if(d){ d.setHours(23,59,59,999); setTo(d);} }} />
+            <DateTimePicker value={to} mode="date" onChange={(_,d)=>{ 
+              setShowTo(false); 
+              if(d){ 
+                // 🔧 תוקן: משתמש בפונקציית העזר החדשה במקום המרה ידנית
+                setTo(setTimeInIsrael(d, 23, 59));
+              } 
+            }} />
           )}
 
           {/* סיכום הכנסות */}

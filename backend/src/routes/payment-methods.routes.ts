@@ -11,15 +11,15 @@ const r = Router();
 r.get('/', auth, async (req: AuthedRequest, res, next) => {
   try {
     const userId = req.userId!;
-    
+
     const paymentMethods = await prisma.paymentMethod.findMany({
       where: { userId },
       orderBy: [
         { isDefault: 'desc' }, // ברירת מחדל קודם
-        { createdAt: 'desc' }
-      ]
+        { createdAt: 'desc' },
+      ],
     });
-    
+
     res.json({ data: paymentMethods });
   } catch (e) {
     next(e);
@@ -43,8 +43,9 @@ r.post('/', auth, async (req: AuthedRequest, res, next) => {
       return res.status(400).json({ error: 'Payment method name is required' });
     }
     if (!['credit_card', 'paypal', 'apple_pay', 'google_pay', 'bank_transfer'].includes(type)) {
-      return res.status(400).json({ 
-        error: 'Invalid payment type. Must be: credit_card, paypal, apple_pay, google_pay, or bank_transfer' 
+      return res.status(400).json({
+        error:
+          'Invalid payment type. Must be: credit_card, paypal, apple_pay, google_pay, or bank_transfer',
       });
     }
 
@@ -52,7 +53,7 @@ r.post('/', auth, async (req: AuthedRequest, res, next) => {
     if (isDefault) {
       await prisma.paymentMethod.updateMany({
         where: { userId },
-        data: { isDefault: false }
+        data: { isDefault: false },
       });
     }
 
@@ -62,8 +63,8 @@ r.post('/', auth, async (req: AuthedRequest, res, next) => {
         type: type.trim(),
         name: name.trim(),
         isDefault: Boolean(isDefault),
-        metadata: metadata ? JSON.stringify(metadata) : null
-      }
+        metadata: metadata ? JSON.stringify(metadata) : null,
+      },
     });
 
     res.status(201).json({ data: paymentMethod });
@@ -88,7 +89,7 @@ r.put('/:id', auth, async (req: AuthedRequest, res, next) => {
 
     // וידוא שאמצעי התשלום שייך למשתמש
     const existingMethod = await prisma.paymentMethod.findFirst({
-      where: { id: methodId, userId }
+      where: { id: methodId, userId },
     });
 
     if (!existingMethod) {
@@ -96,9 +97,13 @@ r.put('/:id', auth, async (req: AuthedRequest, res, next) => {
     }
 
     // ולידציה
-    if (type && !['credit_card', 'paypal', 'apple_pay', 'google_pay', 'bank_transfer'].includes(type)) {
-      return res.status(400).json({ 
-        error: 'Invalid payment type. Must be: credit_card, paypal, apple_pay, google_pay, or bank_transfer' 
+    if (
+      type &&
+      !['credit_card', 'paypal', 'apple_pay', 'google_pay', 'bank_transfer'].includes(type)
+    ) {
+      return res.status(400).json({
+        error:
+          'Invalid payment type. Must be: credit_card, paypal, apple_pay, google_pay, or bank_transfer',
       });
     }
 
@@ -106,7 +111,7 @@ r.put('/:id', auth, async (req: AuthedRequest, res, next) => {
     if (isDefault && !existingMethod.isDefault) {
       await prisma.paymentMethod.updateMany({
         where: { userId, id: { not: methodId } },
-        data: { isDefault: false }
+        data: { isDefault: false },
       });
     }
 
@@ -116,10 +121,10 @@ r.put('/:id', auth, async (req: AuthedRequest, res, next) => {
         ...(type && { type: type.trim() }),
         ...(name && { name: name.trim() }),
         ...(isDefault !== undefined && { isDefault: Boolean(isDefault) }),
-        ...(metadata !== undefined && { 
-          metadata: metadata ? JSON.stringify(metadata) : null 
-        })
-      }
+        ...(metadata !== undefined && {
+          metadata: metadata ? JSON.stringify(metadata) : null,
+        }),
+      },
     });
 
     res.json({ data: updatedMethod });
@@ -143,7 +148,7 @@ r.delete('/:id', auth, async (req: AuthedRequest, res, next) => {
 
     // וידוא שאמצעי התשלום שייך למשתמש
     const existingMethod = await prisma.paymentMethod.findFirst({
-      where: { id: methodId, userId }
+      where: { id: methodId, userId },
     });
 
     if (!existingMethod) {
@@ -151,20 +156,20 @@ r.delete('/:id', auth, async (req: AuthedRequest, res, next) => {
     }
 
     await prisma.paymentMethod.delete({
-      where: { id: methodId }
+      where: { id: methodId },
     });
 
     // אם זה היה ברירת המחדל, נגדיר את הראשון שנשאר כברירת מחדל
     if (existingMethod.isDefault) {
       const firstRemaining = await prisma.paymentMethod.findFirst({
         where: { userId },
-        orderBy: { createdAt: 'asc' }
+        orderBy: { createdAt: 'asc' },
       });
 
       if (firstRemaining) {
         await prisma.paymentMethod.update({
           where: { id: firstRemaining.id },
-          data: { isDefault: true }
+          data: { isDefault: true },
         });
       }
     }
@@ -190,7 +195,7 @@ r.patch('/:id/default', auth, async (req: AuthedRequest, res, next) => {
 
     // וידוא שאמצעי התשלום שייך למשתמש
     const existingMethod = await prisma.paymentMethod.findFirst({
-      where: { id: methodId, userId }
+      where: { id: methodId, userId },
     });
 
     if (!existingMethod) {
@@ -200,13 +205,13 @@ r.patch('/:id/default', auth, async (req: AuthedRequest, res, next) => {
     // ביטול ברירת מחדל מכל אמצעי התשלום האחרים
     await prisma.paymentMethod.updateMany({
       where: { userId, id: { not: methodId } },
-      data: { isDefault: false }
+      data: { isDefault: false },
     });
 
     // הגדרת אמצעי התשלום הנוכחי כברירת מחדל
     const updatedMethod = await prisma.paymentMethod.update({
       where: { id: methodId },
-      data: { isDefault: true }
+      data: { isDefault: true },
     });
 
     res.json({ data: updatedMethod });

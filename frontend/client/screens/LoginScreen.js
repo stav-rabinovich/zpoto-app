@@ -1,18 +1,46 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, TextInput, Pressable, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { createText, useTheme } from '@shopify/restyle';
 import { useAuth } from '../contexts/AuthContext';
+import { useNavigationContext } from '../contexts/NavigationContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import api from '../utils/api';
 
 const RText = createText();
 
-export default function LoginScreen({ navigation }) {
+export default function LoginScreen({ navigation, route }) {
   const { colors } = useTheme();
   const { login } = useAuth();
+  const { executeIntendedNavigation } = useNavigationContext();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // מילוי אוטומטי של האימייל אם הועבר מההרשמה
+  useEffect(() => {
+    const prefillEmail = route?.params?.prefillEmail;
+    if (prefillEmail) {
+      console.log('📧 Pre-filling email from registration:', prefillEmail);
+      setEmail(prefillEmail);
+    }
+  }, [route?.params?.prefillEmail]);
+
+  // פונקציה להמשך התחברות רגילה (מחפש חניות)
+  const proceedWithRegularLogin = async () => {
+    console.log('✅ Dual-role user proceeding with regular login...');
+    
+    const navigated = await executeIntendedNavigation(navigation);
+    
+    if (!navigated) {
+      // אין destination מיועד - נחזור לדף הבית ונאפס את ה-stack
+      console.log('🏠 No intended destination, resetting to Home');
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Home' }],
+      });
+    }
+  };
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -22,11 +50,84 @@ export default function LoginScreen({ navigation }) {
 
     setLoading(true);
     const result = await login(email.trim().toLowerCase(), password);
-    setLoading(false);
 
-    if (!result.success) {
+    if (result.success) {
+      // התחברות מוצלחת - נבדוק אם המשתמש הוא בעל חניה
+      console.log('✅ Basic login successful, checking if user is owner...');
+      
+      try {
+        const statusResponse = await api.get(`/api/owner/status?email=${encodeURIComponent(email.trim().toLowerCase())}`);
+        const userStatus = statusResponse.data.status;
+        
+        console.log(`📊 User status check: status=${userStatus}`);
+        
+        if (userStatus === 'approved') {
+          // המשתמש הוא בעל חניה מאושר - נשאל אותו מה הוא רוצה לעשות
+          setLoading(false);
+          Alert.alert(
+            '👋 ברוך הבא!', 
+            'זיהינו שאתה גם בעל חניה רשום. איך תרצה להמשיך?',
+            [
+              {
+                text: '🏠 ניהול החניות שלי',
+                onPress: () => {
+                  // ניווט לממשק בעלי החניה
+                  console.log('🏠 User chose owner interface');
+                  navigation.navigate('OwnerIntro');
+                },
+                style: 'default'
+              },
+              {
+                text: '🔍 חיפוש חניות',
+                onPress: () => {
+                  // המשך בממשק הרגיל (מחפש חניות)
+                  console.log('🔍 User chose search interface');
+                  proceedWithRegularLogin();
+                },
+                style: 'default'
+              }
+            ]
+          );
+          return;
+        } else if (userStatus === 'pending') {
+          // המשתמש הגיש בקשה להיות בעל חניה אבל עדיין לא אושר - זה בסדר, יכול להמשיך כמחפש
+          console.log('✅ User has pending owner request but can continue as regular user');
+        }
+        
+        // המשתמש רגיל או pending - יכול להמשיך
+        console.log('✅ Regular user login approved, checking for intended navigation...');
+        
+        const navigated = await executeIntendedNavigation(navigation);
+        
+        if (!navigated) {
+          // אין destination מיועד - נחזור לדף הבית ונאפס את ה-stack
+          console.log('🏠 No intended destination, resetting to Home');
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'Home' }],
+          });
+        }
+        
+      } catch (statusError) {
+        console.error('❌ Status check failed:', statusError);
+        // אם יש בעיה בבדיקת הסטטוס, נתן למשתמש להמשיך (fallback)
+        console.log('⚠️ Status check failed, allowing regular login as fallback');
+        
+        const navigated = await executeIntendedNavigation(navigation);
+        
+        if (!navigated) {
+          navigation.reset({
+            index: 0,
+            routes: [{ name: 'Home' }],
+          });
+        }
+      }
+      
+    } else {
       Alert.alert('שגיאת התחברות', result.error);
     }
+    
+    setLoading(false);
   };
 
   return (

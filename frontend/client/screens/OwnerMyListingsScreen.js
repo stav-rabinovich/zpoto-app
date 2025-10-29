@@ -94,9 +94,10 @@ export default function OwnerMyListingsScreen({ navigation }) {
               </View>
               <Text style={styles.row}>כתובת: {item.address || '-'}</Text>
               <Text style={styles.row}>מחיר לשעה: {formatCurrency(item.priceHr || 0)}</Text>
-              <Text style={styles.row}>
+              {/* // 📝 LEGACY CODE - Approval Mode Display (Commented Out) */}
+              {/* <Text style={styles.row}>
                 מצב אישור: {item.approvalMode === 'AUTO' ? 'אוטומטי' : 'ידני'}
-              </Text>
+              </Text> */}
 
               <View style={styles.actions}>
                 <TouchableOpacity style={[styles.btn, styles.primary]} onPress={() => edit(item)}>

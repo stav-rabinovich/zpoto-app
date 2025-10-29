@@ -218,9 +218,10 @@ export const runIntegrationTests = async () => {
       profile: { name: 'Test User', email: 'test@example.com' }
     };
 
-    await AsyncStorage.setItem('bookings', JSON.stringify(mockData.bookings));
-    await AsyncStorage.setItem('vehicles', JSON.stringify(mockData.vehicles));
-    await AsyncStorage.setItem('userProfile', JSON.stringify(mockData.profile));
+    // הוסרה שמירה מקומית - עובדים רק עם שרת
+    // await AsyncStorage.setItem('bookings', JSON.stringify(mockData.bookings));
+    // await AsyncStorage.setItem('vehicles', JSON.stringify(mockData.vehicles));
+    // await AsyncStorage.setItem('userProfile', JSON.stringify(mockData.profile));
 
     // 2. בדיקת זיהוי נתונים
     const localData = await checkLocalData();

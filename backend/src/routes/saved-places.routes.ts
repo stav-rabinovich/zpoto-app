@@ -15,10 +15,10 @@ r.get('/', auth, async (req: AuthedRequest, res, next) => {
       where: { userId },
       orderBy: [
         { type: 'asc' }, // home, work, custom
-        { createdAt: 'desc' }
-      ]
+        { createdAt: 'desc' },
+      ],
     });
-    
+
     res.json({ data: savedPlaces });
   } catch (e) {
     next(e);
@@ -51,12 +51,12 @@ r.post('/', auth, async (req: AuthedRequest, res, next) => {
     // בדיקה שאין כבר מקום מאותו סוג (עבור home/work)
     if (type === 'home' || type === 'work') {
       const existing = await prisma.savedPlace.findFirst({
-        where: { userId, type }
+        where: { userId, type },
       });
-      
+
       if (existing) {
-        return res.status(400).json({ 
-          error: `You already have a ${type} location saved. Please update it instead.` 
+        return res.status(400).json({
+          error: `You already have a ${type} location saved. Please update it instead.`,
         });
       }
     }
@@ -68,8 +68,8 @@ r.post('/', auth, async (req: AuthedRequest, res, next) => {
         address: address.trim(),
         lat,
         lng,
-        type
-      }
+        type,
+      },
     });
 
     res.status(201).json({ data: savedPlace });
@@ -94,7 +94,7 @@ r.put('/:id', auth, async (req: AuthedRequest, res, next) => {
 
     // וידוא שהמקום שייך למשתמש
     const existingPlace = await prisma.savedPlace.findFirst({
-      where: { id: placeId, userId }
+      where: { id: placeId, userId },
     });
 
     if (!existingPlace) {
@@ -115,12 +115,12 @@ r.put('/:id', auth, async (req: AuthedRequest, res, next) => {
     // בדיקה שאין כבר מקום מאותו סוג (אם משנים סוג)
     if (type && type !== existingPlace.type && (type === 'home' || type === 'work')) {
       const existing = await prisma.savedPlace.findFirst({
-        where: { userId, type, id: { not: placeId } }
+        where: { userId, type, id: { not: placeId } },
       });
-      
+
       if (existing) {
-        return res.status(400).json({ 
-          error: `You already have a ${type} location saved.` 
+        return res.status(400).json({
+          error: `You already have a ${type} location saved.`,
         });
       }
     }
@@ -132,8 +132,8 @@ r.put('/:id', auth, async (req: AuthedRequest, res, next) => {
         ...(address && { address: address.trim() }),
         ...(lat !== undefined && { lat }),
         ...(lng !== undefined && { lng }),
-        ...(type && { type })
-      }
+        ...(type && { type }),
+      },
     });
 
     res.json({ data: updatedPlace });
@@ -157,7 +157,7 @@ r.delete('/:id', auth, async (req: AuthedRequest, res, next) => {
 
     // וידוא שהמקום שייך למשתמש
     const existingPlace = await prisma.savedPlace.findFirst({
-      where: { id: placeId, userId }
+      where: { id: placeId, userId },
     });
 
     if (!existingPlace) {
@@ -165,7 +165,7 @@ r.delete('/:id', auth, async (req: AuthedRequest, res, next) => {
     }
 
     await prisma.savedPlace.delete({
-      where: { id: placeId }
+      where: { id: placeId },
     });
 
     res.json({ message: 'Saved place deleted successfully' });

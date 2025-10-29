@@ -4,7 +4,6 @@ import {
   View, Text, StyleSheet, TextInput, Alert,
   ScrollView
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@shopify/restyle';
 import ZpButton from '../components/ui/ZpButton';
 import { useAuth } from '../contexts/AuthContext';
@@ -13,7 +12,7 @@ import api from '../utils/api';
 export default function OwnerListingFormScreen({ navigation, route }) {
   const theme = useTheme();
   const styles = makeStyles(theme);
-  const { isAuthenticated, user, token } = useAuth();
+  const { isAuthenticated, user, token, handleUserBlocked } = useAuth();
   
   // זיהוי אם זו בקשה ראשונית או הוספת חניה
   const isInitialRequest = route?.params?.isInitialRequest || false;
@@ -21,10 +20,8 @@ export default function OwnerListingFormScreen({ navigation, route }) {
   const [fullName, setFullName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const [fullAddress, setFullAddress] = useState('');
-  const [city, setCity] = useState('');
+  const [fullAddress, setFullAddress] = useState(''); // כתובת מלאה כולל עיר
 
-  // טעינת פרטי המשתמש מהפרופיל
   useEffect(() => {
     (async () => {
       try {
@@ -34,25 +31,24 @@ export default function OwnerListingFormScreen({ navigation, route }) {
             headers: { Authorization: `Bearer ${token}` }
           });
           const userData = response.data;
-          
           if (userData.name) setFullName(userData.name);
           if (userData.email) setEmail(userData.email);
           if (userData.phone) setPhone(userData.phone);
         }
         
-        // גיבוי מ-AsyncStorage
-        const profileRaw = await AsyncStorage.getItem('profile');
-        if (profileRaw) {
-          const profile = JSON.parse(profileRaw);
-          if (!fullName && profile.name) setFullName(profile.name);
-          if (!email && profile.email) setEmail(profile.email);
-          if (!phone && profile.phone) setPhone(profile.phone);
-        }
+        // הסרנו גיבוי AsyncStorage - רק שרת
       } catch (error) {
         console.log('Error loading profile:', error);
+        
+        // אם המשתמש חסום - טיפול מרכזי
+        if (error.response?.status === 403) {
+          console.log('🚫 User blocked in listing form profile load - using central handler');
+          await handleUserBlocked(navigation);
+          return;
+        }
       }
     })();
-  }, [token]);
+  }, [token, handleUserBlocked, navigation]);
 
   // --- שליחת בקשה ---
   async function submitRequest() {
@@ -69,23 +65,30 @@ export default function OwnerListingFormScreen({ navigation, route }) {
       if (!fullName.trim()) return Alert.alert('חסר מידע', 'שם מלא חובה');
       if (!phone.trim()) return Alert.alert('חסר מידע', 'טלפון חובה');
       if (!email.trim()) return Alert.alert('חסר מידע', 'אימייל חובה');
-      if (!fullAddress.trim()) return Alert.alert('חסר מידע', 'כתובת חובה');
-      if (!city.trim()) return Alert.alert('חסר מידע', 'עיר חובה');
+      if (!fullAddress.trim()) return Alert.alert('חסר מידע', 'כתובת מלאה חובה (כולל עיר)');
+      
+      // וודא שיש פסיק בכתובת (כלומר יש עיר)
+      if (!fullAddress.includes(',')) return Alert.alert('חסר מידע', 'יש להזין כתובת מלאה כולל עיר (למשל: רוטשילד 21, תל אביב)');
+
+      // פיצול הכתובת לרחוב ועיר לתאימות לאחור
+      const addressParts = fullAddress.split(',');
+      const streetAddress = addressParts.slice(0, -1).join(',').trim();
+      const city = addressParts[addressParts.length - 1].trim();
 
       // הכנת נתוני אונבורדינג בסיסיים - רק מה שהלקוח מילא
       const onboardingData = {
         fullName,
         phone,
         email,
-        fullAddress,
+        fullAddress: streetAddress,
         city,
       };
 
       // שליחה לשרת
       console.log('🚀 Sending listing request:', {
-        fullAddress,
+        fullAddress: streetAddress,
         city,
-        address: `${fullAddress}, ${city}`,
+        address: fullAddress, // הכתובת המלאה כפי שהמשתמש הזין
         phone,
         lat: 32.0853,
         lng: 34.7818,
@@ -94,9 +97,9 @@ export default function OwnerListingFormScreen({ navigation, route }) {
 
       const response = await api.post('/api/owner/listing-requests', {
         title: `חניה ב${city}`,
-        fullAddress,
+        fullAddress: streetAddress,
         city,
-        address: `${fullAddress}, ${city}`,
+        address: fullAddress, // הכתובת המלאה כפי שהמשתמש הזין
         phone,
         lat: 32.0853, // ברירת מחדל - תל אביב
         lng: 34.7818,
@@ -117,6 +120,13 @@ export default function OwnerListingFormScreen({ navigation, route }) {
       console.error('Error status:', e.response?.status);
       
       let errorMsg = 'לא הצלחנו לשלוח את הבקשה. נסה שוב.';
+      
+      // בדיקה אם המשתמש חסום
+      if (e.response?.status === 403) {
+        console.log('🚫 User blocked during submit - using central handler');
+        await handleUserBlocked(navigation);
+        return;
+      }
       
       if (e.response?.status === 401) {
         errorMsg = 'נדרשת התחברות מחדש';
@@ -181,24 +191,16 @@ export default function OwnerListingFormScreen({ navigation, route }) {
           autoCapitalize="none"
         />
         
-        <Text style={styles.label}>כתובת מלאה *</Text>
+        <Text style={styles.label}>כתובת החניה המלאה *</Text>
         <TextInput
           style={styles.input}
           value={fullAddress}
           onChangeText={setFullAddress}
-          placeholder="לדוגמה: רחוב הרצל 12"
+          placeholder="רחוב ומספר בית, עיר - לדוגמה: רוטשילד 21, תל אביב"
           placeholderTextColor={theme.colors.subtext}
           textAlign="right"
-        />
-
-        <Text style={[styles.label, { marginTop: theme.spacing.md }]}>עיר *</Text>
-        <TextInput
-          style={styles.input}
-          value={city}
-          onChangeText={setCity}
-          placeholder="לדוגמה: תל אביב"
-          placeholderTextColor={theme.colors.subtext}
-          textAlign="right"
+          multiline={true}
+          numberOfLines={2}
         />
 
         {isInitialRequest && (

@@ -1,20 +1,18 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import api from '../utils/api';
-import { checkLocalData, migrateAllData } from '../services/migration';
+import memoryCache, { clearUserCache } from '../utils/memory-cache';
+import { clearQueue } from '../utils/request-queue';
 
 const AuthContext = createContext({});
 
 export const AuthProvider = ({ children }) => {
+  console.log('🚀 AuthProvider STARTING UP - NEW VERSION!');
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [migrationStatus, setMigrationStatus] = useState({
-    needed: false,
-    inProgress: false,
-    completed: false,
-    error: null
-  });
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [blockingInProgress, setBlockingInProgress] = useState(false);
 
   // טעינת token בהפעלה
   useEffect(() => {
@@ -22,16 +20,20 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const loadStoredAuth = async () => {
+    console.log('🔍 loadStoredAuth CALLED - checking storage...');
     try {
-      const storedToken = await AsyncStorage.getItem('userToken');
-      const storedUser = await AsyncStorage.getItem('user');
+      const storedToken = await SecureStore.getItemAsync('userToken');
+      const storedUser = await SecureStore.getItemAsync('user');
+      console.log('📱 Storage check - token:', !!storedToken, 'user:', !!storedUser);
       
       if (storedToken && storedUser) {
+        console.log('🔐 Loading stored auth - token exists:', !!storedToken);
+        console.log('🔐 Token preview:', storedToken ? `${storedToken.substring(0, 20)}...` : 'none');
         setToken(storedToken);
         setUser(JSON.parse(storedUser));
-        
-        // בדיקה אם יש נתונים מקומיים להעברה
-        await checkMigrationNeeded();
+        console.log('✅ Auth loaded successfully - isAuthenticated will be:', !!storedToken);
+      } else {
+        console.log('❌ No stored auth found - user will need to login');
       }
     } catch (error) {
       console.error('Failed to load auth from storage:', error);
@@ -40,37 +42,36 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // בדיקה אם נדרשת מיגרציה
-  const checkMigrationNeeded = async () => {
-    try {
-      const localDataInfo = await checkLocalData();
-      if (localDataInfo.hasData) {
-        setMigrationStatus(prev => ({
-          ...prev,
-          needed: true
-        }));
-      }
-    } catch (error) {
-      console.error('Failed to check migration status:', error);
-    }
-  };
 
   const login = async (email, password) => {
     try {
       const { data } = await api.post('/api/auth/login', { email, password });
       
-      await AsyncStorage.setItem('userToken', data.token);
-      await AsyncStorage.setItem('user', JSON.stringify(data.user));
+      await SecureStore.setItemAsync('userToken', data.token);
+      await SecureStore.setItemAsync('user', JSON.stringify(data.user));
       
       setToken(data.token);
       setUser(data.user);
       
-      // בדיקה אם יש נתונים מקומיים להעברה לאחר התחברות
-      await checkMigrationNeeded();
+      console.log('✅ Login successful - user:', data.user.email, 'token exists:', !!data.token);
+      console.log('💾 Token saved to SecureStore successfully');
+      console.log('🔐 UPDATED STATE - token in memory:', !!data.token, 'user in memory:', !!data.user);
       
       return { success: true };
     } catch (error) {
-      const message = error.response?.data?.error || 'שגיאת התחברות';
+      let message = 'שגיאת התחברות';
+      
+      if (error.response?.status === 403) {
+        // שגיאת חסימה - הודעה ברורה
+        message = error.response?.data?.error || 'המשתמש חסום על ידי המנהל';
+      } else if (error.response?.status === 401) {
+        // שגיאת התחברות רגילה
+        message = error.response?.data?.error || 'אימייל או סיסמה שגויים';
+      } else {
+        // שגיאות אחרות
+        message = error.response?.data?.error || 'שגיאת התחברות';
+      }
+      
       return { success: false, error: message };
     }
   };
@@ -79,11 +80,14 @@ export const AuthProvider = ({ children }) => {
     try {
       const { data } = await api.post('/api/auth/register', { email, password });
       
-      await AsyncStorage.setItem('userToken', data.token);
-      await AsyncStorage.setItem('user', JSON.stringify(data.user));
+      await SecureStore.setItemAsync('userToken', data.token);
+      await SecureStore.setItemAsync('user', JSON.stringify(data.user));
       
       setToken(data.token);
       setUser(data.user);
+      
+      console.log('✅ Register successful - user:', data.user.email, 'token exists:', !!data.token);
+      console.log('💾 Token saved to SecureStore successfully');
       
       return { success: true };
     } catch (error) {
@@ -92,75 +96,89 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // פונקציה מרכזית לטיפול בחסימה
+  const handleUserBlocked = async (navigation, alertFunction) => {
+    console.log('🚫 handleUserBlocked called - blockingInProgress:', blockingInProgress, 'isLoggingOut:', isLoggingOut);
+    
+    if (blockingInProgress || isLoggingOut) {
+      console.log('🚫 Already handling blocking or logging out - skipping');
+      return;
+    }
+    
+    console.log('🚫 Handling user blocked - immediate logout and redirect');
+    setBlockingInProgress(true);
+    
+    // התנתקות מיידית
+    await logout();
+    
+    // מעבר מיידי לHome ללא המתנה
+    if (navigation) {
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Home' }],
+      });
+    }
+    
+    // הודעה פשוטה אחרי המעבר
+    setTimeout(() => {
+      alert('המשתמש חסום על ידי המנהל');
+      setBlockingInProgress(false); // איפוס הflag
+    }, 100); // דיליי קצר כדי שהמעבר יתבצע קודם
+  };
+
   const logout = async () => {
     try {
-      await AsyncStorage.removeItem('userToken');
-      await AsyncStorage.removeItem('user');
-      setToken(null);
-      setUser(null);
-      setMigrationStatus({
-        needed: false,
-        inProgress: false,
-        completed: false,
-        error: null
-      });
-    } catch (error) {
-      console.error('Failed to logout:', error);
-    }
-  };
-
-  // פונקציית מיגרציה
-  const startMigration = async (onProgress = null) => {
-    setMigrationStatus(prev => ({
-      ...prev,
-      inProgress: true,
-      error: null
-    }));
-
-    try {
-      const result = await migrateAllData(onProgress);
+      console.log('🔓 Starting logout process...');
+      setIsLoggingOut(true);
       
-      setMigrationStatus({
-        needed: false,
-        inProgress: false,
-        completed: true,
-        error: result.success ? null : result.errors.join(', ')
-      });
-
-      return result;
+      await SecureStore.deleteItemAsync('userToken');
+      await SecureStore.deleteItemAsync('user');
+      setUser(null);
+      setToken(null);
+      console.log('🔓 User logged out successfully');
+      const clearedCacheEntries = clearUserCache(user?.id || 'unknown');
+      console.log(`💾 Cleared ${clearedCacheEntries} cache entries`);
+      
+      // ניקוי כל ה-cache (למקרה שיש נתונים כלליים)
+      const totalCacheCleared = memoryCache.clear();
+      console.log(`🧹 Cleared all ${totalCacheCleared} cache entries`);
+      
+      // ניקוי Request Queue
+      const clearedQueueItems = clearQueue();
+      console.log(`📥 Cleared ${clearedQueueItems} queued requests`);
+      
+      console.log('✅ Logout completed successfully');
     } catch (error) {
-      console.error('Migration failed:', error);
-      setMigrationStatus(prev => ({
-        ...prev,
-        inProgress: false,
-        error: error.message
-      }));
-      return { success: false, error: error.message };
+      console.error('❌ Failed to logout:', error);
+      throw error; // זורק את השגיאה כדי שהUI יוכל להתמודד איתה
+    } finally {
+      setIsLoggingOut(false);
     }
   };
 
-  // ביטול הצורך במיגרציה
-  const skipMigration = () => {
-    setMigrationStatus({
-      needed: false,
-      inProgress: false,
-      completed: false,
-      error: null
-    });
-  };
+  const isAuthenticated = !!token;
+  
+  // Debug log for authentication state
+  console.log('🔐 AuthContext state - token exists:', !!token, 'isAuthenticated:', isAuthenticated);
+
+  // Helper functions לזיהוי סוג המשתמש
+  const isOwner = user?.role === 'OWNER';
+  const isRegularUser = user?.role === 'USER';
+  const isAdmin = user?.role === 'ADMIN';
 
   const value = {
     user,
     token,
-    loading,
-    isAuthenticated: !!token,
+    isAuthenticated: !!token && !!user,
+    isOwner,
+    isRegularUser,
+    isAdmin,
+    isLoggingOut,
+    blockingInProgress,
+    handleUserBlocked,
     login,
     register,
     logout,
-    migrationStatus,
-    startMigration,
-    skipMigration,
-    checkMigrationNeeded,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

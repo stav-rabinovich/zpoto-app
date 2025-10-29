@@ -1,0 +1,153 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                   Int                @id @default(autoincrement())
+  email                String             @unique
+  password             String?
+  name                 String?
+  phone                String?
+  role                 String             @default("USER")
+  googleId             String?            @unique
+  facebookId           String?            @unique
+  appleId              String?            @unique
+  profilePicture       String?
+  isEmailVerified      Boolean            @default(false)
+  isBlocked            Boolean            @default(false)
+  lastLoginAt          DateTime?
+  registrationSource   String?
+  migratedFromDeviceId String?
+  migrationCompletedAt DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  bookings             Booking[]
+  chats                Chat[]
+  uploadedDocuments    Document[]         @relation("DocumentUploader")
+  documents            Document[]
+  documentAuditLogs    DocumentAuditLog[]
+  documentVersions     DocumentVersion[]
+  favorites            Favorite[]
+  listingRequests      ListingRequest[]
+  migrationLogs        MigrationLog[]
+  notifications        Notification[]
+  ownedParkings        Parking[]          @relation("UserOwnedParkings")
+  paymentMethods       PaymentMethod[]
+  recentSearches       RecentSearch[]
+  savedPlaces          SavedPlace[]
+  vehicles             Vehicle[]
+  ownerPayouts         OwnerPayout[]      @relation("OwnerPayouts")
+}
+
+model Parking {
+  id                 Int                 @id @default(autoincrement())
+  title              String
+  lat                Float
+  lng                Float
+  priceHr            Float
+  isActive           Boolean             @default(true)
+  approvalMode       String              @default("AUTO")
+  availability       String?
+  pricing            String?
+  createdAt          DateTime            @default(now())
+  ownerId            Int
+  address            String?
+  entranceImageUrl   String?
+  emptyImageUrl      String?
+  withCarImageUrl    String?
+  additionalImageUrl String?
+  anonymousFavorites AnonymousFavorite[]
+  bookings           Booking[]
+  chats              Chat[]
+  favorites          Favorite[]
+  owner              User                @relation("UserOwnedParkings", fields: [ownerId], references: [id])
+}
+
+model Booking {
+  id                 Int          @id @default(autoincrement())
+  startTime          DateTime
+  endTime            DateTime
+  status             String       @default("PENDING")
+  totalPriceCents    Int?
+  createdAt          DateTime     @default(now())
+  userId             Int
+  parkingId          Int
+  licensePlate       String?
+  paidAt             DateTime?
+  paymentId          String?
+  paymentMethod      String?
+  paymentStatus      String?      @default("PENDING")
+  vehicleDescription String?
+  vehicleId          Int?
+  approvalExpiresAt  DateTime?
+  approvedAt         DateTime?
+  rejectedAt         DateTime?
+  rejectionReason    String?
+  // Commission fields
+  commissionCents    Int?         // עמלת זפוטו בעגורות
+  netOwnerCents      Int?         // הכנסה נטו לבעל החניה
+  commissionRate     Float?       @default(0.15) // שיעור עמלה (15%)
+  parking            Parking      @relation(fields: [parkingId], references: [id])
+  user               User         @relation(fields: [userId], references: [id])
+  commission         Commission?
+
+  @@index([userId])
+  @@index([parkingId, startTime, endTime])
+  @@index([paymentStatus])
+  @@index([paidAt])
+}
+
+// =====================
+// COMMISSION SYSTEM
+// =====================
+
+model Commission {
+  id                  Int      @id @default(autoincrement())
+  bookingId           Int      @unique
+  totalPriceCents     Int      // סכום כולל של ההזמנה
+  commissionCents     Int      // עמלת זפוטו בעגורות
+  netOwnerCents       Int      // הכנסה נטו לבעל החניה
+  commissionRate      Float    // שיעור עמלה שהוחל
+  hourlyBreakdown     String?  // פירוט עמלה לפי שעות (JSON)
+  calculatedAt        DateTime @default(now())
+  payoutProcessed     Boolean  @default(false)
+  payoutId            Int?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  booking             Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  payout              OwnerPayout? @relation(fields: [payoutId], references: [id])
+
+  @@index([calculatedAt])
+  @@index([payoutProcessed])
+  @@index([payoutId])
+}
+
+model OwnerPayout {
+  id                  Int      @id @default(autoincrement())
+  ownerId             Int
+  periodStart         DateTime // תחילת התקופה (1 לחודש)
+  periodEnd           DateTime // סוף התקופה (סוף החודש)
+  totalCommissionCents Int     // סכום עמלות התקופה
+  netPayoutCents      Int      // סכום נטו לתשלום לבעל החניה
+  status              String   @default("PENDING") // PENDING, PROCESSED, FAILED
+  processedAt         DateTime?
+  paymentReference    String?  // אסמכתא תשלום
+  paymentMethod       String?  // אמצעי תשלום
+  notes               String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  owner               User     @relation("OwnerPayouts", fields: [ownerId], references: [id])
+  commissions         Commission[]
+
+  @@index([ownerId, periodStart])
+  @@index([status])
+  @@index([processedAt])
+}
+
+// Other existing models would be here...
+// (I'm only showing the commission-related changes for clarity)

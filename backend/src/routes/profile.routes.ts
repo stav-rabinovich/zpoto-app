@@ -22,7 +22,7 @@ r.get('/', auth, async (req: AuthedRequest, res, next) => {
         role: true,
         createdAt: true,
         // לא מחזירים סיסמה
-      }
+      },
     });
 
     if (!user) {
@@ -67,7 +67,7 @@ r.put('/', auth, async (req: AuthedRequest, res, next) => {
         phone: true,
         role: true,
         createdAt: true,
-      }
+      },
     });
 
     res.json({ data: updatedUser });
@@ -95,7 +95,7 @@ r.put('/password', auth, async (req: AuthedRequest, res, next) => {
 
     // שליפת המשתמש עם הסיסמה הנוכחית
     const user = await prisma.user.findUnique({
-      where: { id: userId }
+      where: { id: userId },
     });
 
     if (!user) {
@@ -103,6 +103,9 @@ r.put('/password', auth, async (req: AuthedRequest, res, next) => {
     }
 
     // בדיקת הסיסמה הנוכחית
+    if (!user.password) {
+      return res.status(400).json({ error: 'No password set for this user' });
+    }
     const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
     if (!isCurrentPasswordValid) {
       return res.status(400).json({ error: 'Current password is incorrect' });
@@ -114,7 +117,7 @@ r.put('/password', auth, async (req: AuthedRequest, res, next) => {
     // עדכון הסיסמה
     await prisma.user.update({
       where: { id: userId },
-      data: { password: hashedNewPassword }
+      data: { password: hashedNewPassword },
     });
 
     res.json({ message: 'Password updated successfully' });
@@ -138,7 +141,7 @@ r.delete('/', auth, async (req: AuthedRequest, res, next) => {
 
     // שליפת המשתמש
     const user = await prisma.user.findUnique({
-      where: { id: userId }
+      where: { id: userId },
     });
 
     if (!user) {
@@ -146,6 +149,9 @@ r.delete('/', auth, async (req: AuthedRequest, res, next) => {
     }
 
     // בדיקת הסיסמה
+    if (!user.password) {
+      return res.status(400).json({ error: 'No password set for this user' });
+    }
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       return res.status(400).json({ error: 'Password is incorrect' });
@@ -153,10 +159,104 @@ r.delete('/', auth, async (req: AuthedRequest, res, next) => {
 
     // מחיקת המשתמש (Prisma ימחק אוטומטית את הרכבים, הזמנות וכו' בגלל CASCADE)
     await prisma.user.delete({
-      where: { id: userId }
+      where: { id: userId },
     });
 
     res.json({ message: 'Account deleted successfully' });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * GET /api/profile/migration-status
+ * בדיקת סטטוס מיזוג נתונים אנונימיים
+ * TODO: יעבוד לאחר עדכון הסכמה עם השדות החדשים
+ */
+r.get('/migration-status', auth, async (req: AuthedRequest, res, next) => {
+  try {
+    const userId = req.userId!;
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        googleId: true,
+        facebookId: true,
+        appleId: true,
+        // TODO: הוסף לאחר עדכון הסכמה:
+        // migratedFromDeviceId: true,
+        // migrationCompletedAt: true,
+        // registrationSource: true
+      },
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // זמנית - נבדוק אם יש OAuth IDs
+    const isSocialLogin = !!(user.googleId || user.facebookId || user.appleId);
+
+    res.json({
+      data: {
+        hasMigrationData: false, // TODO: !!user.migratedFromDeviceId,
+        migrationCompleted: false, // TODO: !!user.migrationCompletedAt,
+        migratedFromDeviceId: null, // TODO: user.migratedFromDeviceId,
+        migrationCompletedAt: null, // TODO: user.migrationCompletedAt,
+        registrationSource: isSocialLogin ? 'social' : 'email', // TODO: user.registrationSource
+      },
+    });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * PUT /api/profile/complete
+ * השלמת פרופיל (לאחר התחברות חברתית)
+ */
+r.put('/complete', auth, async (req: AuthedRequest, res, next) => {
+  try {
+    const userId = req.userId!;
+    const { name, phone, profilePicture } = req.body;
+
+    // ולידציה
+    const updateData: any = {};
+
+    if (name && typeof name === 'string') {
+      updateData.name = name.trim();
+    }
+
+    if (phone && typeof phone === 'string') {
+      updateData.phone = phone.trim();
+    }
+
+    if (profilePicture && typeof profilePicture === 'string') {
+      updateData.profilePicture = profilePicture;
+    }
+
+    // עדכון הפרופיל
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        phone: true,
+        profilePicture: true,
+        role: true,
+        // TODO: registrationSource: true, // הוסף לאחר עדכון הסכמה
+        createdAt: true,
+      },
+    });
+
+    res.json({
+      data: updatedUser,
+      message: 'Profile completed successfully',
+    });
   } catch (e) {
     next(e);
   }
@@ -172,31 +272,31 @@ r.get('/stats', auth, async (req: AuthedRequest, res, next) => {
 
     // ספירת הזמנות
     const totalBookings = await prisma.booking.count({
-      where: { userId }
+      where: { userId },
     });
 
     const confirmedBookings = await prisma.booking.count({
-      where: { userId, status: 'CONFIRMED' }
+      where: { userId, status: 'CONFIRMED' },
     });
 
     const pendingBookings = await prisma.booking.count({
-      where: { userId, status: 'PENDING' }
+      where: { userId, status: 'PENDING' },
     });
 
     // ספירת רכבים
     const totalVehicles = await prisma.vehicle.count({
-      where: { userId }
+      where: { userId },
     });
 
     // ספירת חניות (אם המשתמש הוא בעל חניה)
     const totalParkings = await prisma.parking.count({
-      where: { ownerId: userId }
+      where: { ownerId: userId },
     });
 
     // סך הוצאות על הזמנות
     const bookingsWithPrices = await prisma.booking.findMany({
       where: { userId, status: 'CONFIRMED' },
-      select: { totalPriceCents: true }
+      select: { totalPriceCents: true },
     });
 
     const totalSpent = bookingsWithPrices.reduce((sum, booking) => {
@@ -218,7 +318,7 @@ r.get('/stats', auth, async (req: AuthedRequest, res, next) => {
       spending: {
         totalCents: totalSpent,
         total: totalSpent / 100, // המרה לשקלים
-      }
+      },
     };
 
     res.json({ data: stats });

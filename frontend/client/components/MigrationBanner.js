@@ -7,15 +7,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useNavigation } from '@react-navigation/native';
 
 export default function MigrationBanner() {
-  const theme = useTheme();
-  const styles = makeStyles(theme);
-  const { migrationStatus } = useAuth();
-  const navigation = useNavigation();
-
-  // הצג רק אם יש צורך במיגרציה ולא בתהליך
-  if (!migrationStatus.needed || migrationStatus.inProgress || migrationStatus.completed) {
-    return null;
-  }
+  // מיגרציה בוטלה - החזר null תמיד
+  return null;
 
   const handlePress = () => {
     navigation.navigate('Migration');

@@ -140,12 +140,12 @@ export async function sendOnboardingSignatureEmail(
   try {
     const info = await transporter.sendMail(mailOptions);
     console.log('✅ Email sent:', info.messageId);
-    
+
     // בפיתוח - הדפס קישור לצפייה במייל
     if (process.env.NODE_ENV !== 'production') {
       console.log('📧 Preview URL:', nodemailer.getTestMessageUrl(info));
     }
-    
+
     return { success: true, messageId: info.messageId };
   } catch (error) {
     console.error('❌ Email error:', error);

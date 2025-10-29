@@ -10,18 +10,92 @@ import MapView, { Marker, UrlTile } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// הוסרנו AsyncStorage - עובדים רק מהשרת
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme } from '@shopify/restyle';
 import { osmReverse } from '../utils/osm';
 import { openWaze } from '../utils/nav';
 import api from '../utils/api';
+import { useAuth } from '../contexts/AuthContext';
+import { useAuthGate } from '../hooks/useAuthGate';
+import webSocketService from '../services/webSocketService';
+import { getUserFavorites, addFavorite, removeFavorite } from '../services/api/userService';
+import { API_BASE } from '../consts';
+import { validateBookingSlot } from '../services/api/bookings';
+import { formatForAPI, prepareSearchParams } from '../utils/timezone';
+import { BOOKING_TYPES, isImmediateBooking } from '../constants/bookingTypes';
 
-const OWNER_LISTINGS_KEY = 'owner_listings';
-const PREFS_KEY = 'search_prefs_v1';
+// הוסרנו AsyncStorage keys - עובדים רק מהשרת
 
 const SCREEN_W = Dimensions.get('window').width;
-const CARD_WIDTH = Math.min(SCREEN_W - 24, 340);
+const CARD_WIDTH = SCREEN_W * 0.85;
+const SEARCH_AREA_THRESHOLD_M = 120;
+
+/**
+ * פונקציה לסינון חניות זמינות באמצעות API validation
+ * @param {Array} parkings - רשימת חניות לבדיקה
+ * @param {string} startDate - תאריך התחלה (ISO string)
+ * @param {string} endDate - תאריך סיום (ISO string)
+ * @returns {Array} רשימת חניות זמינות בלבד
+ */
+const filterAvailableParkings = async (parkings, startDate, endDate) => {
+  console.log('🔍 Starting advanced availability filtering...');
+  console.log('📋 Checking', parkings.length, 'parkings for availability');
+  
+  const availableParkings = [];
+  const batchSize = 5; // בדוק 5 חניות בו-זמנית לביצועים
+  
+  for (let i = 0; i < parkings.length; i += batchSize) {
+    const batch = parkings.slice(i, i + batchSize);
+    console.log(`🔄 Processing batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(parkings.length/batchSize)}`);
+    
+    const validationPromises = batch.map(async (parking) => {
+      try {
+        console.log(`🔍 Validating parking ${parking.id} (${parking.title})`);
+        
+        const result = await validateBookingSlot(
+          parking.id, 
+          formatForAPI(startDate), 
+          formatForAPI(endDate)
+        );
+        
+        if (result.success && result.valid) {
+          console.log(`✅ Parking ${parking.title} is available`);
+          return parking;
+        } else {
+          console.log(`❌ Parking ${parking.title} filtered out: ${result.error || 'Not available'}`);
+          return null;
+        }
+      } catch (error) {
+        console.error(`❌ Error validating parking ${parking.id} (${parking.title}):`, error);
+        // במקרה של שגיאה, נכלול את החניה (fallback)
+        console.log(`⚠️ Including parking ${parking.title} due to validation error (fallback)`);
+        return parking;
+      }
+    });
+    
+    const batchResults = await Promise.all(validationPromises);
+    const validParkings = batchResults.filter(Boolean);
+    availableParkings.push(...validParkings);
+    
+    console.log(`📊 Batch complete: ${validParkings.length}/${batch.length} parkings available`);
+  }
+  
+  console.log(`🎯 Final result: ${availableParkings.length}/${parkings.length} parkings are available`);
+  return availableParkings;
+};
+
+// פונקציה לחישוב מרחק בין שתי נקודות (במקום haversineMeters)
+const calculateDistance = (lat1, lng1, lat2, lng2) => {
+  const R = 6371; // רדיוס כדור הארץ בק"מ
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLng/2) * Math.sin(dLng/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c; // מרחק בק"מ
+};
 
 function haversineKm(lat1, lon1, lat2, lon2) {
   const toRad = d => (d * Math.PI) / 180;
@@ -47,17 +121,24 @@ function fmtRange(startIso, endIso) {
 }
 
 const DEFAULT_REGION = { latitude: 32.0853, longitude: 34.7818, latitudeDelta: 0.02, longitudeDelta: 0.02 };
-const GROUP_PRICES = [10, 12, 15, 20];
-const GROUP_DISTANCES = [0.5, 1, 2];
-const SEARCH_AREA_THRESHOLD_M = 120;
+// // 📝 REMOVED - GROUP_PRICES and GROUP_DISTANCES no longer needed
 
 export default function SearchResultsScreen({ route, navigation }) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme, CARD_WIDTH), [theme]);
+  const { attemptAction, ACTIONS_REQUIRING_AUTH } = useAuthGate();
+  const { user } = useAuth(); // לזיהוי בעלי חניה
 
   const initialQuery = route?.params?.query ?? '';
   const coordsFromSearch = route?.params?.coords || null;
   const filtersFromAdvanced = route?.params?.filters || null;
+  const [radiusMeters, setRadiusMeters] = useState(route?.params?.radiusMeters || route?.params?.radius || null); // רדיוס מ"סביבי" או מהחיפוש החדש
+  const searchType = route?.params?.searchType || 'general'; // סוג החיפוש
+  const startDateFromParams = route?.params?.startDate || null;
+  const endDateFromParams = route?.params?.endDate || null;
+  const minDurationHours = route?.params?.minDurationHours || 1;
+  const isImmediate = route?.params?.isImmediate || false;
+  const bookingTypeFromParams = route?.params?.bookingType || null; // סוג הזמנה מהפרמטרים
 
   const [region, setRegion] = useState(null);
   const [searchCenter, setSearchCenter] = useState(null);
@@ -69,13 +150,11 @@ export default function SearchResultsScreen({ route, navigation }) {
   const mapRef = useRef(null);
   const cardsScrollRef = useRef(null);
 
-  const [maxPrice, setMaxPrice] = useState(null);
-  const [maxDistance, setMaxDistance] = useState(null);
-  const [sortBy, setSortBy] = useState('distance');
+  // // 📝 REMOVED - משתני מסננים הוסרו (maxPrice, maxDistance, sortBy)
 
   const [showOwnerListings, setShowOwnerListings] = useState(true);
   const [favorites, setFavorites] = useState([]);
-
+  const [availabilityUpdateReceived, setAvailabilityUpdateReceived] = useState(false);
   const [pickedPoint, setPickedPoint] = useState(null);
   const [reverseLoading, setReverseLoading] = useState(false);
   const [viewportDirty, setViewportDirty] = useState(false);
@@ -105,20 +184,27 @@ export default function SearchResultsScreen({ route, navigation }) {
   useEffect(() => {
     (async () => {
       try {
-        const rawFav = await AsyncStorage.getItem('favorites');
-        if (rawFav) setFavorites(JSON.parse(rawFav));
-      } catch {}
-      try {
-        const prefsRaw = await AsyncStorage.getItem(PREFS_KEY);
-        const prefs = prefsRaw ? JSON.parse(prefsRaw) : {};
-        if (!coordsFromSearch && prefs.lastRegion && !initialRegionLoaded) {
-          setRegion(prefs.lastRegion);
-          setSearchCenter({ latitude: prefs.lastRegion.latitude, longitude: prefs.lastRegion.longitude });
-          setInitialRegionLoaded(true);
-          setLoading(false);
-          return;
+        console.log('📥 Loading favorites...');
+        // טעינת מועדפים - נסה קודם מהשרת, אחר כך Anonymous
+        const result = await getUserFavorites();
+        console.log('📊 Favorites result:', result);
+        if (result.success) {
+          // משתמשים ב-ID של החניות במועדפים
+          const favoriteIds = result.data.map(fav => {
+            const id = Number(fav.parking?.id || fav.id);
+            console.log('🔢 Favorite mapping:', fav, '→', id);
+            return id;
+          });
+          console.log('✅ Setting favorites:', favoriteIds);
+          setFavorites(favoriteIds);
+        } else {
+          console.log('❌ Failed to load favorites:', result.error);
+          setFavorites([]);
         }
-      } catch {}
+      } catch (error) {
+        console.error('Load favorites error:', error);
+        setFavorites([]);
+      }
     })();
   }, []); // eslint-disable-line
 
@@ -127,8 +213,29 @@ export default function SearchResultsScreen({ route, navigation }) {
       if (initialRegionLoaded) return;
       try {
         let startRegion;
-        if (coordsFromSearch) {
-          startRegion = { latitude: coordsFromSearch.latitude, longitude: coordsFromSearch.longitude, latitudeDelta: 0.02, longitudeDelta: 0.02 };
+        
+        console.log('🗺️ SearchResults received coords:', coordsFromSearch);
+        console.log('📍 SearchType:', searchType);
+        console.log('📅 Date range:', { startDateFromParams, endDateFromParams });
+        console.log('⚡ Is immediate search:', isImmediate);
+        console.log('📋 Booking type from params:', bookingTypeFromParams);
+        console.log('🔍 All route params:', route?.params);
+        
+        if (isImmediate) {
+          console.log('🚀 IMMEDIATE SEARCH ACTIVATED:');
+          console.log('  - Radius: 700m');
+          console.log('  - Duration: 2 hours from now');
+          console.log('  - Start:', startDateFromParams ? new Date(startDateFromParams).toLocaleString('he-IL') : 'Not set');
+          console.log('  - End:', endDateFromParams ? new Date(endDateFromParams).toLocaleString('he-IL') : 'Not set');
+        }
+        
+        if (coordsFromSearch && (coordsFromSearch.lat || coordsFromSearch.latitude)) {
+          // תמיכה בשני פורמטים: lat/lng ו-latitude/longitude
+          const lat = coordsFromSearch.lat || coordsFromSearch.latitude;
+          const lng = coordsFromSearch.lng || coordsFromSearch.longitude;
+          
+          console.log('✅ Using provided coordinates:', { lat, lng });
+          startRegion = { latitude: lat, longitude: lng, latitudeDelta: 0.02, longitudeDelta: 0.02 };
         } else {
           const { status } = await Location.requestForegroundPermissionsAsync();
           if (status !== 'granted') {
@@ -153,25 +260,84 @@ export default function SearchResultsScreen({ route, navigation }) {
 
   useEffect(() => {
     (async () => {
-      try {
-        const prevRaw = await AsyncStorage.getItem(PREFS_KEY);
-        const prev = prevRaw ? JSON.parse(prevRaw) : {};
-        await AsyncStorage.setItem(PREFS_KEY, JSON.stringify({ ...prev, sortBy }));
-      } catch {}
+      // TODO: שמירת העדפות בשרת
     })();
-  }, [sortBy]);
+  }, []); // 📝 FIXED - removed sortBy dependency
+
+  // WebSocket - התחברות ומאזין לעדכונים
+  useEffect(() => {
+    // התחברות לWebSocket
+    webSocketService.connect();
+
+    // הצטרפות לחדר חיפוש אם יש מיקום
+    if (searchCenter) {
+      webSocketService.joinSearchRoom({
+        lat: searchCenter.latitude,
+        lng: searchCenter.longitude,
+        radius: 5000 // 5 ק"מ
+      });
+    }
+
+    // מאזין לעדכוני זמינות
+    const handleAvailabilityUpdate = (data) => {
+      console.log('🔄 Availability update received:', data);
+      
+      // הצגת אינדיקטור עדכון
+      setAvailabilityUpdateReceived(true);
+      
+      // רענון מיידי של הנתונים כאשר מקבלים עדכון
+      console.log('⚡ Triggering immediate data refresh due to availability update');
+      if (lastSearchCenterRef.current) {
+        // איפוס זיכרון המיקום כדי לאלץ רענון
+        lastSearchCenterRef.current = null;
+      }
+      
+      // הסתרת האינדיקטור אחרי 3 שניות
+      setTimeout(() => {
+        setAvailabilityUpdateReceived(false);
+      }, 3000);
+    };
+
+    // מאזין לעדכוני חניות כלליים
+    const handleParkingUpdate = (data) => {
+      console.log('🔄 Parking update received:', data);
+      
+      // הצגת אינדיקטור עדכון
+      setAvailabilityUpdateReceived(true);
+      
+      // רענון מיידי של הנתונים כאשר מקבלים עדכון
+      console.log('⚡ Triggering immediate data refresh due to parking update');
+      if (lastSearchCenterRef.current) {
+        // איפוס זיכרון המיקום כדי לאלץ רענון
+        lastSearchCenterRef.current = null;
+      }
+      
+      setTimeout(() => {
+        setAvailabilityUpdateReceived(false);
+      }, 3000);
+    };
+
+    webSocketService.addListener('availability-update', handleAvailabilityUpdate);
+    webSocketService.addListener('parking-update', handleParkingUpdate);
+
+    // ניקוי בעת יציאה מהמסך
+    return () => {
+      webSocketService.removeListener('availability-update', handleAvailabilityUpdate);
+      webSocketService.removeListener('parking-update', handleParkingUpdate);
+    };
+  }, [searchCenter]);
 
   const onRegionChangeComplete = useCallback(async (nextRegion) => {
+    console.log('🗺️ onRegionChangeComplete called, new region:', nextRegion);
     setRegion(nextRegion);
     const centerOfViewport = { latitude: nextRegion.latitude, longitude: nextRegion.longitude };
     const moved = haversineMeters(centerOfViewport, searchCenter) > SEARCH_AREA_THRESHOLD_M;
+    console.log(`📏 Distance from search center: ${haversineMeters(centerOfViewport, searchCenter).toFixed(1)}m (threshold: ${SEARCH_AREA_THRESHOLD_M}m)`);
+    console.log(`🚩 ViewportDirty will be set to: ${moved}`);
     setViewportDirty(moved);
-    try {
-      const prevRaw = await AsyncStorage.getItem(PREFS_KEY);
-      const prev = prevRaw ? JSON.parse(prevRaw) : {};
-      await AsyncStorage.setItem(PREFS_KEY, JSON.stringify({ ...prev, lastRegion: nextRegion }));
-    } catch {}
+    // TODO: שמירת אזור אחרון בשרת
   }, [searchCenter]);
+
 
   useEffect(() => {
     if (!filtersFromAdvanced) return;
@@ -183,46 +349,260 @@ export default function SearchResultsScreen({ route, navigation }) {
   const demoSpots = [];
 
   const [ownerSpots, setOwnerSpots] = useState([]);
+  const lastSearchCenterRef = useRef(null); // למעקב אחר הмרכז האחרון שחיפשנו
+  
   useEffect(() => {
-    (async () => {
+    let isCurrentRequest = true; // למניעת race conditions
+    let debounceTimer = null; // למניעת קריאות מרובות מהירות
+    
+    const loadSpots = async () => {
       try {
-        if (!searchCenter) { setOwnerSpots([]); return; }
+        if (!searchCenter) { 
+          setOwnerSpots([]); 
+          return; 
+        }
+        
+        // בדיקה אם כבר חיפשנו במיקום הזה
+        const currentCenter = `${searchCenter.latitude?.toFixed(6) || 0},${searchCenter.longitude?.toFixed(6) || 0}`;
+        
+        if (lastSearchCenterRef.current === currentCenter) {
+          console.log('🔄 Same search center, skipping reload:', currentCenter);
+          return;
+        }
+        
         const baseLat = searchCenter.latitude;
         const baseLng = searchCenter.longitude;
+        
+        // וודא שיש קואורדינטות תקינות
+        if (!baseLat || !baseLng || isNaN(baseLat) || isNaN(baseLng)) {
+          console.error('❌ Invalid coordinates:', { baseLat, baseLng });
+          console.log('🔄 Trying to use coordsFromSearch as fallback');
+          
+          // נסה להשתמש ב-coordsFromSearch כ-fallback
+          if (coordsFromSearch && coordsFromSearch.lat && coordsFromSearch.lng) {
+            console.log('✅ Using coordsFromSearch:', coordsFromSearch);
+            setSearchCenter({ 
+              latitude: coordsFromSearch.lat, 
+              longitude: coordsFromSearch.lng 
+            });
+            return;
+          }
+          
+          setOwnerSpots([]);
+          return;
+        }
+        
+        console.log('🗺️ Loading parkings for center:', { baseLat, baseLng });
+        console.log('📍 Search center key:', currentCenter);
 
-        // קריאה לשרת - חיפוש חניות ברדיוס 10 ק"מ
-        const response = await api.get('/api/parkings/search', {
-          params: {
-            lat: baseLat,
-            lng: baseLng,
-            radius: 10, // 10 ק"מ
+        // קריאה לשרת - חיפוש חניות עם פרמטרים מתקדמים
+        const searchRadius = radiusMeters ? radiusMeters / 1000 : 15; // המרה למטרים או ברירת מחדל 15 ק"מ
+        
+        // הכנת פרמטרים לשרת
+        const searchParams = {
+          lat: baseLat,
+          lng: baseLng,
+          radius: searchRadius, // רדיוס בק"מ
+          searchType: searchType
+        };
+        
+        // עבור חיפוש מיידי, הוסף פרמטרים נוספים
+        if (isImmediate && startDateFromParams && endDateFromParams) {
+          searchParams.startTime = formatForAPI(startDateFromParams);
+          searchParams.endTime = formatForAPI(endDateFromParams);
+          searchParams.minDurationHours = minDurationHours;
+          searchParams.requireAvailable = true;
+          searchParams.checkOwnerAvailability = true;
+          searchParams.checkBookingConflicts = true;
+          
+          console.log('🚀 Adding immediate search parameters:', {
+            startDate: new Date(startDateFromParams).toLocaleString('he-IL'),
+            endDate: new Date(endDateFromParams).toLocaleString('he-IL'),
+            minDurationHours,
+            radius: `${searchRadius}km`
+          });
+        }
+
+        // הוספת פרמטרים לחיפוש עתידי (רק אם לא חיפוש מיידי)
+        if (!isImmediate) {
+          if (startDateFromParams) searchParams.startTime = formatForAPI(startDateFromParams);
+          if (endDateFromParams) searchParams.endTime = formatForAPI(endDateFromParams);
+          searchParams.minDurationHours = minDurationHours;
+          
+          // עבור חיפוש עתידי, הוסף פרמטרי זמינות רק אם יש תאריכים
+          if (startDateFromParams && endDateFromParams) {
+            searchParams.requireAvailable = true;
+            searchParams.checkOwnerAvailability = true;
+            searchParams.checkBookingConflicts = true;
+            
+            console.log('📅 Adding future search parameters:', {
+              startDate: new Date(startDateFromParams).toLocaleString('he-IL'),
+              endDate: new Date(endDateFromParams).toLocaleString('he-IL'),
+              minDurationHours,
+              radius: `${searchRadius}km`
+            });
+          }
+        }
+        
+        if (filtersFromAdvanced?.isCovered) searchParams.isCovered = true;
+        if (filtersFromAdvanced?.hasCharging) searchParams.hasCharging = true;
+        if (searchType && searchType !== 'general') searchParams.searchType = searchType;
+
+        console.log('📤 Sending search params:', searchParams);
+        console.log('🎯 Search criteria:', {
+          location: `${baseLat}, ${baseLng}`,
+          radius: `${searchRadius}km`,
+          dateRange: startDateFromParams && endDateFromParams ? 
+            `${new Date(startDateFromParams).toLocaleString('he-IL')} - ${new Date(endDateFromParams).toLocaleString('he-IL')}` : 
+            'No date filter',
+          minDuration: `${minDurationHours} hours`,
+          searchType: searchType,
+          availabilityFilters: {
+            requireAvailable: searchParams.requireAvailable,
+            checkOwnerAvailability: searchParams.checkOwnerAvailability,
+            checkBookingConflicts: searchParams.checkBookingConflicts
           }
         });
 
-        const list = response.data?.data || [];
+        console.log('🚨 IMPORTANT: Server must implement availability filtering!');
+        console.log('🚨 Example: Smolenskin 7 should NOT appear if unavailable from 12:00 onwards');
+        console.log('🚨 Current search time:', startDateFromParams ? new Date(startDateFromParams).toLocaleTimeString('he-IL') : 'No time specified');
 
-        const mapped = list
-          .filter(x => x.isActive && typeof x.lat === 'number' && typeof x.lng === 'number')
-          .map(x => ({
-            id: `parking-${x.id}`,
-            parkingId: x.id,
-            title: x.title || x.address || 'חניה',
-            address: x.address || '',
-            price: typeof x.priceHr === 'number' ? x.priceHr : 10,
-            latitude: x.lat,
-            longitude: x.lng,
-            images: [],
-            distanceKm: haversineKm(baseLat, baseLng, x.lat, x.lng),
-            source: 'server',
-            available: x.available !== false,
-          }));
+        const response = await api.get('/api/parkings/search', {
+          params: searchParams
+        });
 
-        setOwnerSpots(mapped);
+        let list = response.data?.data || [];
+        console.log('🔍 Frontend received parkings:', list.length);
+        
+        // Debug רק לחניות ללא תמונות
+        const parkingsWithoutImages = list.filter(p => !p.entranceImageUrl && !p.emptyImageUrl && !p.withCarImageUrl && (!p.images || p.images.length === 0));
+        if (parkingsWithoutImages.length > 0) {
+          console.log(`🖼️ Found ${parkingsWithoutImages.length} parkings without images:`, 
+            parkingsWithoutImages.map(p => ({ id: p.id, title: p.title }))
+          );
+        }
+        
+        // סינון מתקדם בצד הלקוח באמצעות API validation
+        if (startDateFromParams && endDateFromParams && list.length > 0) {
+          console.log('🔍 Applying advanced client-side availability filtering...');
+          console.log('📋 Starting validation for', list.length, 'parkings');
+          
+          list = await filterAvailableParkings(list, startDateFromParams, endDateFromParams);
+          console.log('🔍 After advanced filtering:', list.length, 'parkings remain');
+        }
+        
+        if (list.length === 0) {
+          console.log('❌ No available parkings found with current criteria');
+          // הודעה ברורה למשתמש
+          if (startDateFromParams && endDateFromParams) {
+            console.log('💡 Suggestion: Try different time slots or expand search area');
+          }
+        } else {
+          console.log('✅ Found available parkings:', list.map(p => ({ id: p.id, title: p.title })));
+        }
+        
+        // Debug חניה 10 במיוחד
+        const parking10 = list.find(p => p.id === 10);
+        if (parking10) {
+          console.log('🎯 FOUND PARKING 10:', parking10);
+          console.log('🖼️ PARKING 10 IMAGES:', parking10.images);
+        } else {
+          console.log('❌ PARKING 10 NOT FOUND in response');
+        }
+        
+        // פשוט משתמשים ברשימה מהשרת - הרדיוס גדול מספיק (15 ק"מ)
+        const mergedList = list;
+        console.log(`📋 Using ${mergedList.length} parkings from server (15km radius)`);
+        
+        // לוג ספציפי לשדה pricing
+        mergedList.forEach((parking, index) => {
+          console.log(`🎯 Parking ${index + 1} (ID: ${parking.id}):`);
+          console.log(`   - title: ${parking.title}`);
+          console.log(`   - priceHr: ${parking.priceHr}`);
+          console.log(`   - pricing field: ${parking.pricing}`);
+          console.log(`   - pricing type: ${typeof parking.pricing}`);
+        });
+
+        const mapped = mergedList
+          .filter(x => {
+            const isValid = x.isActive && typeof x.lat === 'number' && typeof x.lng === 'number';
+            
+            // פילטור בעלי חניה - לא להציג להם את החניה שלהם
+            const isOwner = user?.id && x.ownerId === user.id;
+            if (isOwner) {
+              console.log(`🚫 Filtering out parking ${x.id} - user ${user.id} is the owner`);
+              return false;
+            }
+            
+            console.log(`🔍 Parking ${x.id}: isActive=${x.isActive}, lat=${x.lat}, lng=${x.lng}, valid=${isValid}`);
+            return isValid;
+          })
+          .map(x => {
+            console.log(`🔍 Raw parking ${x.id} data:`, x);
+            const price = typeof x.firstHourPrice === 'number' ? x.firstHourPrice : (typeof x.priceHr === 'number' ? x.priceHr : 10);
+            console.log(`💰 Frontend mapping parking ${x.id}: firstHourPrice=${x.firstHourPrice} (type: ${typeof x.firstHourPrice}), priceHr=${x.priceHr} (type: ${typeof x.priceHr}), final price=${price}`);
+            
+            return {
+              id: `parking-${x.id}`,
+              parkingId: x.id,
+              title: x.title || x.address || 'חניה',
+              address: x.address || '',
+              price: price,
+              pricing: x.pricing, // 🎯 העברת המחירון המדורג!
+              latitude: x.lat,
+              longitude: x.lng,
+              images: x.images || [], // 🖼️ תמונות במבנה ישן
+              // תמונות מהשרת - מבנה חדש
+              entranceImageUrl: x.entranceImageUrl,
+              emptyImageUrl: x.emptyImageUrl,
+              withCarImageUrl: x.withCarImageUrl,
+              additionalImageUrl: x.additionalImageUrl,
+              distanceKm: haversineKm(baseLat, baseLng, x.lat, x.lng),
+              source: 'server',
+              available: x.available !== false,
+            };
+          });
+
+        console.log(`🎯 Frontend mapped ${mapped.length} parkings`);
+        
+        // לוג לאחר המיפוי
+        mapped.forEach((parking, index) => {
+          console.log(`🎯 Mapped parking ${index + 1}:`);
+          console.log(`   - id: ${parking.id}`);
+          console.log(`   - title: ${parking.title}`);
+          console.log(`   - price: ${parking.price}`);
+          console.log(`   - pricing: ${parking.pricing}`);
+        });
+
+        // עדכון רק אם זה עדיין הבקשה הנוכחית
+        if (isCurrentRequest) {
+          lastSearchCenterRef.current = currentCenter; // שמירת המיקום שחיפשנו
+          setOwnerSpots(mapped);
+        }
       } catch (error) {
         console.error('Search error:', error);
-        setOwnerSpots([]);
+        if (isCurrentRequest) {
+          setOwnerSpots([]);
+        }
       }
-    })();
+    };
+    
+    // debounce - חכה 150ms לפני קריאה לשרת (הקטנו לחווית משתמש טובה יותר)
+    debounceTimer = setTimeout(() => {
+      if (isCurrentRequest) {
+        console.log('⏱️ Debounce complete, loading spots...');
+        loadSpots();
+      }
+    }, 150);
+    
+    // cleanup function למניעת race conditions
+    return () => {
+      isCurrentRequest = false;
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+      }
+    };
   }, [searchCenter]);
 
   const spotsRaw = useMemo(() => {
@@ -234,47 +614,96 @@ export default function SearchResultsScreen({ route, navigation }) {
   const spots = useMemo(() => {
     let arr = [...spotsRaw];
     const filt = filtersFromAdvanced || {};
-    const priceCap = maxPrice ?? filt.maxPrice ?? null;
-       const distCap  = maxDistance ?? filt.maxDistance ?? null;
+    const priceCap = filt.maxPrice ?? null;
+    const distCap  = filt.maxDistance ?? null;
+
+    // 📝 NEW - סינון לפי רדיוס מכפתור "סביבי"
+    if (radiusMeters != null) {
+      const radiusKm = radiusMeters / 1000; // המרה למטרים לקילומטרים
+      console.log(`🎯 Filtering by radius: ${radiusKm}km (${radiusMeters}m)`);
+      const beforeCount = arr.length;
+      arr = arr.filter(s => s.distanceKm <= radiusKm);
+      console.log(`📊 Filtered from ${beforeCount} to ${arr.length} parkings`);
+    }
 
     if (priceCap != null) arr = arr.filter(s => s.price <= priceCap);
     if (distCap  != null) arr = arr.filter(s => s.distanceKm <= distCap);
-    arr.sort((a, b) => (sortBy === 'distance' ? a.distanceKm - b.distanceKm : a.price - b.price));
+    // 📝 CHANGED - מיון הפוך לפי מרחק - הרחוקה ראשונה, הקרובה אחרונה
+    arr.sort((a, b) => b.distanceKm - a.distanceKm);
+    console.log('🔄 Sorted parkings by distance (farthest first):', arr.map(p => `${p.title}: ${p.distanceKm.toFixed(2)}km`));
     return arr;
-  }, [spotsRaw, maxPrice, maxDistance, sortBy, filtersFromAdvanced]);
+  }, [spotsRaw, filtersFromAdvanced, radiusMeters]); // 📝 FIXED - added radiusMeters dependency
 
   const toggleFavorite = useCallback(async (spot) => {
+    console.log('🚀 toggleFavorite called:', spot);
     await Haptics.selectionAsync();
-    setFavorites(prev => {
-      const exists = prev.includes(spot.id);
-      const next = exists ? prev.filter(id => id !== spot.id) : [...prev, spot.id];
-      AsyncStorage.setItem('favorites', JSON.stringify(next));
-      AsyncStorage.getItem('favoritesData').then(raw => {
-        let map = {};
-        try { map = raw ? JSON.parse(raw) : {}; } catch {}
-        if (exists) delete map[spot.id];
-        else map[spot.id] = spot;
-        AsyncStorage.setItem('favoritesData', JSON.stringify(map));
-      });
-      return next;
-    });
-  }, []);
+    const parkingId = Number(spot.parkingId || spot.id);
+    const exists = favorites.includes(parkingId);
+    
+    console.log('📊 Toggle favorite - parkingId:', parkingId, 'exists:', exists, 'favorites:', favorites);
+    
+    try {
+      if (exists) {
+        // הסרת מועדף - נסה קודם מהשרת, אחר כך Anonymous
+        const result = await removeFavorite(parkingId);
+        if (result.success) {
+          setFavorites(prev => prev.filter(id => id !== parkingId));
+          console.log('✅ Favorite removed successfully:', parkingId);
+        } else {
+          console.error('❌ Failed to remove favorite:', result.error);
+        }
+      } else {
+        // הוספת מועדף - נסה קודם מהשרת, אחר כך Anonymous
+        const result = await addFavorite(parkingId);
+        if (result.success) {
+          setFavorites(prev => [...prev, parkingId]);
+          console.log('✅ Favorite added successfully:', parkingId);
+        } else {
+          console.error('❌ Failed to add favorite:', result.error);
+        }
+      }
+    } catch (error) {
+      console.error('Toggle favorite error:', error);
+      // TODO: הצגת שגיאה למשתמש
+    }
+  }, [favorites]);
 
   const onSelectSpot = useCallback(async (spot) => {
-    setSelectedId(spot.id);
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    if (mapRef.current) {
-      mapRef.current.animateToRegion(
-        { latitude: spot.latitude, longitude: spot.longitude, latitudeDelta: 0.012, longitudeDelta: 0.012 },
-        400
-      );
-    }
-    if (cardsScrollRef.current) {
-      const idx = spots.findIndex(s => s.id === spot.id);
-      if (idx >= 0) {
-        const x = idx * (CARD_WIDTH + 12);
-        cardsScrollRef.current.scrollTo({ x, y: 0, animated: true });
+    try {
+      console.log('🗺️ onSelectSpot called:', spot);
+      setSelectedId(spot.id);
+      
+      try {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      } catch (hapticsError) {
+        console.log('⚠️ Haptics not available:', hapticsError.message);
       }
+      
+      if (mapRef.current) {
+        const latitude = spot.latitude || spot.lat;
+        const longitude = spot.longitude || spot.lng;
+        console.log('📍 Moving map to:', { latitude, longitude });
+        if (latitude && longitude) {
+          mapRef.current.animateToRegion(
+            { latitude, longitude, latitudeDelta: 0.012, longitudeDelta: 0.012 },
+            400
+          );
+        } else {
+          console.log('❌ No valid coordinates found');
+        }
+      } else {
+        console.log('❌ mapRef not available');
+      }
+      
+      if (cardsScrollRef.current) {
+        const idx = spots.findIndex(s => s.id === spot.id);
+        if (idx >= 0) {
+          const x = idx * (CARD_WIDTH + 12);
+          cardsScrollRef.current.scrollTo({ x, y: 0, animated: true });
+        }
+      }
+    } catch (error) {
+      console.error('❌ onSelectSpot error:', error);
     }
   }, [spots]);
 
@@ -329,21 +758,51 @@ export default function SearchResultsScreen({ route, navigation }) {
   }, [pickedPoint, region]);
 
   const searchByViewport = useCallback(async () => {
-    if (!region) return;
-    await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    const nextCenter = { latitude: region.latitude, longitude: region.longitude };
-    setSearchCenter(nextCenter);
-    setQuery('חיפוש באזור המפה');
-    setSelectedId(null);
-    setViewportDirty(false);
-  }, [region]);
+    try {
+      console.log('🔍 searchByViewport called, region:', region);
+      if (!region) {
+        console.log('❌ No region available');
+        return;
+      }
+      
+      try {
+        await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      } catch (hapticsError) {
+        console.log('⚠️ Haptics not available:', hapticsError.message);
+      }
+      
+      const nextCenter = { latitude: region.latitude, longitude: region.longitude };
+      console.log('📍 Setting new search center:', nextCenter);
+      console.log('🔄 Previous search center was:', searchCenter);
+      
+      setSearchCenter(nextCenter);
+      setQuery('חיפוש באזור המפה');
+      setSelectedId(null);
+      setViewportDirty(false);
+      
+      // מרכוז המפה למיקום החדש (החזרת הנעץ למרכז)
+      if (mapRef.current) {
+        console.log('🎯 Centering map to new search location');
+        mapRef.current.animateToRegion(
+          { 
+            ...nextCenter, 
+            latitudeDelta: region?.latitudeDelta ?? 0.02, 
+            longitudeDelta: region?.longitudeDelta ?? 0.02 
+          },
+          500
+        );
+      }
+      
+      // עדכון רדיוס החיפוש - עכשיו 5 ק"מ במקום הרדיוס המקורי (הגדלנו מ-2.5)
+      setRadiusMeters(5000);
+      console.log('🔄 Updated radius to 5km for viewport search');
+      console.log('⚡ This will trigger useEffect to reload spots after 150ms debounce');
+    } catch (error) {
+      console.error('❌ searchByViewport error:', error);
+    }
+  }, [searchCenter]); // הסרנו region מהdependencies כי זה גורם לקריאות לא רצויות
 
-  const clearFilters = useCallback(() => {
-    setMaxPrice(null);
-    setMaxDistance(null);
-    setSortBy('distance');
-    setShowOwnerListings(true);
-  }, []);
+  // // 📝 REMOVED - clearFilters function no longer needed
 
   if (loading || !region || !searchCenter) {
     return (
@@ -387,7 +846,7 @@ export default function SearchResultsScreen({ route, navigation }) {
             key={spot.id}
             coordinate={{ latitude: spot.latitude, longitude: spot.longitude }}
             title={`${spot.title || spot.address || 'חניה'}`}
-            description={`₪${spot.price}/ש׳ • ${spot.distanceKm.toFixed(2)} ק״מ${spot.source === 'owner' ? ' • בעל חניה' : ''}`}
+            description={`₪${spot.price}/שעה ראשונה • ${spot.distanceKm.toFixed(2)} ק״מ${spot.source === 'owner' ? ' • בעל חניה' : ''}`}
             onPress={() => onSelectSpot(spot)}
             pinColor={spot.id === selectedId ? theme.colors.primary : (spot.source === 'owner' ? theme.colors.success : undefined)}
           />
@@ -408,74 +867,7 @@ export default function SearchResultsScreen({ route, navigation }) {
         <Text style={styles.attrText}>© OpenStreetMap contributors</Text>
       </View>
 
-      {/* סרגל פילטרים עליון - נקי ואינטואיטיבי */}
-      <View style={styles.filtersBar} pointerEvents="box-none">
-        <LinearGradient
-          colors={['rgba(255,255,255,0.98)', 'rgba(255,255,255,0.95)']}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-          style={StyleSheet.absoluteFillObject}
-        />
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.filtersContent}
-        >
-          {/* מונה תוצאות */}
-          <View style={styles.countBadge}>
-            <Text style={styles.countBadgeText}>{spots.length}</Text>
-            <Text style={styles.countBadgeLabel}>חניות</Text>
-          </View>
-
-          {/* מחיר */}
-          <View style={styles.filterSection}>
-            <Text style={styles.filterLabel}>💰</Text>
-            <View style={styles.filterGroup}>
-              {GROUP_PRICES.map(v => (
-                <Chip
-                  key={`p-${v}`}
-                  label={`₪${v}`}
-                  active={(maxPrice ?? filtersFromAdvanced?.maxPrice) === v}
-                  onPress={() => setMaxPrice((maxPrice ?? null) === v ? null : v)}
-                />
-              ))}
-            </View>
-          </View>
-
-          {/* מרחק */}
-          <View style={styles.filterSection}>
-            <Text style={styles.filterLabel}>📍</Text>
-            <View style={styles.filterGroup}>
-              {GROUP_DISTANCES.map(v => (
-                <Chip
-                  key={`d-${v}`}
-                  label={`${v}km`}
-                  active={(maxDistance ?? filtersFromAdvanced?.maxDistance) === v}
-                  onPress={() => setMaxDistance((maxDistance ?? null) === v ? null : v)}
-                />
-              ))}
-            </View>
-          </View>
-
-          {/* מיון */}
-          <TouchableOpacity 
-            onPress={() => setSortBy(sortBy === 'distance' ? 'price' : 'distance')}
-            style={styles.sortButton}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.sortButtonText}>
-              {sortBy === 'distance' ? '📍 מיון: מרחק' : '💰 מיון: מחיר'}
-            </Text>
-            <Ionicons name="swap-vertical" size={16} color={theme.colors.primary} />
-          </TouchableOpacity>
-
-          {/* נקה */}
-          {(maxPrice || maxDistance) && (
-            <TouchableOpacity onPress={clearFilters} activeOpacity={0.8} style={styles.clearBtnNew}>
-              <Ionicons name="close-circle" size={18} color={theme.colors.error} />
-            </TouchableOpacity>
-          )}
-        </ScrollView>
-      </View>
+      {/* // 📝 REMOVED - סרגל המסננים העליון הוסר לפי בקשה */}
 
       {/* באדג׳ טווח זמן (אם קיים) */}
       {!!timeBadge && (
@@ -497,10 +889,27 @@ export default function SearchResultsScreen({ route, navigation }) {
 
       {viewportDirty && (
         <View style={styles.searchViewportBar}>
-          <Text style={styles.searchViewportText}>האזור במפה השתנה</Text>
-          <TouchableOpacity style={styles.searchViewportBtn} onPress={searchByViewport} activeOpacity={0.9}>
-            <Text style={styles.searchViewportBtnText}>חפש באזור הנראה</Text>
+          <View style={styles.searchViewportContent}>
+            <Ionicons name="map-outline" size={18} color={theme.colors.primary} />
+            <View style={styles.searchTextContainer}>
+              <Text style={styles.searchViewportText}>עברת לאזור חדש במפה</Text>
+              <Text style={styles.searchHintText}>💡 לחיצה ארוכה מציבה נעץ סגול</Text>
+            </View>
+          </View>
+          <TouchableOpacity style={styles.searchViewportBtn} onPress={searchByViewport} activeOpacity={0.8}>
+            <Ionicons name="search" size={16} color="#fff" style={{ marginEnd: 6 }} />
+            <Text style={styles.searchViewportBtnText}>חפש כאן</Text>
           </TouchableOpacity>
+        </View>
+      )}
+
+      {/* אינדיקטור עדכון זמינות בזמן אמת */}
+      {availabilityUpdateReceived && (
+        <View style={styles.availabilityUpdateBar}>
+          <View style={styles.availabilityUpdateContent}>
+            <Ionicons name="wifi" size={16} color="#10B981" />
+            <Text style={styles.availabilityUpdateText}>זמינות חניות עודכנה</Text>
+          </View>
         </View>
       )}
 
@@ -514,14 +923,41 @@ export default function SearchResultsScreen({ route, navigation }) {
         >
           {spots.length === 0 ? (
             <View style={[styles.card, { width: CARD_WIDTH, alignItems: 'center' }]}>
-              <Text style={styles.cardTitle}>לא נמצאו חניות בתנאי הסינון</Text>
-              <Text style={styles.cardLine}>נסו להרחיב מחיר/מרחק או להפעיל חניות מבעלי חניה</Text>
+              <Ionicons name="time-outline" size={48} color="#94A3B8" style={{ marginBottom: 12 }} />
+              <Text style={styles.cardTitle}>לא נמצאו חניות זמינות</Text>
+              <Text style={styles.cardLine}>
+                אין חניות זמינות כרגע באזור זה.{'\n'}
+                נסו לחפש באזור אחר או בזמן אחר.
+              </Text>
+              <View style={styles.noResultsHint}>
+                <Ionicons name="bulb-outline" size={16} color="#0b6aa8" />
+                <Text style={styles.noResultsHintText}>
+                  💡 החניות מוצגות רק כשהן זמינות לפי הגדרות בעל החניה
+                </Text>
+              </View>
             </View>
           ) : (
             spots.map(spot => {
-              const liked = favorites.includes(spot.id);
-              const thumb = spot.images?.[0]?.uri;
+              const parkingId = Number(spot.parkingId || spot.id);
+              const liked = favorites.includes(parkingId);
+              
+              // תיקון URL של התמונות - השתמש בתמונות מהשרת
+              let thumb = spot.images?.[0]?.uri || spot.entranceImageUrl || spot.emptyImageUrl || spot.withCarImageUrl;
+              if (thumb && thumb.startsWith('/api/')) {
+                thumb = `${API_BASE}${thumb}`;
+              }
+              
               const isActive = spot.id === selectedId;
+              
+              // Debug לוג לתמונות - רק אם אין תמונה
+              if (!thumb) {
+                console.log(`🖼️ DEBUG: No image for parking ${spot.id} (${spot.title}):`, {
+                  images: spot.images,
+                  entranceImageUrl: spot.entranceImageUrl,
+                  emptyImageUrl: spot.emptyImageUrl,
+                  withCarImageUrl: spot.withCarImageUrl
+                });
+              }
               return (
                 <View
                   key={spot.id}
@@ -538,11 +974,34 @@ export default function SearchResultsScreen({ route, navigation }) {
                     />
                   )}
 
-                  {!!thumb && <Image source={{ uri: thumb }} style={styles.cardImg} />}
+                  {thumb ? (
+                    <Image 
+                      source={{ uri: thumb }} 
+                      style={styles.cardImg}
+                      onError={(error) => {
+                        console.log('🚨 Image load error:', error.nativeEvent.error);
+                        console.log('🚨 Image URI:', thumb);
+                      }}
+                      onLoad={() => {
+                        console.log('✅ Image loaded successfully:', thumb);
+                      }}
+                    />
+                  ) : (
+                    <View style={[styles.cardImg, styles.placeholderImg]}>
+                      <Text style={styles.placeholderText}>📷</Text>
+                    </View>
+                  )}
 
                   {/* כותרת לשמאל; תגית + לב בצד ימין */}
                   <View style={styles.cardHeaderRow}>
-                    <Text style={styles.cardTitle} numberOfLines={1}>{spot.title || spot.address}</Text>
+                    <View style={styles.titleWithAvailability}>
+                      <Text style={styles.cardTitle} numberOfLines={1}>{spot.title || spot.address}</Text>
+                      {/* אינדיקטור זמינות */}
+                      <View style={styles.availabilityIndicator}>
+                        <View style={styles.availabilityDot} />
+                        <Text style={styles.availabilityText}>זמין עכשיו</Text>
+                      </View>
+                    </View>
                     <View style={styles.badgesRow}>
                       {/* תגית מקור */}
                       {spot.source === 'owner' ? (
@@ -565,7 +1024,7 @@ export default function SearchResultsScreen({ route, navigation }) {
 
                   {/* נתוני כרטיסייה לשמאל */}
                   <Text style={styles.cardLine}>
-                    ₪{spot.price} לשעה • {spot.distanceKm.toFixed(2)} ק״מ{spot.source === 'owner' ? ' • בעל חניה' : ''}
+                    ₪{spot.price}/שעה ראשונה • {spot.distanceKm.toFixed(2)} ק״מ{spot.source === 'owner' ? ' • בעל חניה' : ''}
                   </Text>
 
                   <View style={styles.cardButtonsRow}>
@@ -582,20 +1041,135 @@ export default function SearchResultsScreen({ route, navigation }) {
 
                     <TouchableOpacity
                       style={[styles.cardBtnOutline, { flex:1 }]}
-                      onPress={() => {
-                        console.log('🔍 Navigating with spot:', spot);
-                        console.log('🔍 Spot parkingId:', spot.parkingId, 'Type:', typeof spot.parkingId);
-                        navigation.navigate('Booking', {
-                          spot: {
-                            id: spot.id,
-                            parkingId: spot.parkingId, // ודא שזה מועבר
-                            ...spot,
-                            title: spot.title || spot.address,
-                            ownerListingId: spot.ownerListingId ?? null,
-                            availability: spot.availability ?? null,
-                            requireApproval: !!spot.requireApproval,
+                      onPress={async () => {
+                        try {
+                          console.log('🏷️ Pricing button clicked for parking:', spot.parkingId);
+                          // קבלת מחירון מפורט מהשרת
+                          const response = await api.get(`/api/parkings/${spot.parkingId}`);
+                          const parking = response.data?.data;
+                          console.log('🏷️ Parking data received:', parking);
+                          
+                          let pricingText = `מחיר לפי שעות:\n• שעה ראשונה: ₪${spot.price}`;
+                          
+                          if (parking?.pricing) {
+                            try {
+                              const pricingData = typeof parking.pricing === 'string' ? JSON.parse(parking.pricing) : parking.pricing;
+                              console.log('🏷️ Parsed pricing data:', pricingData);
+                              if (pricingData && typeof pricingData === 'object') {
+                                // הצגת כל 12 השעות
+                                const validPrices = [];
+                                for (let hour = 1; hour <= 12; hour++) {
+                                  const hourKey = `hour${hour}`;
+                                  const hourValue = pricingData[hourKey];
+                                  
+                                  // טיפול גם ב-string וגם ב-number
+                                  if (hourValue !== undefined && hourValue !== null) {
+                                    const price = typeof hourValue === 'string' ? parseFloat(hourValue) : hourValue;
+                                    if (!isNaN(price)) {
+                                      validPrices.push({ hour, price });
+                                    }
+                                  }
+                                }
+                                
+                                // בניית הטקסט
+                                if (validPrices.length > 0) {
+                                  console.log('🏷️ Valid prices found:', validPrices);
+                                  pricingText = 'מחירון מפורט:\n';
+                                  validPrices.forEach(({ hour, price }) => {
+                                    if (price === 0) {
+                                      pricingText += `• שעה ${hour}: חינם\n`;
+                                    } else {
+                                      pricingText += `• שעה ${hour}: ₪${price}\n`;
+                                    }
+                                  });
+                                  // הסרת השורה האחרונה
+                                  pricingText = pricingText.trim();
+                                } else {
+                                  console.log('🏷️ No valid prices found');
+                                }
+                                
+                                // אם לא מצאנו מחירים, נציג הודעה
+                                if (pricingText === `מחיר לפי שעות:\n• שעה ראשונה: ₪${spot.price}`) {
+                                  pricingText += '\n• שעות נוספות: לפי מחירון בעל החניה';
+                                }
+                              } else {
+                                pricingText += '\n• שעות נוספות: לפי מחירון בעל החניה';
+                              }
+                            } catch (error) {
+                              console.error('Failed to parse pricing data:', error);
+                              pricingText += '\n• שעות נוספות: לפי מחירון בעל החניה';
+                            }
+                          } else {
+                            pricingText += '\n• שעות נוספות: לפי מחירון בעל החניה';
                           }
-                        });
+                          
+                          console.log('🏷️ Final pricing text:', pricingText);
+                          Alert.alert('מחירון מפורט', pricingText, [{ text: 'הבנתי', style: 'default' }]);
+                        } catch (error) {
+                          console.error('Failed to fetch pricing details:', error);
+                          Alert.alert(
+                            'מחירון מפורט',
+                            `מחיר לפי שעות:\n• שעה ראשונה: ₪${spot.price}\n• שעות נוספות: לפי מחירון בעל החניה`,
+                            [{ text: 'הבנתי', style: 'default' }]
+                          );
+                        }
+                      }}
+                      activeOpacity={0.9}
+                      accessibilityRole="button"
+                      accessibilityLabel="הצג מחירון מפורט"
+                    >
+                      <Ionicons name="pricetag" size={16} color={theme.colors.primary} />
+                      <Text style={styles.cardBtnOutlineText} numberOfLines={1}>מחירון</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.cardBtnOutline, { flex:1 }]}
+                      onPress={() => {
+                        // שימוש ב-AuthGate לבדיקת הרשאה לפני הזמנת חניה
+                        attemptAction(
+                          ACTIONS_REQUIRING_AUTH.BOOK_PARKING,
+                          () => {
+                            // המשתמש מחובר - בצע הזמנה
+                            console.log('🔍 User authenticated, proceeding with booking:', spot);
+                            
+                            // קביעת סוג ההזמנה ופרמטרים נוספים
+                            // עדיפות לפרמטר מפורש, אחר כך לפי isImmediate
+                            const bookingType = bookingTypeFromParams || 
+                              (isImmediate ? BOOKING_TYPES.IMMEDIATE : BOOKING_TYPES.FUTURE);
+                            
+                            const bookingParams = {
+                              spot: {
+                                id: spot.id,
+                                parkingId: spot.parkingId,
+                                ...spot,
+                                title: spot.title || spot.address,
+                                ownerListingId: spot.ownerListingId ?? null,
+                                availability: spot.availability ?? null,
+                                requireApproval: !!spot.requireApproval,
+                              },
+                              bookingType: bookingType
+                            };
+                            
+                            // אם זה הזמנה עתידית, העבר את פרמטרי הזמן מהחיפוש
+                            if (bookingType === BOOKING_TYPES.FUTURE && startDateFromParams && endDateFromParams) {
+                              bookingParams.searchStartDate = startDateFromParams;
+                              bookingParams.searchEndDate = endDateFromParams;
+                              console.log('📅 Future booking with predefined times:', {
+                                start: new Date(startDateFromParams).toLocaleString('he-IL'),
+                                end: new Date(endDateFromParams).toLocaleString('he-IL')
+                              });
+                            }
+                            
+                            // אם זה הזמנה מיידית, העבר את משך הזמן המבוקש
+                            if (bookingType === BOOKING_TYPES.IMMEDIATE) {
+                              bookingParams.immediateDuration = 2; // שעתיים כברירת מחדל
+                              console.log('⚡ Immediate booking with 2 hours duration');
+                            }
+                            
+                            console.log('🚀 Navigating to BookingScreen with params:', bookingParams);
+                            navigation.navigate('Booking', bookingParams);
+                          }
+                        );
                       }}
                       activeOpacity={0.9}
                       accessibilityRole="button"
@@ -606,7 +1180,7 @@ export default function SearchResultsScreen({ route, navigation }) {
 
                     <TouchableOpacity
                       style={[styles.cardBtnWaze, { flex:1 }]}
-                      onPress={() => openWaze(spot.latitude, spot.longitude, spot.title || spot.address || 'Zpoto')}
+                      onPress={() => openWaze(spot.latitude || spot.lat, spot.longitude || spot.lng, spot.title || spot.address || 'Zpoto')}
                       activeOpacity={0.9}
                       accessibilityRole="button"
                       accessibilityLabel="פתח ניווט בוויז"
@@ -742,30 +1316,59 @@ function makeStyles(theme, cardWidth) {
     },
     countPillText:{ color:'#fff', fontWeight:'800', textAlign:'right', writingDirection:'rtl' },
 
-    // recenter FAB — עבר לשמאל
+    // recenter FAB — עבר לשמאל (הוגבה כדי לא להיחסם על ידי הכרטיסיות)
     fab:{
-      position:'absolute', left:18, bottom:Platform.select({ ios: 160, android: 150 }), width:56, height:56, borderRadius:28,
+      position:'absolute', left:18, bottom:Platform.select({ ios: 200, android: 190 }), width:56, height:56, borderRadius:28,
       alignItems:'center', justifyContent:'center',
       overflow:'hidden',
       shadowColor:colors.gradientStart, shadowOpacity:0.45, shadowRadius:16, shadowOffset:{ width:0, height:8 }, elevation:6
     },
 
-    // viewport dirty bar
+    // viewport dirty bar - שיפור תצוגה ברורה יותר
     searchViewportBar:{
-      position:'absolute', top:72, left:12, right:12,
-      backgroundColor:'#fff7e6', borderRadius:12, borderWidth:1, borderColor:'#ffd79a',
-      padding:10, flexDirection:'row-reverse', alignItems:'center', gap:10,
-      shadowColor:'#000', shadowOpacity:0.08, shadowRadius:8, shadowOffset:{ width:0, height:4 }
+      position:'absolute', top:25, left:12, right:12,
+      backgroundColor:'#ffffff', borderRadius:16, borderWidth:2, borderColor: colors.primary + '40',
+      padding:16, flexDirection:'row-reverse', alignItems:'center', justifyContent:'space-between',
+      shadowColor:'#000', shadowOpacity:0.15, shadowRadius:12, shadowOffset:{ width:0, height:6 }, elevation:8
     },
-    searchViewportText:{ color:'#7a4d00', fontWeight:'800', flex:1, textAlign:'right', writingDirection:'rtl' },
-    searchViewportBtn:{ backgroundColor:'#ffb74d', paddingVertical:10, paddingHorizontal:12, borderRadius:10 },
-    searchViewportBtnText:{ color:'#4a2a00', fontWeight:'900', textAlign:'right', writingDirection:'rtl' },
+    searchViewportContent:{
+      flexDirection:'row-reverse', alignItems:'center', flex:1, gap:8
+    },
+    searchTextContainer: {
+      flex: 1,
+    },
+    searchViewportText:{ 
+      color: colors.text, fontWeight:'700', fontSize: 15, textAlign:'right', writingDirection:'rtl' 
+    },
+    searchHintText: {
+      color: colors.text + '80', fontSize: 12, textAlign:'right', writingDirection:'rtl', marginTop: 2
+    },
+    searchViewportBtn:{ 
+      backgroundColor: colors.primary, paddingVertical:12, paddingHorizontal:16, borderRadius:12,
+      flexDirection:'row-reverse', alignItems:'center',
+      shadowColor: colors.primary, shadowOpacity:0.3, shadowRadius:6, shadowOffset:{ width:0, height:3 }
+    },
+    searchViewportBtnText:{ color:'#fff', fontWeight:'700', fontSize: 14, textAlign:'right', writingDirection:'rtl' },
+
+    // אינדיקטור עדכון זמינות
+    availabilityUpdateBar:{
+      position:'absolute', top:120, left:12, right:12,
+      backgroundColor:'#10B981', borderRadius:12,
+      padding:12, flexDirection:'row-reverse', alignItems:'center', justifyContent:'center',
+      shadowColor:'#000', shadowOpacity:0.15, shadowRadius:8, shadowOffset:{ width:0, height:4 }, elevation:6
+    },
+    availabilityUpdateContent:{
+      flexDirection:'row-reverse', alignItems:'center', gap:8
+    },
+    availabilityUpdateText:{ 
+      color:'#fff', fontWeight:'700', fontSize:14, textAlign:'right', writingDirection:'rtl' 
+    },
 
     // bottom cards
     cardsWrap:{ position:'absolute', bottom:22, left:0, right:0 },
     cardsContent:{ paddingHorizontal: 12, flexDirection:'row-reverse' },
     card:{
-      width: cardWidth, marginStart:12, backgroundColor:'#fff', borderRadius:14, padding:12,
+      width: cardWidth, marginEnd:12, backgroundColor:'#fff', borderRadius:14, padding:12,
       shadowColor:'#000', shadowOpacity:0.1, shadowRadius:8, shadowOffset:{ width:0, height:4 }, elevation:2,
       borderWidth:1, borderColor:'#ecf1f7', overflow:'hidden'
     },
@@ -790,8 +1393,56 @@ function makeStyles(theme, cardWidth) {
     demoBadgeText:{ color:colors.primary, fontWeight:'800', textAlign:'right', writingDirection:'rtl' },
 
     // מיושרים לשמאל
-    cardTitle:{ fontSize:16, fontWeight:'800', marginBottom:4, color:'#0b0f14', textAlign:'left' },
+    titleWithAvailability:{ flex:1 },
+    cardTitle:{ fontSize:16, fontWeight:'800', marginBottom:2, color:'#0b0f14', textAlign:'left' },
     cardLine:{ fontSize:14, color:'#333', textAlign:'left' },
+    
+    // אינדיקטור זמינות
+    availabilityIndicator:{ 
+      flexDirection:'row', 
+      alignItems:'center', 
+      marginTop:2 
+    },
+    availabilityDot:{ 
+      width:6, 
+      height:6, 
+      borderRadius:3, 
+      backgroundColor:'#10B981', 
+      marginRight:4 
+    },
+    availabilityText:{ 
+      fontSize:11, 
+      color:'#10B981', 
+      fontWeight:'600' 
+    },
+
+    // Placeholder image styles
+    placeholderImg: {
+      backgroundColor: theme.colors.border,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    placeholderText: {
+      fontSize: 24,
+      opacity: 0.5,
+    },
+    
+    // הודעת "אין תוצאות"
+    noResultsHint:{ 
+      flexDirection:'row', 
+      alignItems:'center', 
+      backgroundColor:'#f0f7ff', 
+      padding:8, 
+      borderRadius:8, 
+      marginTop:12,
+      gap:6
+    },
+    noResultsHintText:{ 
+      fontSize:12, 
+      color:'#0b6aa8', 
+      flex:1,
+      textAlign:'center'
+    },
 
     cardButtonsRow:{ flexDirection:'row-reverse', alignItems:'stretch', gap:6, marginTop:8 },
     cardBtn:{

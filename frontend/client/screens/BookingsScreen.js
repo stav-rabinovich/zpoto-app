@@ -1,8 +1,9 @@
 // screens/BookingsScreen.js
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator } from 'react-native';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, RefreshControl, ActivityIndicator, Alert } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { useTheme } from '@shopify/restyle';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
 import { getUserBookings, getStatusText, getStatusColor, formatBookingDate, isBookingActive, isBookingUpcoming } from '../services/api/bookings';
@@ -17,12 +18,15 @@ const BOOKING_STATUS = {
 
 export default function BookingsScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = makeStyles(theme);
   const { token } = useAuth();
 
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [timers, setTimers] = useState({}); // {bookingId: timeLeftMs}
+  const intervalRef = useRef(null);
   const navigation = useNavigation();
 
   const load = useCallback(async () => {
@@ -33,17 +37,32 @@ export default function BookingsScreen() {
     }
     
     try {
+      console.log('📲 BookingsScreen: Starting to load bookings...');
       const result = await getUserBookings();
-      if (result.success) {
+      console.log('📋 BookingsScreen: Received result:', {
+        success: result.success,
+        dataType: typeof result.data,
+        isArray: Array.isArray(result.data),
+        dataLength: result.data?.length || 'N/A'
+      });
+      
+      if (result.success && result.data && Array.isArray(result.data)) {
+        console.log(`✅ BookingsScreen: Processing ${result.data.length} bookings`);
         // מיון לפי תאריך התחלה (חדש יותר קודם)
         const sortedBookings = result.data.sort((a, b) => new Date(b.startTime) - new Date(a.startTime));
+        console.log(`📊 BookingsScreen: Setting ${sortedBookings.length} sorted bookings to state`);
+        console.log('🔍 First booking:', sortedBookings[0] ? {
+          id: sortedBookings[0].id,
+          status: sortedBookings[0].status,
+          startTime: sortedBookings[0].startTime
+        } : 'None');
         setBookings(sortedBookings);
       } else {
-        console.error('Failed to load bookings:', result.error);
+        console.error('❌ BookingsScreen: Failed to load bookings or invalid data:', result);
         setBookings([]);
       }
     } catch (error) {
-      console.error('Load bookings error:', error);
+      console.error('❌ BookingsScreen: Load bookings error:', error);
       setBookings([]);
     } finally {
       setLoading(false);
@@ -69,15 +88,46 @@ export default function BookingsScreen() {
     }
   }, [load]);
 
+  // // 📝 LEGACY CODE - Timer System for Manual Approvals (Commented Out)
+  // // This system showed countdown timers for pending approval bookings
+  // useEffect(() => {
+  //   const pendingBookings = bookings.filter(b => b.status === 'PENDING_APPROVAL');
+  //   if (pendingBookings.length > 0) {
+  //     intervalRef.current = setInterval(() => {
+  //       // Timer logic for manual approval system
+  //     }, 1000);
+  //   }
+  //   return () => {
+  //     if (intervalRef.current) {
+  //       clearInterval(intervalRef.current);
+  //     }
+  //   };
+  // }, [bookings, load]);
+
+  // // 📝 LEGACY CODE - Timer formatting function (Commented Out)
+  // const formatTimeLeft = (ms) => {
+  //   if (ms <= 0) return '⏰ פג הזמן';
+  //   const minutes = Math.floor(ms / (1000 * 60));
+  //   const seconds = Math.floor((ms % (1000 * 60)) / 1000);
+  //   return minutes > 0 ? `⏱️ ${minutes}:${seconds.toString().padStart(2, '0')}` : `⏱️ ${seconds}s`;
+  // };
+
   function openBooking(b) {
     navigation.navigate('BookingDetail', { id: b.id });
   }
+
+  // // 📝 REMOVED - Extension functions moved to BookingDetailScreen only
 
   const renderItem = ({ item }) => {
     const parking = item.parking || {};
     const statusColor = getStatusColor(item.status);
     const isActive = isBookingActive(item);
     const isUpcoming = isBookingUpcoming(item);
+    
+    // בדיקה אם החניה הושלמה (עברה וההזמנה מאושרת)
+    const now = new Date();
+    const endTime = new Date(item.endTime);
+    const isCompleted = item.status === 'CONFIRMED' && endTime < now && !isActive;
     
     return (
       <TouchableOpacity onPress={() => openBooking(item)} activeOpacity={0.85} style={styles.cardTap}>
@@ -97,7 +147,16 @@ export default function BookingsScreen() {
             <Text style={styles.title} numberOfLines={1}>{parking.title || 'הזמנה'}</Text>
           </View>
           
-          {/* אינדיקטור להזמנה פעילה או עתידית */}
+          {/* // 📝 LEGACY CODE - Timer Display (Commented Out) */}
+          {/* {isPendingApproval && item.approvalExpiresAt && (
+            <View style={[styles.timerContainer, timeLeft <= 0 && styles.expiredTimer]}>
+              <Text style={[styles.timerText, timeLeft <= 0 && styles.expiredTimerText]}>
+                {formatTimeLeft(timeLeft)}
+              </Text>
+            </View>
+          )} */}
+          
+          {/* אינדיקטור להזמנה פעילה, עתידית או מושלמת */}
           {isActive && (
             <View style={styles.activeIndicator}>
               <Text style={styles.activeText}>🟢 פעילה כעת</Text>
@@ -108,6 +167,13 @@ export default function BookingsScreen() {
               <Text style={styles.upcomingText}>⏰ עתידית</Text>
             </View>
           )}
+          {!isActive && !isUpcoming && isCompleted && (
+            <View style={styles.completedIndicator}>
+              <Text style={styles.completedText}>🏁 הושלמה</Text>
+            </View>
+          )}
+
+          {/* // 📝 REMOVED - Extension button moved to booking detail screen only */}
 
           <View style={styles.rowLine}>
             <Ionicons name="calendar-outline" size={16} color={theme.colors.subtext} style={{ marginEnd: 6 }} />
@@ -139,8 +205,6 @@ export default function BookingsScreen() {
 
   return (
     <View style={styles.container}>
-      {/* כותרת מרכזית */}
-      <Text style={styles.header}>ההזמנות שלי</Text>
 
       <FlatList
         data={bookings}
@@ -153,7 +217,7 @@ export default function BookingsScreen() {
             tintColor={theme.colors.primary}
           />
         }
-        contentContainerStyle={{ paddingHorizontal: theme.spacing.lg, paddingBottom: theme.spacing.xl }}
+        contentContainerStyle={{ paddingHorizontal: theme.spacing.lg, paddingBottom: Math.max(insets.bottom + 70, theme.spacing.xl) }}
         renderItem={renderItem}
       />
     </View>
@@ -255,6 +319,44 @@ function makeStyles(theme) {
       color: '#F57C00',
       fontWeight: '600',
     },
+    completedIndicator: {
+      backgroundColor: '#F5F5F5',
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.xs,
+      borderRadius: borderRadii.sm,
+      marginTop: spacing.xs,
+      alignSelf: 'flex-start',
+    },
+    completedText: {
+      fontSize: 12,
+      color: '#757575',
+      fontWeight: '600',
+    },
+
+    // טיימר לבקשות ממתינות
+    timerContainer: {
+      backgroundColor: '#fef3c7',
+      borderRadius: borderRadii.sm,
+      padding: spacing.sm,
+      marginTop: spacing.xs,
+      borderWidth: 1,
+      borderColor: '#f59e0b',
+    },
+    timerText: {
+      fontSize: 13,
+      fontWeight: '700',
+      color: '#92400e',
+      textAlign: 'center',
+    },
+    expiredTimer: {
+      backgroundColor: '#fee2e2',
+      borderColor: '#f87171',
+    },
+    expiredTimerText: {
+      color: '#dc2626',
+    },
+
+    // // 📝 REMOVED - Extension button styles moved to BookingDetailScreen only
 
     ctaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: spacing.sm },
     link: { fontSize: 13, fontWeight: '700', color: colors.primary, marginEnd: 4 },

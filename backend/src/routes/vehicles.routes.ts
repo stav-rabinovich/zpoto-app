@@ -15,10 +15,10 @@ r.get('/', auth, async (req: AuthedRequest, res, next) => {
       where: { userId },
       orderBy: [
         { isDefault: 'desc' }, // רכב ברירת מחדל קודם
-        { createdAt: 'desc' }
-      ]
+        { createdAt: 'desc' },
+      ],
     });
-    
+
     res.json({ data: vehicles });
   } catch (e) {
     next(e);
@@ -42,7 +42,7 @@ r.post('/', auth, async (req: AuthedRequest, res, next) => {
     if (isDefault) {
       await prisma.vehicle.updateMany({
         where: { userId },
-        data: { isDefault: false }
+        data: { isDefault: false },
       });
     }
 
@@ -55,8 +55,8 @@ r.post('/', auth, async (req: AuthedRequest, res, next) => {
         color: color?.trim() || null,
         year: year ? parseInt(year) : null,
         description: description?.trim() || null,
-        isDefault: Boolean(isDefault)
-      }
+        isDefault: Boolean(isDefault),
+      },
     });
 
     res.status(201).json({ data: vehicle });
@@ -84,7 +84,7 @@ r.put('/:id', auth, async (req: AuthedRequest, res, next) => {
 
     // וידוא שהרכב שייך למשתמש
     const existingVehicle = await prisma.vehicle.findFirst({
-      where: { id: vehicleId, userId }
+      where: { id: vehicleId, userId },
     });
 
     if (!existingVehicle) {
@@ -99,7 +99,7 @@ r.put('/:id', auth, async (req: AuthedRequest, res, next) => {
     if (isDefault && !existingVehicle.isDefault) {
       await prisma.vehicle.updateMany({
         where: { userId, id: { not: vehicleId } },
-        data: { isDefault: false }
+        data: { isDefault: false },
       });
     }
 
@@ -112,8 +112,8 @@ r.put('/:id', auth, async (req: AuthedRequest, res, next) => {
         color: color?.trim() || null,
         year: year ? parseInt(year) : null,
         description: description?.trim() || null,
-        isDefault: Boolean(isDefault)
-      }
+        isDefault: Boolean(isDefault),
+      },
     });
 
     res.json({ data: vehicle });
@@ -140,7 +140,7 @@ r.delete('/:id', auth, async (req: AuthedRequest, res, next) => {
 
     // וידוא שהרכב שייך למשתמש
     const existingVehicle = await prisma.vehicle.findFirst({
-      where: { id: vehicleId, userId }
+      where: { id: vehicleId, userId },
     });
 
     if (!existingVehicle) {
@@ -148,7 +148,7 @@ r.delete('/:id', auth, async (req: AuthedRequest, res, next) => {
     }
 
     await prisma.vehicle.delete({
-      where: { id: vehicleId }
+      where: { id: vehicleId },
     });
 
     res.json({ message: 'Vehicle deleted successfully' });
@@ -172,7 +172,7 @@ r.patch('/:id/default', auth, async (req: AuthedRequest, res, next) => {
 
     // וידוא שהרכב שייך למשתמש
     const existingVehicle = await prisma.vehicle.findFirst({
-      where: { id: vehicleId, userId }
+      where: { id: vehicleId, userId },
     });
 
     if (!existingVehicle) {
@@ -182,13 +182,13 @@ r.patch('/:id/default', auth, async (req: AuthedRequest, res, next) => {
     // ביטול ברירת מחדל מכל הרכבים האחרים
     await prisma.vehicle.updateMany({
       where: { userId, id: { not: vehicleId } },
-      data: { isDefault: false }
+      data: { isDefault: false },
     });
 
     // הגדרת הרכב הנוכחי כברירת מחדל
     const vehicle = await prisma.vehicle.update({
       where: { id: vehicleId },
-      data: { isDefault: true }
+      data: { isDefault: true },
     });
 
     res.json({ data: vehicle });

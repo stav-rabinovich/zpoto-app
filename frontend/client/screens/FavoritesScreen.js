@@ -1,5 +1,5 @@
 // screens/FavoritesScreen.js
-// מציג מועדפים מה-AsyncStorage (IDs + מפה לנתונים).
+// מציג מועדפים מהשרת
 // כפתורים זהים בגודל: הזמן עכשיו | פתח במפה | וויז
 import React, { useCallback, useEffect, useState } from 'react';
 import {
@@ -11,17 +11,19 @@ import {
   RefreshControl,
   Image,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getUserFavorites, removeFavorite } from '../services/api';
+import { getAnonymousFavorites, removeAnonymousFavorite } from '../services/api/guestService';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { openWaze } from '../utils/nav';
 import { useTheme } from '@shopify/restyle';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const IDS_KEY = 'favorites';
-const DATA_KEY = 'favoritesData';
+// הוסרנו AsyncStorage keys - עובדים רק מהשרת
 
 export default function FavoritesScreen({ navigation }) {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = makeStyles(theme);
 
   const [loading, setLoading] = useState(true);
@@ -32,15 +34,39 @@ export default function FavoritesScreen({ navigation }) {
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const [rawIds, rawMap] = await Promise.all([
-        AsyncStorage.getItem(IDS_KEY),
-        AsyncStorage.getItem(DATA_KEY),
-      ]);
-      const idsArr = rawIds ? JSON.parse(rawIds) : [];
-      let map = {};
-      try { map = rawMap ? JSON.parse(rawMap) : {}; } catch {}
-      setIds(idsArr);
-      setDataMap(map);
+      // קריאה מהשרת - נסה קודם API של משתמשים מחוברים, אחר כך Anonymous
+      const result = await getUserFavorites();
+      
+      if (result.success) {
+        const favorites = result.data || [];
+        
+        // המרה לפורמט הקיים
+        const idsArr = favorites.map(fav => String(fav.parking.id));
+        const map = {};
+        favorites.forEach(fav => {
+          map[String(fav.parking.id)] = {
+            id: fav.parking.id,
+            title: fav.parking.title,
+            address: fav.parking.address,
+            lat: fav.parking.lat,
+            lng: fav.parking.lng,
+            priceHr: fav.parking.priceHr,
+            latitude: fav.parking.lat,  // הוספה לתאימות
+            longitude: fav.parking.lng  // הוספה לתאימות
+          };
+        });
+        
+        setIds(idsArr);
+        setDataMap(map);
+      } else {
+        console.error('Load favorites error:', result.error);
+        setIds([]);
+        setDataMap({});
+      }
+    } catch (error) {
+      console.error('Load favorites error:', error);
+      setIds([]);
+      setDataMap({});
     } finally {
       setLoading(false);
     }
@@ -58,17 +84,28 @@ export default function FavoritesScreen({ navigation }) {
     setRefreshing(false);
   }, [load]);
 
-  const removeFavorite = useCallback(async (spotId) => {
+  const removeFavoriteItem = useCallback(async (spotId) => {
     await Haptics.selectionAsync();
-    const nextIds = ids.filter(id => id !== spotId);
-    const nextMap = { ...dataMap };
-    delete nextMap[spotId];
-    await Promise.all([
-      AsyncStorage.setItem(IDS_KEY, JSON.stringify(nextIds)),
-      AsyncStorage.setItem(DATA_KEY, JSON.stringify(nextMap)),
-    ]);
-    setIds(nextIds);
-    setDataMap(nextMap);
+    
+    try {
+      // מחיקה בשרת - נסה קודם API של משתמשים מחוברים, אחר כך Anonymous
+      const result = await removeFavorite(parseInt(spotId));
+      
+      if (result.success) {
+        // עדכון מקומי אחרי הצלחה
+        const nextIds = ids.filter(id => id !== spotId);
+        const nextMap = { ...dataMap };
+        delete nextMap[spotId];
+        setIds(nextIds);
+        setDataMap(nextMap);
+      } else {
+        console.error('Remove favorite error:', result.error);
+        // TODO: הצגת שגיאה למשתמש
+      }
+    } catch (error) {
+      console.error('Remove favorite error:', error);
+      // TODO: הצגת שגיאה למשתמש
+    }
   }, [ids, dataMap]);
 
   const renderItem = ({ item: spotId }) => {
@@ -83,7 +120,7 @@ export default function FavoritesScreen({ navigation }) {
         {/* כותרת + הסרה */}
         <View style={styles.cardHeader}>
           <Text style={styles.title}>{spot.address || spot.title || 'חניה'}</Text>
-          <TouchableOpacity onPress={() => removeFavorite(spotId)} hitSlop={{ top:8, bottom:8, left:8, right:8 }}>
+          <TouchableOpacity onPress={() => removeFavoriteItem(spotId)} hitSlop={{ top:8, bottom:8, left:8, right:8 }}>
             <Ionicons name="heart-dislike-outline" size={20} color={theme.colors.error} />
           </TouchableOpacity>
         </View>
@@ -156,7 +193,7 @@ export default function FavoritesScreen({ navigation }) {
         keyExtractor={(id) => id}
         renderItem={renderItem}
         ListEmptyComponent={!loading && empty}
-        contentContainerStyle={{ padding: theme.spacing.lg, paddingBottom: theme.spacing.xl }}
+        contentContainerStyle={{ padding: theme.spacing.lg, paddingBottom: Math.max(insets.bottom + 70, theme.spacing.xl) }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.primary} />
         }

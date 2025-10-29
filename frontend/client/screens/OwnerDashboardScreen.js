@@ -1,25 +1,29 @@
 // screens/OwnerDashboardScreen.js
 import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, Alert, Image, ActivityIndicator } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// הוסרנו AsyncStorage - עובדים רק מהשרת
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ZpButton from '../components/ui/ZpButton';
 import api from '../utils/api';
 import { useAuth } from '../contexts/AuthContext';
-export const LISTINGS_KEY = 'owner_listings';
+// הוסרנו LISTINGS_KEY - עובדים רק מהשרת
 
 export default function OwnerDashboardScreen({ navigation }) {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = makeStyles(theme);
-  const { isAuthenticated, token } = useAuth();
+  const { isAuthenticated, token, logout, isLoggingOut, handleUserBlocked, blockingInProgress } = useAuth();
 
   const [listings, setListings] = useState([]);
   const [loading, setLoading] = useState(false);
 
+
   const load = useCallback(async () => {
-    if (!token) {
-      Alert.alert('שגיאה', 'עליך להתחבר כדי לראות את החניות שלך');
+    if (!token || isLoggingOut || blockingInProgress) {
+      // לא מציגים הודעה - סביר שזה אחרי logout או בתהליך חסימה
+      console.log('🔐 No token, logging out, or blocking in progress - skipping load');
       return;
     }
     
@@ -35,16 +39,36 @@ export default function OwnerDashboardScreen({ navigation }) {
       });
       setListings(ls);
     } catch (error) {
-      console.error('Load parkings error:', error);
+      // בדיקה אם המשתמש חסום
+      if (error.isUserBlocked || error.response?.status === 403) {
+        console.log('🚫 User blocked in dashboard - using central handler');
+        await handleUserBlocked(navigation);
+        return;
+      }
+      
+      // טיפול ב-401 בלי הודעה - פשוט חוזר למסך הבית
+      if (error.response?.status === 401) {
+        console.log('🔐 Token invalid in dashboard - redirecting home');
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Home' }],
+        });
+        return;
+      }
+      
+      console.log('⚠️ Load parkings error (non-blocking):', error.message || 'Unknown error');
       Alert.alert('שגיאה', 'לא הצלחנו לטעון את החניות שלך');
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, navigation, isLoggingOut, blockingInProgress, handleUserBlocked]);
 
   useEffect(() => {
+    load(); // טעינה ראשונית
+  }, []); 
+  
+  useEffect(() => {
     const unsub = navigation.addListener('focus', load);
-    load();
     return unsub;
   }, [navigation, load]);
 
@@ -64,7 +88,7 @@ export default function OwnerDashboardScreen({ navigation }) {
         p.id === id ? { ...p, isActive: !p.isActive } : p
       ));
     } catch (error) {
-      console.error('Toggle active error:', error);
+      console.log('⚠️ Toggle active error (non-blocking):', error.message || 'Unknown error');
       Alert.alert('שגיאה', 'לא הצלחנו לעדכן את הסטטוס');
     }
   };
@@ -79,7 +103,7 @@ export default function OwnerDashboardScreen({ navigation }) {
             });
             setListings(prev => prev.filter(x => x.id !== id));
           } catch (error) {
-            console.error('Delete error:', error);
+            console.log('⚠️ Delete error (non-blocking):', error.message || 'Unknown error');
             Alert.alert('שגיאה', 'לא הצלחנו למחוק את החניה');
           }
         }
@@ -87,38 +111,15 @@ export default function OwnerDashboardScreen({ navigation }) {
     ]);
   };
 
-  const toggleApprovalMode = async (parkingId) => {
-    try {
-      const currentParking = listings.find(p => p.id === parkingId);
-      const newMode = currentParking.approvalMode === 'AUTO' ? 'MANUAL' : 'AUTO';
-      
-      const response = await api.patch(`/api/owner/parkings/${parkingId}/approval-mode`, {
-        approvalMode: newMode
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.data) {
-        // עדכון הרשימה
-        setListings(prev => prev.map(p => 
-          p.id === parkingId ? { ...p, approvalMode: newMode } : p
-        ));
-        
-        Alert.alert(
-          'עודכן בהצלחה',
-          `מצב האישור שונה ל${newMode === 'AUTO' ? 'אוטומטי' : 'ידני'}`
-        );
-      }
-    } catch (error) {
-      console.error('Toggle approval mode error:', error);
-      Alert.alert('שגיאה', 'לא ניתן לשנות את מצב האישור');
-    }
-  };
+  // 📝 LEGACY CODE - Approval Mode Toggle (Commented Out)
+  // const toggleApprovalMode = async (parkingId) => {
+  //   // This functionality was removed as all bookings are now auto-approved
+  // };
 
   const renderListing = ({ item }) => {
     const thumb = Array.isArray(item.images) && item.images[0]?.uri;
     const isActive = item.isActive ?? item.active ?? false;
-    const isManualApproval = item.approvalMode === 'MANUAL';
+    // const isManualApproval = item.approvalMode === 'MANUAL'; // Legacy code
 
     return (
       <View style={styles.card}>
@@ -129,8 +130,9 @@ export default function OwnerDashboardScreen({ navigation }) {
         
         <Text style={styles.line}>📍 {item.address || 'כתובת לא זמינה'}</Text>
         
-        {/* מצב אישור */}
-        <View style={styles.approvalModeContainer}>
+        {/* // 📝 LEGACY CODE - Approval Mode Controls (Commented Out) */}
+        {/* מצב אישור - הוסר כיוון שכל ההזמנות מאושרות אוטומטית */}
+        {/* <View style={styles.approvalModeContainer}>
           <Text style={styles.approvalModeLabel}>מצב אישור:</Text>
           <TouchableOpacity
             onPress={() => toggleApprovalMode(item.id)}
@@ -141,7 +143,7 @@ export default function OwnerDashboardScreen({ navigation }) {
               {isManualApproval ? '✋ ידני' : '⚡ אוטומטי'}
             </Text>
           </TouchableOpacity>
-        </View>
+        </View> */}
 
         {/* כפתורי ניהול */}
         <View style={styles.actionsGrid}>
@@ -205,7 +207,9 @@ export default function OwnerDashboardScreen({ navigation }) {
         keyExtractor={i => String(i.id)}
         renderItem={renderListing}
         ListHeaderComponent={
-          <Text style={styles.header}>ניהול החניות</Text>
+          <View style={styles.headerContainer}>
+            <Text style={styles.header}>ניהול החניות</Text>
+          </View>
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
@@ -213,7 +217,7 @@ export default function OwnerDashboardScreen({ navigation }) {
             <Text style={styles.emptyHint}>הגש בקשה או המתן לאישור</Text>
           </View>
         }
-        contentContainerStyle={{ paddingBottom: 100 }}
+        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 80, 100) }}
       />
       
       {/* כפתור הוסף חניה בתחתית */}
@@ -233,7 +237,13 @@ function makeStyles(theme) {
   const { colors, spacing, borderRadii } = theme;
   return StyleSheet.create({
     wrap:{ flex:1, backgroundColor: colors.bg, padding: spacing.lg },
-    header:{ fontSize:20, fontWeight:'800', textAlign:'center', marginBottom: spacing.md, color: colors.text },
+    headerContainer:{ 
+      flexDirection: 'row', 
+      justifyContent: 'space-between', 
+      alignItems: 'center', 
+      marginBottom: spacing.md 
+    },
+    header:{ fontSize:20, fontWeight:'800', color: colors.text, flex: 1, textAlign: 'center' },
 
     floatingButtonContainer: {
       position: 'absolute',

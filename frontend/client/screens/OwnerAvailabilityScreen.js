@@ -18,25 +18,63 @@ const DAYS = [
 ];
 
 const TIME_SLOTS = [
-  { label: '00:00-06:00', start: 0, end: 6 },
-  { label: '06:00-12:00', start: 6, end: 12 },
-  { label: '12:00-18:00', start: 12, end: 18 },
-  { label: '18:00-24:00', start: 18, end: 24 },
+  { label: '00:00-04:00', start: 0, end: 4 },
+  { label: '04:00-08:00', start: 4, end: 8 },
+  { label: '08:00-12:00', start: 8, end: 12 },
+  { label: '12:00-16:00', start: 12, end: 16 },
+  { label: '16:00-20:00', start: 16, end: 20 },
+  { label: '20:00-24:00', start: 20, end: 24 },
 ];
 
 export default function OwnerAvailabilityScreen({ route, navigation }) {
   const theme = useTheme();
   const styles = makeStyles(theme);
-  const { token } = useAuth();
+  const { token, logout, handleUserBlocked } = useAuth();
   const parkingId = route.params?.id;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [parking, setParking] = useState(null);
+  const [checkingConflicts, setCheckingConflicts] = useState(false);
   
   // מבנה: { sunday: [0,6,12,18], monday: [6,12], ... }
   // כל מספר מייצג את תחילת משבצת זמן פנויה
   const [availability, setAvailability] = useState({});
+
+  // פונקציה למיגרציה מבלוקים ישנים (6 שעות) לחדשים (4 שעות)
+  const migrateOldAvailability = (oldAvailability) => {
+    const migrated = {};
+    
+    Object.keys(oldAvailability).forEach(dayKey => {
+      const oldSlots = oldAvailability[dayKey] || [];
+      const newSlots = [];
+      
+      // מיפוי מבלוקים ישנים לחדשים
+      oldSlots.forEach(oldSlot => {
+        switch(oldSlot) {
+          case 0:  // 00:00-06:00 -> 00:00-04:00 + 04:00-08:00
+            newSlots.push(0, 4);
+            break;
+          case 6:  // 06:00-12:00 -> 08:00-12:00 (חלקי)
+            if (!newSlots.includes(4)) newSlots.push(4); // 04:00-08:00
+            newSlots.push(8); // 08:00-12:00
+            break;
+          case 12: // 12:00-18:00 -> 12:00-16:00 + 16:00-20:00 (חלקי)
+            newSlots.push(12, 16);
+            break;
+          case 18: // 18:00-24:00 -> 16:00-20:00 + 20:00-24:00
+            if (!newSlots.includes(16)) newSlots.push(16); // 16:00-20:00
+            newSlots.push(20); // 20:00-24:00
+            break;
+        }
+      });
+      
+      // הסרת כפילויות ומיון
+      migrated[dayKey] = [...new Set(newSlots)].sort((a, b) => a - b);
+    });
+    
+    return migrated;
+  };
 
   useEffect(() => {
     loadParking();
@@ -52,18 +90,46 @@ export default function OwnerAvailabilityScreen({ route, navigation }) {
       });
       setParking(response.data);
       
-      // טעינת זמינות קיימת (אם יש)
+      // טעינת זמינות קיימת (אם יש) עם מיגרציה
       if (response.data.availability) {
         try {
           const parsed = typeof response.data.availability === 'string' 
             ? JSON.parse(response.data.availability) 
             : response.data.availability;
-          setAvailability(parsed || {});
+          
+          // בדיקה אם צריך מיגרציה (אם יש בלוקים ישנים)
+          const needsMigration = Object.values(parsed).some(daySlots => 
+            Array.isArray(daySlots) && daySlots.some(slot => [6, 18].includes(slot))
+          );
+          
+          if (needsMigration) {
+            console.log('🔄 Migrating old availability format to new 4-hour blocks');
+            const migratedAvailability = migrateOldAvailability(parsed);
+            setAvailability(migratedAvailability);
+            
+            // שמירה אוטומטית של הפורמט החדש
+            setTimeout(() => {
+              api.patch(`/api/owner/parkings/${parkingId}`, {
+                availability: JSON.stringify(migratedAvailability)
+              }, {
+                headers: { Authorization: `Bearer ${token}` }
+              }).catch(err => console.log('Auto-migration save failed:', err));
+            }, 1000);
+          } else {
+            setAvailability(parsed || {});
+          }
         } catch {
           setAvailability({});
         }
       }
     } catch (error) {
+      // בדיקה אם המשתמש חסום
+      if (error.isUserBlocked || error.response?.status === 403) {
+        console.log('🚫 User blocked in availability - using central handler');
+        await handleUserBlocked(navigation, Alert);
+        return;
+      }
+      
       console.error('Load parking error:', error);
       Alert.alert('שגיאה', 'לא הצלחנו לטעון את פרטי החניה');
     } finally {
@@ -71,34 +137,104 @@ export default function OwnerAvailabilityScreen({ route, navigation }) {
     }
   };
 
-  const toggleSlot = (dayKey, slotStart) => {
-    setAvailability(prev => {
-      const daySlots = prev[dayKey] || [];
-      const exists = daySlots.includes(slotStart);
+  // בדיקת התנגשויות לפני הסרת בלוקי זמן
+  const checkConflictsBeforeRemoval = async (dayKey, slotsToRemove) => {
+    if (!parkingId || !token || slotsToRemove.length === 0) return { hasConflicts: false, conflicts: [] };
+    
+    setCheckingConflicts(true);
+    try {
+      const response = await api.post(`/api/owner/parkings/${parkingId}/check-availability-conflicts`, {
+        dayKey,
+        timeSlots: slotsToRemove
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
       
-      return {
-        ...prev,
-        [dayKey]: exists 
-          ? daySlots.filter(s => s !== slotStart)
-          : [...daySlots, slotStart].sort((a, b) => a - b)
-      };
-    });
+      return response.data;
+    } catch (error) {
+      console.error('Conflict check error:', error);
+      return { hasConflicts: false, conflicts: [] };
+    } finally {
+      setCheckingConflicts(false);
+    }
   };
 
-  const toggleDay = (dayKey) => {
-    setAvailability(prev => {
-      const daySlots = prev[dayKey] || [];
-      const allSlots = TIME_SLOTS.map(s => s.start);
+  // הצגת הודעת התנגשות מעוצבת
+  const showConflictAlert = (conflicts) => {
+    const conflictsList = conflicts.map(booking => {
+      const startDate = new Date(booking.startTime).toLocaleDateString('he-IL');
+      const startTime = new Date(booking.startTime).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+      const endTime = new Date(booking.endTime).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+      const userName = booking.userName || booking.userEmail || 'לא ידוע';
       
-      // אם כל המשבצות מסומנות - נבטל הכל
-      // אחרת - נסמן הכל
-      const isFullDay = allSlots.every(slot => daySlots.includes(slot));
-      
-      return {
+      return `• ${userName}\n  ${startDate} ${startTime}-${endTime}`;
+    }).join('\n\n');
+
+    Alert.alert(
+      '🚫 לא ניתן לשנות זמינות',
+      `יש הזמנות מאושרות בזמנים אלו:\n\n${conflictsList}\n\n❌ לא ניתן להסיר זמינות כשיש הזמנות קיימות.\n\n💡 תוכל לשנות זמינות רק לאחר סיום ההזמנות.`,
+      [
+        { text: 'הבנתי', style: 'default' }
+      ]
+    );
+  };
+
+  const toggleSlot = async (dayKey, slotStart) => {
+    const daySlots = availability[dayKey] || [];
+    const exists = daySlots.includes(slotStart);
+    
+    // אם מוסיפים בלוק - אין צורך בבדיקה
+    if (!exists) {
+      setAvailability(prev => ({
         ...prev,
-        [dayKey]: isFullDay ? [] : allSlots
-      };
-    });
+        [dayKey]: [...daySlots, slotStart].sort((a, b) => a - b)
+      }));
+      return;
+    }
+    
+    // אם מסירים בלוק - בדיקת התנגשויות
+    const conflictCheck = await checkConflictsBeforeRemoval(dayKey, [slotStart]);
+    
+    if (conflictCheck.hasConflicts) {
+      showConflictAlert(conflictCheck.conflicts);
+      return; // לא מבצעים את השינוי
+    }
+    
+    // אין התנגשויות - מבצעים את השינוי
+    setAvailability(prev => ({
+      ...prev,
+      [dayKey]: daySlots.filter(s => s !== slotStart)
+    }));
+  };
+
+  const toggleDay = async (dayKey) => {
+    const daySlots = availability[dayKey] || [];
+    const allSlots = TIME_SLOTS.map(s => s.start);
+    const isFullDay = allSlots.every(slot => daySlots.includes(slot));
+    
+    // אם מפעילים יום שלם - אין צורך בבדיקה
+    if (!isFullDay) {
+      setAvailability(prev => ({
+        ...prev,
+        [dayKey]: allSlots
+      }));
+      return;
+    }
+    
+    // אם מכבים יום שלם - בדיקת התנגשויות לכל הבלוקים
+    const conflictCheck = await checkConflictsBeforeRemoval(dayKey, daySlots);
+    
+    if (conflictCheck.hasConflicts) {
+      // אסור לכבות - יש הזמנות קיימות
+      showConflictAlert(conflictCheck.conflicts);
+      return; // לא מאפשרים כיבוי בכלל
+    }
+    
+    // אין התנגשויות - מכבים את היום
+    setAvailability(prev => ({
+      ...prev,
+      [dayKey]: []
+    }));
   };
 
   const saveAvailability = async () => {
@@ -153,7 +289,15 @@ export default function OwnerAvailabilityScreen({ route, navigation }) {
         <View style={styles.infoBox}>
           <Ionicons name="information-circle" size={20} color={theme.colors.primary} />
           <Text style={styles.infoText}>
-            סמן את משבצות הזמן בהן החניה פנויה. לקוחות יוכלו להזמין רק בזמנים אלו.
+            סמן את בלוקי הזמן בהן החניה פנויה. כל בלוק מכסה 4 שעות. לקוחות יוכלו להזמין רק בזמנים אלו.
+          </Text>
+        </View>
+
+        {/* הסבר על בדיקת התנגשויות */}
+        <View style={styles.warningBox}>
+          <Ionicons name="shield-checkmark" size={20} color={theme.colors.warning} />
+          <Text style={styles.warningText}>
+            🛡️ הגנה חכמה: המערכת תמנע הסרת זמינות אם יש הזמנות מאושרות באותם זמנים.
           </Text>
         </View>
 
@@ -191,13 +335,22 @@ export default function OwnerAvailabilityScreen({ route, navigation }) {
                   return (
                     <TouchableOpacity
                       key={slot.start}
-                      style={[styles.slot, isActive && styles.slotActive]}
+                      style={[
+                        styles.slot, 
+                        isActive && styles.slotActive,
+                        checkingConflicts && styles.slotDisabled
+                      ]}
                       onPress={() => toggleSlot(day.key, slot.start)}
                       activeOpacity={0.7}
+                      disabled={checkingConflicts}
                     >
-                      <Text style={[styles.slotText, isActive && styles.slotTextActive]}>
-                        {slot.label}
-                      </Text>
+                      {checkingConflicts ? (
+                        <ActivityIndicator size="small" color={isActive ? "white" : theme.colors.primary} />
+                      ) : (
+                        <Text style={[styles.slotText, isActive && styles.slotTextActive]}>
+                          {slot.label}
+                        </Text>
+                      )}
                     </TouchableOpacity>
                   );
                 })}
@@ -281,6 +434,24 @@ function makeStyles(theme) {
       color: colors.subtext,
       lineHeight: 18,
     },
+    warningBox: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.warning + '10',
+      padding: spacing.md,
+      borderRadius: 12,
+      marginBottom: spacing.lg,
+      borderWidth: 1,
+      borderColor: colors.warning + '30',
+    },
+    warningText: {
+      flex: 1,
+      marginRight: 12,
+      fontSize: 13,
+      color: colors.warning,
+      lineHeight: 18,
+      fontWeight: '600',
+    },
     dayCard: {
       backgroundColor: colors.surface,
       borderRadius: 12,
@@ -318,7 +489,7 @@ function makeStyles(theme) {
     },
     slot: {
       flex: 1,
-      minWidth: '45%',
+      minWidth: '30%', // שונה מ-45% ל-30% כדי להכיל 6 בלוקים
       padding: spacing.sm,
       borderRadius: 8,
       backgroundColor: colors.bg,
@@ -337,6 +508,9 @@ function makeStyles(theme) {
     },
     slotTextActive: {
       color: 'white',
+    },
+    slotDisabled: {
+      opacity: 0.6,
     },
     saveButton: {
       flexDirection: 'row',

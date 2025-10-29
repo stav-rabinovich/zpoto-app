@@ -12,16 +12,16 @@ export async function getAllChats() {
           id: true,
           email: true,
           name: true,
-        }
+        },
       },
       parking: {
         select: {
           id: true,
           title: true,
           address: true,
-        }
-      }
-    }
+        },
+      },
+    },
   });
 }
 
@@ -38,9 +38,9 @@ export async function getChatsByUser(userId: number) {
           id: true,
           title: true,
           address: true,
-        }
-      }
-    }
+        },
+      },
+    },
   });
 }
 
@@ -66,16 +66,16 @@ export async function sendMessage(input: {
           id: true,
           email: true,
           name: true,
-        }
+        },
       },
       parking: {
         select: {
           id: true,
           title: true,
           address: true,
-        }
-      }
-    }
+        },
+      },
+    },
   });
 }
 
@@ -84,6 +84,6 @@ export async function sendMessage(input: {
  */
 export async function deleteMessage(id: number) {
   return prisma.chat.delete({
-    where: { id }
+    where: { id },
   });
 }

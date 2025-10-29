@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, TextInput, Pressable, ActivityIndicator, Alert, KeyboardAvoidingView, Platform, ScrollView } from 'react-native';
 import { createText, useTheme } from '@shopify/restyle';
 import { useAuth } from '../contexts/AuthContext';
+import { useNavigationContext } from '../contexts/NavigationContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -10,6 +11,7 @@ const RText = createText();
 export default function RegisterScreen({ navigation }) {
   const { colors } = useTheme();
   const { register } = useAuth();
+  const { executeIntendedNavigation } = useNavigationContext();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -35,7 +37,31 @@ export default function RegisterScreen({ navigation }) {
     const result = await register(email.trim().toLowerCase(), password);
     setLoading(false);
 
-    if (!result.success) {
+    if (result.success) {
+      // הרשמה מוצלחת - מעבר למסך התחברות עם האימייל שהוזן
+      console.log('✅ Registration successful, navigating to Login screen');
+      Alert.alert(
+        'הרשמה מוצלחת!', 
+        'כעת תוכל להתחבר עם הפרטים שהזנת',
+        [
+          {
+            text: 'התחבר עכשיו',
+            onPress: () => {
+              navigation.reset({
+                index: 0,
+                routes: [
+                  { name: 'Home' },
+                  { 
+                    name: 'Login', 
+                    params: { prefillEmail: email.trim().toLowerCase() } 
+                  }
+                ],
+              });
+            }
+          }
+        ]
+      );
+    } else {
       Alert.alert('שגיאת הרשמה', result.error);
     }
   };

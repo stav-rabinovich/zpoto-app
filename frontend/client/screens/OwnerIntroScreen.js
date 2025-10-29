@@ -1,15 +1,13 @@
 // screens/OwnerIntroScreen.js
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, TextInput } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@shopify/restyle';
 import { LinearGradient } from 'expo-linear-gradient';
 import ZpButton from '../components/ui/ZpButton';
 import api from '../utils/api';
-import { useAuthContext } from '../contexts/ServerOnlyAuthContext';
+import { useAuth } from '../contexts/AuthContext';
 
-const PROFILE_KEY = 'profile';
 
 function StatusBadge({ status, colors }) {
   const map = {
@@ -41,39 +39,192 @@ function KpiCard({ icon, label, value, colors }) {
 
 export default function OwnerIntroScreen({ navigation }) {
   const theme = useTheme();
-  const { user, token } = useAuthContext();
+  const { user, isAuthenticated, login, logout } = useAuth();
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState('none'); // 'none' | 'pending' | 'approved'
   const [name, setName] = useState('');
+  const [canLogin, setCanLogin] = useState(false);
+  
+  // Login form state
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  
+  // Commission data state
+  const [monthlyCommissions, setMonthlyCommissions] = useState(null);
+  const [commissionsLoading, setCommissionsLoading] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  // טעינת עמלות חודשיות - פשוט
+  const loadMonthlyCommissions = useCallback(async () => {
+    if (!isAuthenticated || !user?.id || commissionsLoading) return;
+    
+    setCommissionsLoading(true);
+    try {
+      const currentDate = new Date();
+      const year = currentDate.getFullYear();
+      const month = currentDate.getMonth() + 1;
+      
+      const response = await api.get(`/api/commissions/owner/${user.id}/commissions?year=${year}&month=${month}`, {
+        headers: { Authorization: `Bearer ${user.token}` }
+      });
+      
+      if (response.data.success) {
+        setMonthlyCommissions(response.data.data);
+      }
+    } catch (error) {
+      console.log('💰 Error loading commissions:', error.message);
+    } finally {
+      setCommissionsLoading(false);
+    }
+  }, [isAuthenticated, user, commissionsLoading]);
 
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const raw = await AsyncStorage.getItem(PROFILE_KEY);
-      const p = raw ? JSON.parse(raw) : {};
-      setStatus(p?.owner_status || 'none');
-      setName(p?.name || '');
+      
+      if (user?.email) {
+        const response = await api.get(`/api/owner/status?email=${encodeURIComponent(user.email)}`);
+        setStatus(response.data.status || 'none');
+        setCanLogin(response.data.canLogin || false);
+        setName(user.name || '');
+      } else {
+        setStatus('none');
+        setCanLogin(false);
+        setName('');
+      }
+    } catch (error) {
+      console.error('Load owner status error:', error);
+      
+      // אם זו שגיאת 403 זה לא משנה - פשוט לא נציג מידע
+      if (error.response?.status === 403) {
+        console.log('🚫 User blocked - not showing status info');
+      }
+      
+      setStatus('none');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user]);
+
+  const handleLogin = useCallback(async () => {
+    if (!loginEmail || !loginPassword) {
+      alert('אנא מלא אימייל וסיסמה');
+      return;
+    }
+
+    try {
+      setLoginLoading(true);
+      console.log('🔐 Attempting owner login:', loginEmail);
+      
+      const result = await login(loginEmail, loginPassword);
+      
+      if (result.success) {
+        console.log('✅ Basic login successful, checking owner status...');
+        
+        // בדיקה מיוחדת: בודק אם המשתמש הוא אכן בעל חניה
+        try {
+          const statusResponse = await api.get(`/api/owner/status?email=${encodeURIComponent(loginEmail)}`);
+          const userStatus = statusResponse.data.status;
+          const userCanLogin = statusResponse.data.canLogin;
+          
+          console.log(`📊 Owner status check: status=${userStatus}, canLogin=${userCanLogin}`);
+          
+          if (userStatus === 'none') {
+            // המשתמש לא בעל חניה בכלל
+            await logout(); // זריקה מהמערכת
+            alert('❌ אין לך הרשאה לגשת לאזור בעלי החניה.\n\n💡 להגיש בקשה להיות בעל חניה, היכנס לאפליקציה ובחר "הצטרף כבעל חניה".');
+            return;
+          }
+          
+          if (userStatus === 'pending') {
+            // המשתמש הגיש בקשה אבל עדיין לא אושר
+            await logout(); // זריקה מהמערכת
+            alert('⏳ הבקשה שלך להיות בעל חניה עדיין בטיפול.\n\n📧 תקבל התראה כשהבקשה תאושר.');
+            return;
+          }
+          
+          if (userStatus === 'approved' && !userCanLogin) {
+            // המשתמש מאושר אבל אין לו סיסמה
+            await logout(); // זריקה מהמערכת
+            alert('🔑 החשבון שלך מאושר אבל עדיין לא הוגדרה סיסמה.\n\n📧 בדוק את האימייל לקבלת הסיסמה הזמנית.');
+            return;
+          }
+          
+          if (userStatus === 'approved' && userCanLogin) {
+            // הכל בסדר! נישאר בדף OwnerIntro
+            console.log('🎉 Owner login approved - staying on intro screen');
+            setStatus(userStatus);
+            setCanLogin(userCanLogin);
+            // לא מנווטים - נישאר בדף "ברוך הבא! מה תרצו לעשות?"
+            return;
+          }
+          
+          // מקרה לא צפוי
+          await logout();
+          alert('❌ שגיאה בבדיקת הרשאות. נסה שוב מאוחר יותר.');
+          
+        } catch (statusError) {
+          console.error('❌ Status check failed:', statusError);
+          await logout(); // זריקה מהמערכת
+          alert('❌ שגיאה בבדיקת הרשאות. נסה שוב מאוחר יותר.');
+        }
+        
+      } else {
+        console.log('🔐 Owner login failed:', result.error);
+        alert(result.error || 'התחברות נכשלה. בדוק את פרטי ההתחברות.');
+      }
+    } catch (error) {
+      console.log('🔐 Owner login exception:', error);
+      alert('שגיאה בהתחברות. נסה שוב.');
+    } finally {
+      setLoginLoading(false);
+    }
+  }, [loginEmail, loginPassword, login, logout, navigation]);
+
+  const handleLogout = useCallback(async () => {
+    try {
+      console.log('🚪 Owner logout initiated...');
+      await logout();
+      console.log('✅ Owner logout successful - navigating to main screen');
+      // מעבר למסך הראשי של האפליקציה
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Home' }],
+      });
+    } catch (error) {
+      console.error('❌ Owner logout failed:', error);
+      // גם במקרה של שגיאה, חוזר למסך הראשי
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Home' }],
+      });
+    }
+  }, [logout, navigation]);
 
   useEffect(() => {
-    const unsub = navigation.addListener('focus', load);
+    const unsub = navigation.addListener('focus', () => {
+      load();
+      // טעינת עמלות רק אם המשתמש מחובר ומאושר
+      if (isAuthenticated && status === 'approved') {
+        loadMonthlyCommissions();
+      }
+    });
     load();
+    // טעינת עמלות רק אם המשתמש מחובר ומאושר
+    if (isAuthenticated && status === 'approved') {
+      loadMonthlyCommissions();
+    }
     return unsub;
   }, [navigation, load]);
 
-  const approveDev = useCallback(async () => {
-    const raw = await AsyncStorage.getItem(PROFILE_KEY);
-    const prev = raw ? JSON.parse(raw) : {};
-    const roles = Array.isArray(prev.roles)
-      ? Array.from(new Set([...prev.roles, 'owner']))
-      : ['seeker', 'owner'];
-    const next = { ...prev, owner_status: 'approved', roles };
-    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(next));
-    setStatus('approved');
-  }, []);
+  // טעינת עמלות רק כשנדרש
+  useEffect(() => {
+    if (isAuthenticated && status === 'approved') {
+      console.log('💰 Loading commissions for approved owner...');
+      loadMonthlyCommissions();
+    }
+  }, [isAuthenticated, status]);
+
 
   if (loading) {
     return (
@@ -103,17 +254,6 @@ export default function OwnerIntroScreen({ navigation }) {
         <View style={styles.heroTopRow}>
           <Text style={styles.heroTitle}>מרכז הניהול להשכרת חניה</Text>
 
-          {status !== 'approved' && (
-            <TouchableOpacity
-              onPress={approveDev}
-              style={[styles.devBtn, { borderColor: 'rgba(255,255,255,0.45)' }]}
-              activeOpacity={0.9}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Ionicons name="construct-outline" size={14} color="#fff" style={{ marginEnd: 6 }} />
-              <Text style={[styles.devBtnText, { color: '#fff' }]}>אשר זמנית (DEV)</Text>
-            </TouchableOpacity>
-          )}
         </View>
 
         {/* ברכה קצרה */}
@@ -130,12 +270,6 @@ export default function OwnerIntroScreen({ navigation }) {
         </View>
       </LinearGradient>
 
-      {/* KPIs */}
-      <View style={styles.kpiRow}>
-        <KpiCard icon="cash-outline"     label="הכנסה חודשית" value="₪0 (דמו)" colors={theme.colors} />
-        <KpiCard icon="calendar-outline" label="הזמנות החודש" value="—"         colors={theme.colors} />
-        <KpiCard icon="timer-outline"    label="שעות תפוסה"    value="—"         colors={theme.colors} />
-      </View>
 
       {/* תוכן לפי סטטוס */}
       {status === 'approved' && (
@@ -146,6 +280,92 @@ export default function OwnerIntroScreen({ navigation }) {
                 <Ionicons name="checkmark-circle-outline" size={16} color="#fff" />
               </View>
               <Text style={[styles.cardTitle, { color: theme.colors.text }]}>ברוך/ה הבא/ה{name ? `, ${name}` : ''}!</Text>
+            </View>
+
+            {/* קארד הכנסות חודשיות */}
+            <View style={[styles.monthlyRevenueCard, { 
+              backgroundColor: theme.colors.surface,
+              borderColor: theme.colors.border 
+            }]}>
+              <View style={styles.monthlyRevenueHeader}>
+                <View style={[styles.monthlyRevenueIcon, { backgroundColor: `${theme.colors.success}15` }]}>
+                  <Ionicons name="wallet" size={20} color={theme.colors.success} />
+                </View>
+                <View style={styles.monthlyRevenueInfo}>
+                  <Text style={[styles.monthlyRevenueTitle, { color: theme.colors.text }]}>
+                    הכנסות החודש
+                  </Text>
+                  <Text style={[styles.monthlyRevenueSubtitle, { color: theme.colors.subtext }]}>
+                    {new Date().toLocaleDateString('he-IL', { month: 'long', year: 'numeric' })}
+                  </Text>
+                </View>
+                <TouchableOpacity 
+                  style={[styles.monthlyRevenueDetailsButton, { backgroundColor: `${theme.colors.primary}10` }]}
+                  onPress={() => navigation.navigate('OwnerOverview')}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.monthlyRevenueDetailsText, { color: theme.colors.primary }]}>
+                    פירוט
+                  </Text>
+                  <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.monthlyRevenueContent}>
+                {commissionsLoading ? (
+                  <View style={styles.monthlyRevenueLoading}>
+                    <ActivityIndicator size="small" color={theme.colors.primary} />
+                    <Text style={[styles.monthlyRevenueLoadingText, { color: theme.colors.subtext }]}>
+                      טוען נתונים...
+                    </Text>
+                  </View>
+                ) : monthlyCommissions ? (
+                  <View style={styles.monthlyRevenueData}>
+                    <View style={styles.monthlyRevenueAmount}>
+                      <Text style={[styles.monthlyRevenueAmountValue, { color: theme.colors.success }]}>
+                        ₪{monthlyCommissions.summary.totalNetOwnerILS}
+                      </Text>
+                      <Text style={[styles.monthlyRevenueAmountLabel, { color: theme.colors.subtext }]}>
+                        נטו לתשלום
+                      </Text>
+                    </View>
+                    
+                    <View style={[styles.monthlyRevenueStats, { borderTopColor: theme.colors.border }]}>
+                      <View style={styles.monthlyRevenueStat}>
+                        <Text style={[styles.monthlyRevenueStatValue, { color: theme.colors.text }]}>
+                          {monthlyCommissions.summary.count}
+                        </Text>
+                        <Text style={[styles.monthlyRevenueStatLabel, { color: theme.colors.subtext }]}>
+                          הזמנות
+                        </Text>
+                      </View>
+                      
+                      <View style={styles.monthlyRevenueStat}>
+                        <Text style={[styles.monthlyRevenueStatValue, { color: theme.colors.text }]}>
+                          ₪{monthlyCommissions.summary.totalCommissionILS}
+                        </Text>
+                        <Text style={[styles.monthlyRevenueStatLabel, { color: theme.colors.subtext }]}>
+                          עמלת זפוטו
+                        </Text>
+                      </View>
+                    </View>
+                    
+                    <View style={[styles.monthlyRevenuePayoutInfo, { backgroundColor: `${theme.colors.accent}08` }]}>
+                      <Ionicons name="calendar" size={12} color={theme.colors.subtext} />
+                      <Text style={[styles.monthlyRevenuePayoutText, { color: theme.colors.subtext }]}>
+                        תשלום ב-1 לחודש הבא
+                      </Text>
+                    </View>
+                  </View>
+                ) : (
+                  <View style={styles.monthlyRevenueEmpty}>
+                    <Ionicons name="information-circle" size={16} color={theme.colors.subtext} />
+                    <Text style={[styles.monthlyRevenueEmptyText, { color: theme.colors.subtext }]}>
+                      אין הכנסות החודש
+                    </Text>
+                  </View>
+                )}
+              </View>
             </View>
 
             <Text style={[styles.sectionTitleLeft, { color: theme.colors.text }]}>מה תרצו לעשות?</Text>
@@ -175,8 +395,8 @@ export default function OwnerIntroScreen({ navigation }) {
                 onPress={() => navigation.navigate('OwnerPending')}
                 activeOpacity={0.9}
               >
-                <Ionicons name="timer" size={20} color={theme.colors.primary} />
-                <Text style={[styles.quickLabel, { color: theme.colors.text }]}>בקשות בהמתנה</Text>
+                <Ionicons name="calendar-outline" size={20} color={theme.colors.primary} />
+                <Text style={[styles.quickLabel, { color: theme.colors.text }]}>הזמנות עתידיות</Text>
               </TouchableOpacity>
 
               {/* פרסום חניה חדשה -> OwnerListingFormScreen.js */}
@@ -188,15 +408,17 @@ export default function OwnerIntroScreen({ navigation }) {
                 <Ionicons name="add-circle-outline" size={20} color={theme.colors.primary} />
                 <Text style={[styles.quickLabel, { color: theme.colors.text }]}>פרסום חניה חדשה</Text>
               </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.quickTile, { borderColor: theme.colors.border }]}
+                onPress={() => navigation.navigate('OwnerSettings')}
+                activeOpacity={0.9}
+              >
+                <Ionicons name="settings-outline" size={20} color={theme.colors.primary} />
+                <Text style={[styles.quickLabel, { color: theme.colors.text }]}>הגדרות</Text>
+              </TouchableOpacity>
             </View>
 
-            {/* שינוי טקסט הכפתור */}
-            <ZpButton
-              title="כניסה לממשק"
-              onPress={() => navigation.navigate('OwnerOverview')}
-              leftIcon={<Ionicons name="enter" size={18} color="#fff" style={{ marginEnd: 6 }} />}
-              style={{ marginTop: theme.spacing.sm }}
-            />
           </View>
 
           <View style={[styles.infoStrip, { borderColor: theme.colors.border, backgroundColor: '#F8FAFF' }]}>
@@ -231,39 +453,108 @@ export default function OwnerIntroScreen({ navigation }) {
       )}
 
       {status === 'none' && (
-        <View style={[styles.card, themed(theme)]}>
-          <View style={styles.cardHeader}>
-            <View style={[styles.cardIconWrap, { backgroundColor: theme.colors.primary }]}>
-              <Ionicons name="create-outline" size={16} color="#fff" />
+        <>
+          {/* טופס התחברות - רק אם המשתמש לא מחובר */}
+          {!isAuthenticated && (
+            <>
+              <View style={[styles.card, themed(theme)]}>
+                <View style={styles.cardHeader}>
+                  <View style={[styles.cardIconWrap, { backgroundColor: theme.colors.primary }]}>
+                    <Ionicons name="log-in-outline" size={16} color="#fff" />
+                  </View>
+                  <Text style={[styles.cardTitle, { color: theme.colors.text }]}>כבר יש לך חשבון?</Text>
+                </View>
+
+                <View style={styles.loginForm}>
+                  <View style={styles.inputGroup}>
+                    <Text style={[styles.inputLabel, { color: theme.colors.text }]}>אימייל</Text>
+                    <TextInput
+                      style={[styles.textInput, { borderColor: theme.colors.border, color: theme.colors.text }]}
+                      value={loginEmail}
+                      onChangeText={setLoginEmail}
+                      placeholder="הזן את האימייל שלך"
+                      placeholderTextColor={theme.colors.subtext}
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                    />
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={[styles.inputLabel, { color: theme.colors.text }]}>סיסמה</Text>
+                    <TextInput
+                      style={[styles.textInput, { borderColor: theme.colors.border, color: theme.colors.text }]}
+                      value={loginPassword}
+                      onChangeText={setLoginPassword}
+                      placeholder="הזן את הסיסמה שלך"
+                      placeholderTextColor={theme.colors.subtext}
+                      secureTextEntry
+                    />
+                  </View>
+
+                  <ZpButton
+                    title={loginLoading ? "מתחבר..." : "כניסה למערכת"}
+                    onPress={handleLogin}
+                    disabled={loginLoading || !loginEmail || !loginPassword}
+                    leftIcon={<Ionicons name="log-in" size={18} color="#fff" style={{ marginEnd: 6 }} />}
+                    style={{ marginTop: theme.spacing.sm }}
+                  />
+                </View>
+              </View>
+
+              {/* מפריד */}
+              <View style={styles.divider}>
+                <View style={[styles.dividerLine, { backgroundColor: theme.colors.border }]} />
+                <Text style={[styles.dividerText, { color: theme.colors.subtext }]}>או</Text>
+                <View style={[styles.dividerLine, { backgroundColor: theme.colors.border }]} />
+              </View>
+            </>
+          )}
+
+          {/* הגשת בקשה - מופיע גם למשתמשים מחוברים וגם לא מחוברים */}
+          <View style={[styles.card, themed(theme)]}>
+            <View style={styles.cardHeader}>
+              <View style={[styles.cardIconWrap, { backgroundColor: theme.colors.primary }]}>
+                <Ionicons name="create-outline" size={16} color="#fff" />
+              </View>
+              <Text style={[styles.cardTitle, { color: theme.colors.text }]}>רוצה להצטרף כבעל/ת חניה?</Text>
             </View>
-            <Text style={[styles.cardTitle, { color: theme.colors.text }]}>התחילו להשכיר בחכמה</Text>
+
+            <View style={styles.bullets}>
+              <View style={styles.bulletRow}>
+                <Ionicons name="shield-checkmark" size={16} color={theme.colors.primary} style={{ marginEnd: 8 }} />
+                <Text style={[styles.bulletText, { color: theme.colors.subtext }]}>תשלומים מאובטחים והגנות ביטול</Text>
+              </View>
+              <View style={styles.bulletRow}>
+                <Ionicons name="calendar" size={16} color={theme.colors.primary} style={{ marginEnd: 8 }} />
+                <Text style={[styles.bulletText, { color: theme.colors.subtext }]}>שליטה מלאה בזמינות</Text>
+              </View>
+              <View style={styles.bulletRow}>
+                <Ionicons name="chatbubbles" size={16} color={theme.colors.primary} style={{ marginEnd: 8 }} />
+                <Text style={[styles.bulletText, { color: theme.colors.subtext }]}>תמיכה ידידותית בעברית</Text>
+              </View>
+            </View>
+
+            <ZpButton
+              title={isAuthenticated ? "הגש בקשה להיות בעל חניה" : "הגש בקשה"}
+              onPress={() => navigation.navigate('OwnerApply')}
+              leftIcon={<Ionicons name="create" size={18} color="#fff" style={{ marginEnd: 6 }} />}
+              style={{ marginTop: theme.spacing.sm }}
+            />
           </View>
+        </>
+      )}
 
-          <Text style={[styles.parLeft, { color: theme.colors.text }]}>
-            נמלא פרטים קצרים ונשלח בקשה לאישור. אחר כך תקבלו גישה למרכז הניהול.
-          </Text>
-
-          <View style={styles.bullets}>
-            <View style={styles.bulletRow}>
-              <Ionicons name="shield-checkmark" size={16} color={theme.colors.primary} style={{ marginEnd: 8 }} />
-              <Text style={[styles.bulletText, { color: theme.colors.subtext }]}>תשלומים מאובטחים והגנות ביטול</Text>
-            </View>
-            <View style={styles.bulletRow}>
-              <Ionicons name="calendar" size={16} color={theme.colors.primary} style={{ marginEnd: 8 }} />
-              <Text style={[styles.bulletText, { color: theme.colors.subtext }]}>שליטה מלאה בזמינות</Text>
-            </View>
-            <View style={styles.bulletRow}>
-              <Ionicons name="chatbubbles" size={16} color={theme.colors.primary} style={{ marginEnd: 8 }} />
-              <Text style={[styles.bulletText, { color: theme.colors.subtext }]}>תמיכה ידידותית בעברית</Text>
-            </View>
-          </View>
-
-          <ZpButton
-            title="הגש בקשה"
-            onPress={() => navigation.navigate('OwnerApply')}
-            leftIcon={<Ionicons name="create" size={18} color="#fff" style={{ marginEnd: 6 }} />}
-            style={{ marginTop: theme.spacing.sm }}
-          />
+      {/* כפתור התנתקות - רק אם המשתמש מחובר כבעל חניה */}
+      {isAuthenticated && user?.role === 'OWNER' && (
+        <View style={styles.logoutContainer}>
+          <TouchableOpacity 
+            style={styles.logoutButton}
+            onPress={handleLogout}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="log-out-outline" size={20} color="#fff" />
+            <Text style={styles.logoutButtonText}>התנתק</Text>
+          </TouchableOpacity>
         </View>
       )}
     </ScrollView>
@@ -347,6 +638,117 @@ const styles = StyleSheet.create({
   sectionTitleLeft: { fontSize: 14, fontWeight: '800', marginTop: 2, marginBottom: 8, textAlign: 'left', writingDirection: 'ltr' },
   parLeft: { fontSize: 14, marginVertical: 2, textAlign: 'left', writingDirection: 'ltr' },
 
+  // קארד הכנסות חודשיות
+  monthlyRevenueCard: {
+    borderRadius: 12,
+    padding: 16,
+    marginVertical: 12,
+    borderWidth: 1,
+  },
+  monthlyRevenueHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  monthlyRevenueIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginEnd: 12,
+  },
+  monthlyRevenueInfo: {
+    flex: 1,
+  },
+  monthlyRevenueTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  monthlyRevenueSubtitle: {
+    fontSize: 13,
+  },
+  monthlyRevenueDetailsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  monthlyRevenueDetailsText: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginEnd: 4,
+  },
+  monthlyRevenueContent: {
+    minHeight: 60,
+  },
+  monthlyRevenueLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+  },
+  monthlyRevenueLoadingText: {
+    fontSize: 13,
+    marginStart: 8,
+  },
+  monthlyRevenueData: {
+    gap: 12,
+  },
+  monthlyRevenueAmount: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  monthlyRevenueAmountValue: {
+    fontSize: 24,
+    fontWeight: '800',
+    marginBottom: 2,
+  },
+  monthlyRevenueAmountLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  monthlyRevenueStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 8,
+    borderTopWidth: 1,
+  },
+  monthlyRevenueStat: {
+    alignItems: 'center',
+  },
+  monthlyRevenueStatValue: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  monthlyRevenueStatLabel: {
+    fontSize: 11,
+  },
+  monthlyRevenuePayoutInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  monthlyRevenuePayoutText: {
+    fontSize: 12,
+    marginStart: 4,
+  },
+  monthlyRevenueEmpty: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+  },
+  monthlyRevenueEmptyText: {
+    fontSize: 13,
+    marginStart: 8,
+  },
+
   quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   quickTile: {
     width: '48%',
@@ -385,4 +787,57 @@ const styles = StyleSheet.create({
   bullets: { marginTop: 6 },
   bulletRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
   bulletText: { fontSize: 13 },
+
+  // Login form styles
+  loginForm: { marginTop: 12 },
+  inputGroup: { marginBottom: 12 },
+  inputLabel: { fontSize: 14, fontWeight: '600', marginBottom: 6 },
+  textInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    textAlign: 'right',
+  },
+
+  // Divider styles
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 16,
+  },
+  dividerLine: { flex: 1, height: 1 },
+  dividerText: {
+    marginHorizontal: 12,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // Logout button styles
+  logoutContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    paddingBottom: 30,
+  },
+  logoutButton: {
+    backgroundColor: '#ef4444', // אדום
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    shadowColor: '#ef4444',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  logoutButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginStart: 8,
+  },
 });

@@ -1,12 +1,203 @@
 import { Router } from 'express';
-import { auth, AuthedRequest } from '../middlewares/auth';
+import { auth, requireOwner, AuthedRequest } from '../middlewares/auth';
 import { prisma } from '../lib/prisma';
 import * as svc from '../services/owner.service';
+import { broadcastAvailabilityUpdate } from '../services/websocket.service';
 
 const r = Router();
 
-// כל ה-routes דורשים התחברות
-r.use(auth);
+/**
+ * GET /api/owner/status?email={email}
+ * בדיקת סטטוס בעל חניה לפי אימייל (ללא התחברות)
+ */
+r.get('/status', async (req, res, next) => {
+  try {
+    const { email } = req.query;
+    if (!email) return res.status(400).json({ error: 'Missing email' });
+
+    const user = await prisma.user.findUnique({
+      where: { email: String(email).toLowerCase() },
+      select: { id: true, role: true, password: true, ownershipBlocked: true },
+    });
+    if (!user) return res.json({ status: 'none' });
+
+    // בדיקת בקשה ממתינה
+    const pending = await prisma.listingRequest.findFirst({
+      where: { userId: user.id, status: 'PENDING' },
+    });
+    if (pending) return res.json({ status: 'pending' });
+
+    // בדיקת בקשה שנדחתה
+    const rejected = await prisma.listingRequest.findFirst({
+      where: { userId: user.id, status: 'REJECTED' },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (rejected || user.ownershipBlocked) {
+      return res.json({ status: 'rejected', message: 'בקשתך נדחתה - אתה יכול להמשיך כמחפש חניה' });
+    }
+
+    const parkings = await prisma.parking.count({ where: { ownerId: user.id } });
+    const hasPassword = !!user.password;
+
+    if (parkings > 0 && user.role === 'OWNER' && hasPassword) {
+      return res.json({ status: 'approved', canLogin: true });
+    } else if (parkings > 0) {
+      return res.json({ status: 'approved', canLogin: false });
+    } else {
+      return res.json({ status: 'none' });
+    }
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/owner/check-existing
+ * בדיקת בקשות קיימות לפי אימייל או טלפון
+ * Body: { email?, phone? }
+ */
+r.post('/check-existing', async (req, res, next) => {
+  try {
+    const { email, phone } = req.body || {};
+
+    if (!email && !phone) {
+      return res.status(400).json({ error: 'Missing email or phone' });
+    }
+
+    // בדיקה אם יש בקשה קיימת
+    const whereConditions = [];
+    if (email) whereConditions.push({ user: { email: String(email).toLowerCase() } });
+    if (phone) whereConditions.push({ phone: String(phone) });
+
+    const existingRequest = await prisma.listingRequest.findFirst({
+      where: {
+        OR: whereConditions,
+      },
+      include: {
+        user: {
+          select: { email: true, name: true },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (existingRequest) {
+      return res.json({
+        exists: true,
+        status: existingRequest.status,
+        createdAt: existingRequest.createdAt,
+        message:
+          existingRequest.status === 'PENDING'
+            ? 'קיימת בקשה בהמתנה לאישור עם פרטים אלה'
+            : existingRequest.status === 'APPROVED'
+              ? 'הבקשה עם פרטים אלה כבר אושרה'
+              : 'קיימת בקשה עם פרטים אלה',
+      });
+    }
+
+    return res.json({ exists: false });
+  } catch (e) {
+    console.error('❌ Check existing request error:', e);
+    next(e);
+  }
+});
+
+/**
+ * POST /api/owner/apply
+ * הגשת בקשה להיות בעל חניה (ללא התחברות)
+ * Body: { name, email, phone, address, city }
+ */
+r.post('/apply', async (req, res, next) => {
+  try {
+    console.log('🔥 OWNER APPLY REQUEST:', req.body);
+    const { name, email, phone, address, city } = req.body || {};
+
+    // בדיקות בסיסיות
+    if (!name || typeof name !== 'string') {
+      return res.status(400).json({ error: 'Missing or invalid name' });
+    }
+    if (!email || typeof email !== 'string') {
+      return res.status(400).json({ error: 'Missing or invalid email' });
+    }
+    if (!phone || typeof phone !== 'string') {
+      return res.status(400).json({ error: 'Missing or invalid phone' });
+    }
+    if (!address || typeof address !== 'string') {
+      return res.status(400).json({ error: 'Missing or invalid address' });
+    }
+    if (!city || typeof city !== 'string') {
+      return res.status(400).json({ error: 'Missing or invalid city' });
+    }
+
+    console.log('🚀 Creating owner application:', {
+      name: name.trim(),
+      email: email.trim(),
+      phone: phone.trim(),
+      address: address.trim(),
+      city: city.trim(),
+    });
+
+    // יצירת משתמש זמני (או שימוש במשתמש קיים עם אימייל זה)
+    let user = await prisma.user.findUnique({
+      where: { email: email.trim() },
+    });
+
+    if (!user) {
+      // יצירת משתמש זמני עבור הבקשה
+      console.log('📝 Creating new user for owner application');
+      user = await prisma.user.create({
+        data: {
+          email: email.trim(),
+          name: name.trim(),
+          phone: phone.trim(),
+          password: 'temp_password_' + Date.now(), // סיסמה זמנית
+          role: 'USER',
+        },
+      });
+    } else {
+      // עדכון פרטי המשתמש הקיים עם הנתונים החדשים מהטופס
+      console.log('🔄 Updating existing user info for owner application');
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          name: name.trim(), // עדכון שם אם השתנה
+          phone: phone.trim() || user.phone, // עדכון טלפון אם סופק, אחרת שמירה על הקיים
+          // לא עדכנים אימייל או סיסמה - רק שם וטלפון
+        },
+      });
+    }
+
+    // שמירה בטבלת ListingRequest
+    const application = await prisma.listingRequest.create({
+      data: {
+        userId: user.id,
+        title: `בקשת בעלות חניה - ${name.trim()}`,
+        address: address.trim(),
+        fullAddress: address.trim(),
+        city: city.trim(),
+        phone: phone.trim(),
+        lat: 32.0853, // ברירת מחדל - תל אביב
+        lng: 34.7818,
+        priceHr: 0, // ישוטח במהלך האונבורדינג
+        description: `בקשה מ-${name.trim()}`,
+        status: 'PENDING',
+      },
+    });
+
+    console.log('✅ Owner application created:', application);
+    res.status(201).json({
+      success: true,
+      message: 'הבקשה נשלחה בהצלחה',
+      data: application,
+    });
+  } catch (e: any) {
+    console.error('❌ Owner apply error:', e);
+    next(e);
+  }
+});
+
+// כל ה-routes הבאים דורשים התחברות כבעל חניה
+r.use(requireOwner);
 
 /**
  * POST /api/owner/listing-requests
@@ -16,7 +207,8 @@ r.use(auth);
 r.post('/listing-requests', async (req: AuthedRequest, res, next) => {
   try {
     console.log('🔥 LISTING REQUEST:', req.body, 'User ID:', req.userId);
-    const { title, address, fullAddress, city, phone, lat, lng, priceHr, description, onboarding } = req.body || {};
+    const { title, address, fullAddress, city, phone, lat, lng, priceHr, description, onboarding } =
+      req.body || {};
 
     // בדיקות בסיסיות
     if (!address || typeof address !== 'string') {
@@ -46,7 +238,7 @@ r.post('/listing-requests', async (req: AuthedRequest, res, next) => {
       lng: longitude,
       priceHr: priceHr || 0,
       description,
-      onboarding
+      onboarding,
     });
 
     const data = await svc.createListingRequest({
@@ -116,10 +308,29 @@ r.get('/parkings/:id', async (req: AuthedRequest, res, next) => {
  */
 r.patch('/parkings/:id', async (req: AuthedRequest, res, next) => {
   try {
+    console.log(`🔄 PATCH /api/owner/parkings/${req.params.id} - User: ${req.userId}`);
+    console.log('📤 Request body:', req.body);
+
     const id = Number(req.params.id);
     const patch = req.body || {};
 
     const data = await svc.updateMyParking(id, Number(req.userId), patch);
+
+    // אם עודכנה זמינות - שליחת עדכון WebSocket
+    if (patch.availability !== undefined) {
+      console.log('📡 Broadcasting availability update via WebSocket');
+      try {
+        const parsedAvailability =
+          typeof patch.availability === 'string'
+            ? JSON.parse(patch.availability)
+            : patch.availability;
+        broadcastAvailabilityUpdate(id, parsedAvailability);
+      } catch (wsError) {
+        console.error('WebSocket broadcast error:', wsError);
+        // לא נכשיל את הבקשה בגלל שגיאת WebSocket
+      }
+    }
+
     res.json(data);
   } catch (e: any) {
     if (e?.message === 'PARKING_NOT_FOUND') {
@@ -141,17 +352,17 @@ r.get('/bookings', async (req: AuthedRequest, res, next) => {
     const ownerId = req.userId!;
     const bookings = await prisma.booking.findMany({
       where: {
-        parking: { ownerId }
+        parking: { ownerId },
       },
       include: {
         user: {
-          select: { id: true, email: true, name: true }
+          select: { id: true, email: true, name: true },
         },
         parking: {
-          select: { id: true, title: true, address: true }
-        }
+          select: { id: true, title: true, address: true },
+        },
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     });
     res.json({ data: bookings });
   } catch (e) {
@@ -168,25 +379,35 @@ r.patch('/parkings/:id/approval-mode', async (req: AuthedRequest, res, next) => 
     const ownerId = req.userId!;
     const parkingId = parseInt(req.params.id);
     const { approvalMode } = req.body;
-    
+
     if (!['AUTO', 'MANUAL'].includes(approvalMode)) {
       return res.status(400).json({ error: 'Invalid approval mode' });
     }
-    
+
     // וודא שהחניה שייכת לבעלים
     const parking = await prisma.parking.findFirst({
-      where: { id: parkingId, ownerId }
+      where: { id: parkingId, ownerId },
     });
-    
+
     if (!parking) {
       return res.status(404).json({ error: 'parking not found' });
     }
-    
+
+    console.log(`🎛️ Updating approval mode for parking #${parkingId}:`);
+    console.log(`👤 Owner: #${ownerId}`);
+    console.log(`🔄 Old mode: ${parking.approvalMode} -> New mode: ${approvalMode}`);
+
     const updated = await prisma.parking.update({
       where: { id: parkingId },
-      data: { approvalMode }
+      data: { approvalMode },
     });
-    
+
+    console.log(`✅ Approval mode updated successfully:`, {
+      parkingId: updated.id,
+      title: updated.title,
+      approvalMode: updated.approvalMode,
+    });
+
     res.json({ data: updated });
   } catch (e) {
     next(e);
@@ -202,19 +423,19 @@ r.get('/bookings', async (req: AuthedRequest, res, next) => {
     const ownerId = req.userId!;
     const bookings = await prisma.booking.findMany({
       where: {
-        parking: { ownerId }
+        parking: { ownerId },
       },
       include: {
         parking: {
-          select: { id: true, title: true, address: true }
+          select: { id: true, title: true, address: true },
         },
         user: {
-          select: { id: true, email: true }
-        }
+          select: { id: true, email: true },
+        },
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     });
-    
+
     res.json({ data: bookings });
   } catch (e) {
     next(e);
@@ -229,16 +450,16 @@ r.get('/stats/:parkingId', async (req: AuthedRequest, res, next) => {
   try {
     const ownerId = req.userId!;
     const parkingId = parseInt(req.params.parkingId);
-    
+
     if (isNaN(parkingId)) {
       return res.status(400).json({ error: 'Invalid parking ID' });
     }
 
     // וידוא שהחניה שייכת לבעלים
     const parking = await prisma.parking.findFirst({
-      where: { id: parkingId, ownerId }
+      where: { id: parkingId, ownerId },
     });
-    
+
     if (!parking) {
       return res.status(404).json({ error: 'Parking not found or not owned by user' });
     }
@@ -246,8 +467,10 @@ r.get('/stats/:parkingId', async (req: AuthedRequest, res, next) => {
     // פרמטרים לטווח תאריכים (ברירת מחדל: 30 יום אחרונים)
     const { from, to, days = '30' } = req.query;
     const daysNum = parseInt(days as string) || 30;
-    
-    const fromDate = from ? new Date(from as string) : new Date(Date.now() - daysNum * 24 * 60 * 60 * 1000);
+
+    const fromDate = from
+      ? new Date(from as string)
+      : new Date(Date.now() - daysNum * 24 * 60 * 60 * 1000);
     const toDate = to ? new Date(to as string) : new Date();
 
     // שליפת הזמנות בטווח
@@ -256,14 +479,14 @@ r.get('/stats/:parkingId', async (req: AuthedRequest, res, next) => {
         parkingId,
         createdAt: {
           gte: fromDate,
-          lte: toDate
-        }
+          lte: toDate,
+        },
       },
       include: {
         user: {
-          select: { id: true, email: true }
-        }
-      }
+          select: { id: true, email: true },
+        },
+      },
     });
 
     // חישוב סטטיסטיקות
@@ -284,16 +507,16 @@ r.get('/stats/:parkingId', async (req: AuthedRequest, res, next) => {
       dayStart.setHours(0, 0, 0, 0);
       const dayEnd = new Date(d);
       dayEnd.setHours(23, 59, 59, 999);
-      
+
       const dayBookings = bookings.filter(b => {
         const bookingDate = new Date(b.createdAt);
         return bookingDate >= dayStart && bookingDate <= dayEnd;
       });
-      
+
       const dayRevenue = dayBookings
         .filter(b => b.status === 'CONFIRMED')
         .reduce((sum, b) => sum + (b.totalPriceCents || 0), 0);
-      
+
       dailyStats.push({
         day: d.toISOString().split('T')[0],
         bookings: dayBookings.length,
@@ -306,14 +529,20 @@ r.get('/stats/:parkingId', async (req: AuthedRequest, res, next) => {
       confirmedBookings: confirmedBookings.length,
       totalRevenue: totalRevenue / 100, // המרה לשקלים
       totalHours: Math.round(totalHours * 100) / 100,
-      avgRevPerBooking: confirmedBookings.length > 0 ? Math.round((totalRevenue / confirmedBookings.length) / 100 * 100) / 100 : 0,
-      avgHoursPerBooking: confirmedBookings.length > 0 ? Math.round((totalHours / confirmedBookings.length) * 100) / 100 : 0,
+      avgRevPerBooking:
+        confirmedBookings.length > 0
+          ? Math.round((totalRevenue / confirmedBookings.length / 100) * 100) / 100
+          : 0,
+      avgHoursPerBooking:
+        confirmedBookings.length > 0
+          ? Math.round((totalHours / confirmedBookings.length) * 100) / 100
+          : 0,
       daily: dailyStats,
       period: {
         from: fromDate.toISOString(),
         to: toDate.toISOString(),
-        days: daysNum
-      }
+        days: daysNum,
+      },
     };
 
     res.json({ data: stats });
@@ -342,16 +571,16 @@ r.patch('/bookings/:id/status', async (req: AuthedRequest, res, next) => {
 
     // וידוא שההזמנה שייכת לחניה של הבעלים
     const booking = await prisma.booking.findFirst({
-      where: { 
+      where: {
         id: bookingId,
-        parking: { ownerId }
+        parking: { ownerId },
       },
       include: {
         parking: true,
         user: {
-          select: { id: true, email: true }
-        }
-      }
+          select: { id: true, email: true },
+        },
+      },
     });
 
     if (!booking) {
@@ -365,12 +594,133 @@ r.patch('/bookings/:id/status', async (req: AuthedRequest, res, next) => {
       include: {
         parking: true,
         user: {
-          select: { id: true, email: true }
-        }
-      }
+          select: { id: true, email: true },
+        },
+      },
     });
 
     res.json({ data: updatedBooking });
+  } catch (e) {
+    next(e);
+  }
+});
+
+/**
+ * POST /api/owner/parkings/:id/check-availability-conflicts
+ * בדיקת התנגשויות הזמנות לפני שינוי זמינות
+ */
+r.post(
+  '/parkings/:id/check-availability-conflicts',
+  auth,
+  requireOwner,
+  async (req: AuthedRequest, res, next) => {
+    try {
+      const parkingId = parseInt(req.params.id);
+      const { dayKey, timeSlots } = req.body; // timeSlots: [0, 4, 8] - בלוקי זמן שרוצים להסיר
+
+      if (!dayKey || !Array.isArray(timeSlots)) {
+        return res.status(400).json({ error: 'Missing dayKey or timeSlots' });
+      }
+
+      // וידוא שהחניה שייכת לבעל החניה
+      const parking = await prisma.parking.findFirst({
+        where: { id: parkingId, ownerId: req.userId },
+      });
+
+      if (!parking) {
+        return res.status(404).json({ error: 'Parking not found' });
+      }
+
+      const conflicts = await svc.checkBookingConflicts(parkingId, dayKey, timeSlots);
+
+      res.json({
+        hasConflicts: conflicts.length > 0,
+        conflicts: conflicts.map(booking => ({
+          id: booking.id,
+          startTime: booking.startTime,
+          endTime: booking.endTime,
+          userEmail: booking.user?.email,
+          userName: booking.user?.name,
+        })),
+      });
+    } catch (e) {
+      next(e);
+    }
+  }
+);
+
+/**
+ * GET /api/owner/bookings/upcoming
+ * הזמנות עתידיות לחניות של בעל החניה
+ */
+r.get('/bookings/upcoming', auth, requireOwner, async (req: AuthedRequest, res, next) => {
+  try {
+    const ownerId = req.userId!;
+    const now = new Date();
+
+    const upcomingBookings = await prisma.booking.findMany({
+      where: {
+        parking: {
+          ownerId: ownerId,
+        },
+        startTime: {
+          gte: now, // רק הזמנות עתידיות
+        },
+        status: 'CONFIRMED',
+      },
+      include: {
+        parking: {
+          select: {
+            id: true,
+            title: true,
+            address: true,
+          },
+        },
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+          },
+        },
+      },
+      orderBy: {
+        startTime: 'asc',
+      },
+      take: 50, // מגביל ל-50 הזמנות עתידיות
+    });
+
+    // חישוב צפי הכנסות (המרה מcents לשקלים)
+    const totalRevenue = upcomingBookings.reduce(
+      (sum, booking) => sum + (booking.totalPriceCents || 0) / 100,
+      0
+    );
+
+    // פילוח לפי תקופות
+    const thisWeek = new Date();
+    thisWeek.setDate(thisWeek.getDate() + 7);
+
+    const thisMonth = new Date();
+    thisMonth.setMonth(thisMonth.getMonth() + 1);
+
+    const weeklyRevenue = upcomingBookings
+      .filter(booking => new Date(booking.startTime) <= thisWeek)
+      .reduce((sum, booking) => sum + (booking.totalPriceCents || 0) / 100, 0);
+
+    const monthlyRevenue = upcomingBookings
+      .filter(booking => new Date(booking.startTime) <= thisMonth)
+      .reduce((sum, booking) => sum + (booking.totalPriceCents || 0) / 100, 0);
+
+    res.json({
+      data: upcomingBookings,
+      revenue: {
+        total: totalRevenue,
+        thisWeek: weeklyRevenue,
+        thisMonth: monthlyRevenue,
+        bookingsCount: upcomingBookings.length,
+      },
+    });
   } catch (e) {
     next(e);
   }

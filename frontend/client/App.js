@@ -1,7 +1,7 @@
 // App.js
-import React, { useEffect, useMemo } from 'react';
-import { View, Pressable, Platform, Text, TextInput, I18nManager } from 'react-native';
-import { NavigationContainer, DefaultTheme as NavDefaultTheme } from '@react-navigation/native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { View, Pressable, Platform, Text, TextInput, I18nManager, AppState } from 'react-native';
+import { NavigationContainer, DefaultTheme as NavDefaultTheme, useNavigation } from '@react-navigation/native';
 import {
   createStackNavigator,
   CardStyleInterpolators,
@@ -15,10 +15,13 @@ import { theme } from './theme/zpotoThemeRestyle';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { enableScreens } from 'react-native-screens';
+import { initializeSocialLogin } from './services/auth/socialLoginConfig';
+import { initializeTokenManager } from './services/api/tokenManager';
+import NavigationWrapper from './components/NavigationWrapper';
+import { useAuth } from './contexts/AuthContext';
 enableScreens(true);
 
 // ===== RTL BOOT (פעם אחת) =====
@@ -44,17 +47,79 @@ enableScreens(true);
 
 const RText = createText();
 
-// Auth
-import { AuthProvider } from './contexts/ServerOnlyAuthContext';
-import LoginScreen from './screens/ServerOnlyLoginScreen';
-import RegisterScreen from './screens/ServerOnlyRegisterScreen';
+// קומפוננטת כפתור בעלי חניה בסרגל העליון
+const OwnerButton = () => {
+  const { isAuthenticated, user } = useAuth();
+  const navigation = useNavigation();
+  const [ownerStatus, setOwnerStatus] = useState('none');
+
+  // בדיקת סטטוס בעל חניה
+  useEffect(() => {
+    const checkOwnerStatus = async () => {
+      if (isAuthenticated && user?.email) {
+        try {
+          const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/owner/status`, {
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+          });
+          if (response.ok) {
+            const data = await response.json();
+            setOwnerStatus(data.status || 'none');
+          } else {
+            setOwnerStatus('none');
+          }
+        } catch (error) {
+          // שגיאת רשת - פשוט נשאיר none ללא לוג
+          setOwnerStatus('none');
+        }
+      } else {
+        setOwnerStatus('none');
+      }
+    };
+
+    checkOwnerStatus();
+  }, [isAuthenticated, user]);
+
+  const handleOwnerPress = () => {
+    navigation.navigate('OwnerIntro');
+  };
+
+  // בחירת אייקון לפי סטטוס
+  const getIcon = () => {
+    if (ownerStatus === 'approved') return 'home';
+    if (isAuthenticated) return 'business';
+    return 'cash';
+  };
+
+  return (
+    <Pressable
+      onPress={handleOwnerPress}
+      hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+      android_ripple={{ color: 'rgba(255,255,255,0.2)', radius: 18 }}
+      style={{ padding: 6, borderRadius: 999 }}
+      accessibilityRole="button"
+      accessibilityLabel="בעלי חניה"
+    >
+      <Ionicons name={getIcon()} size={24} color="#FFFFFF" />
+    </Pressable>
+  );
+};
+
+
+// Auth - Updated to use fixed AuthContext
+import { AuthProvider } from './contexts/AuthContext';
+import { NavigationProvider } from './contexts/NavigationContext';
+import { AppProvider } from './contexts/AppContext';
+import LoginScreen from './screens/LoginScreen';
+import RegisterScreen from './screens/RegisterScreen';
 
 // מסכים
 import HomeScreen from './screens/HomeScreen';
 import SearchResultsScreen from './screens/SearchResultsScreen';
 import BookingScreen from './screens/BookingScreen';
+import PaymentScreen from './screens/PaymentScreen';
 import BookingsScreen from './screens/BookingsScreen';
-import BookingDetailScreen from './screens/BookingDetailScreenNew';
+import BookingDetailScreen from './screens/BookingDetailScreen';
 import FavoritesScreen from './screens/FavoritesScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import AdvancedSearchScreen from './screens/AdvancedSearchScreen';
@@ -62,12 +127,16 @@ import AdvancedSearchScreen from './screens/AdvancedSearchScreen';
 import OwnerIntroScreen from './screens/OwnerIntroScreen';
 import OwnerDashboardScreen from './screens/OwnerDashboardScreen';
 import OwnerListingFormScreen from './screens/OwnerListingFormScreen';
+import NotificationsScreen from './screens/NotificationsScreen';
+import NotificationSettingsScreen from './screens/NotificationSettingsScreen';
 import OwnerOverviewScreen from './screens/OwnerOverviewScreen';
 import OwnerPendingScreen from './screens/OwnerPendingScreen';
+import OwnerSettingsScreen from './screens/OwnerSettingsScreen';
 import OwnerListingDetailScreen from './screens/OwnerListingDetailScreen';
 import OwnerAvailabilityScreen from './screens/OwnerAvailabilityScreen';
 import OwnerPricingScreen from './screens/OwnerPricingScreen';
 import OwnerApplyScreen from './screens/OwnerApplyScreen';
+import OwnerCommissionsScreen from './screens/OwnerCommissionsScreen';
 
 // Stack (JS)
 const Stack = createStackNavigator();
@@ -133,18 +202,16 @@ function ZpGradientHeader({ navigation, route, options, back }) {
         </View>
       ) : null}
 
-      {/* Profile */}
-      <View style={profileBtnPos}>
-        <Pressable
-          onPress={() => navigation.navigate('Profile')}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-          android_ripple={{ color: 'rgba(255,255,255,0.2)', radius: 18 }}
-          style={{ padding: 6, borderRadius: 999 }}
-          accessibilityRole="button"
-          accessibilityLabel="פרופיל"
-        >
-          <Ionicons name="person-circle" size={32} color="#FFFFFF" />
-        </Pressable>
+      {/* כפתור בעלי חניה */}
+      <View style={{ 
+        position: 'absolute', 
+        right: 16, 
+        top: insets.top + 8, 
+        height: 40,
+        justifyContent: 'center',
+        alignItems: 'center'
+      }}>
+        <OwnerButton />
       </View>
 
       {/* כותרת במרכז */}
@@ -175,65 +242,123 @@ export default function App() {
       header: (props) => <ZpGradientHeader {...props} />,
       contentStyle: { backgroundColor: theme.colors.bg },
 
-      // ✅ גרירה מימין לשמאל
+      // ✅ אנימציה חלקה עם גרירה מימין לשמאל (RTL)
       gestureEnabled: true,
-      gestureDirection: 'horizontal-inverted',
-      // להפוך את האנימציה ל"חלקה" במיוחד בסוף הגרירה
+      gestureDirection: 'horizontal-inverted', // הפוך לRTL
+      // אנימציה חלקה מצד ימין (RTL)
       cardStyleInterpolator: CardStyleInterpolators.forHorizontalIOS,
-      headerStyleInterpolator: HeaderStyleInterpolators.forUIKit,
+      headerStyleInterpolator: HeaderStyleInterpolators.forFade,
       transitionSpec: {
-        open: TransitionSpecs.TransitionIOSSpec,
-        close: TransitionSpecs.TransitionIOSSpec,
+        open: TransitionSpecs.FadeInFromBottomAndroidSpec,
+        close: TransitionSpecs.FadeOutToBottomAndroidSpec,
       },
-      // להשאיר את המסך הקודם מחובר למניעת פליקר בקצה הסגירה
-      detachPreviousScreen: false,
+      // מסך חלק ונקי
+      detachPreviousScreen: true,
       cardOverlayEnabled: false,
 
       animationEnabled: true,
       headerBackTitleVisible: false,
     }),
-    []
+    [theme]
   );
+
+  // אפשרויות מיוחדות לעמודים ראשיים (סרגל תחתון) - מעבר מהאמצע
+  const mainScreenOptions = useMemo(
+    () => ({
+      header: (props) => <ZpGradientHeader {...props} />,
+      contentStyle: { backgroundColor: theme.colors.bg },
+
+      // ✅ גרירה RTL אבל מעבר מהאמצע
+      gestureEnabled: true,
+      gestureDirection: 'horizontal-inverted', // הפוך לRTL
+      // אנימציה מהאמצע לעמודים ראשיים
+      cardStyleInterpolator: CardStyleInterpolators.forFadeFromBottomAndroid,
+      headerStyleInterpolator: HeaderStyleInterpolators.forFade,
+      transitionSpec: {
+        open: TransitionSpecs.FadeInFromBottomAndroidSpec,
+        close: TransitionSpecs.FadeOutToBottomAndroidSpec,
+      },
+      // מסך חלק ונקי
+      detachPreviousScreen: true,
+      cardOverlayEnabled: false,
+
+      animationEnabled: true,
+    }),
+    [theme]
+  );
+
+  // אתחול Social Login בהפעלה
+  React.useEffect(() => {
+    initializeSocialLogin();
+  }, []);
+
+  // אתחול מנהל טוקנים בהפעלה
+  React.useEffect(() => {
+    initializeTokenManager().catch(console.warn);
+  }, []);
+
+  // טיפול נכון בAppState כדי למנוע מסך שחור
+  React.useEffect(() => {
+    const handleAppStateChange = (nextAppState) => {
+      console.log('AppState changed to:', nextAppState);
+      // כאן ניתן להוסיף לוגיקה נוספת אם נדרש
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    
+    return () => {
+      subscription?.remove();
+    };
+  }, []);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <StatusBar style="light" backgroundColor="transparent" translucent />
         <ThemeProvider theme={theme}>
           <AuthProvider>
-            <NavigationContainer ref={navigationRef} theme={navTheme}>
-              <View style={{ flex: 1 }}>
-                <Stack.Navigator screenOptions={screenOptions} initialRouteName="Home">
-                  {/* Main Screens - Home הוא המסך הראשון */}
-                  <Stack.Screen name="Home" component={HomeScreen} options={{ title: 'Zpoto' }} />
+            <AppProvider>
+              <NavigationProvider>
+              <StatusBar style="light" backgroundColor="transparent" translucent hidden={false} />
+              <NavigationContainer ref={navigationRef} theme={navTheme}>
+                <NavigationWrapper>
+                  <Stack.Navigator screenOptions={screenOptions} initialRouteName="Home">
+                  {/* עמודים ראשיים - מעבר מהאמצע */}
+                  <Stack.Screen name="Home" component={HomeScreen} options={{ ...mainScreenOptions, title: 'Zpoto' }} />
+                  <Stack.Screen name="Bookings" component={BookingsScreen} options={{ ...mainScreenOptions, title: 'ההזמנות שלי' }} />
+                  <Stack.Screen name="Favorites" component={FavoritesScreen} options={{ ...mainScreenOptions, title: 'מועדפים' }} />
+                  <Stack.Screen name="Profile" component={ProfileScreen} options={{ ...mainScreenOptions, title: 'הפרופיל שלי' }} />
                   
-                  {/* Auth Screens - זמינים רק כשצריך */}
+                  {/* עמודים משניים - מעבר מהצד */}
                   <Stack.Screen name="Login" component={LoginScreen} options={{ title: 'התחברות', headerShown: false }} />
                   <Stack.Screen name="Register" component={RegisterScreen} options={{ title: 'הרשמה', headerShown: false }} />
                   <Stack.Screen name="SearchResults" component={SearchResultsScreen} options={{ title: 'תוצאות חיפוש' }} />
                   <Stack.Screen name="Booking" component={BookingScreen} options={{ title: 'הזמנה' }} />
-                  <Stack.Screen name="Bookings" component={BookingsScreen} options={{ title: 'ההזמנות שלי' }} />
+                  <Stack.Screen name="Payment" component={PaymentScreen} options={{ title: 'תשלום' }} />
                   <Stack.Screen name="BookingDetail" component={BookingDetailScreen} options={{ title: 'פרטי הזמנה' }} />
-                  <Stack.Screen name="Favorites" component={FavoritesScreen} options={{ title: 'מועדפים' }} />
-                  <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: 'הפרופיל שלי' }} />
                   <Stack.Screen name="AdvancedSearch" component={AdvancedSearchScreen} options={{ title: 'חניה עתידית' }} />
 
                   {/* Owner Screens */}
                   <Stack.Screen name="OwnerIntro" component={OwnerIntroScreen} options={{ title: 'בעלי חניה' }} />
                   <Stack.Screen name="OwnerApply" component={OwnerApplyScreen} options={{ title: 'הגשת בקשה' }} />
                   <Stack.Screen name="OwnerOverview" component={OwnerOverviewScreen} options={{ title: 'סקירה כללית' }} />
-                  <Stack.Screen name="OwnerPending" component={OwnerPendingScreen} options={{ title: 'בקשות בהמתנה' }} />
+                  <Stack.Screen name="OwnerPending" component={OwnerPendingScreen} options={{ title: 'חניות עתידיות' }}/>
+                  <Stack.Screen name="OwnerSettings" component={OwnerSettingsScreen} options={{ title: 'הגדרות' }} />
                   <Stack.Screen name="OwnerDashboard" component={OwnerDashboardScreen} options={{ title: 'ניהול החניות' }} />
                   <Stack.Screen name="OwnerListingForm" component={OwnerListingFormScreen} options={{ title: 'טופס חניה' }} />
                   <Stack.Screen name="OwnerListingDetail" component={OwnerListingDetailScreen} options={{ title: 'דוח חניה' }} />
                   <Stack.Screen name="OwnerAvailability" component={OwnerAvailabilityScreen} options={{ title: 'זמינות חניה' }} />
                   <Stack.Screen name="OwnerPricing" component={OwnerPricingScreen} options={{ title: 'עריכת מחירון' }} />
+                  <Stack.Screen name="OwnerCommissions" component={OwnerCommissionsScreen} options={{ title: 'הכנסות והעמלות' }} />
+                  <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'התראות' }} />
+                  <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} options={{ title: 'הגדרות התראות' }} />
                 </Stack.Navigator>
-              </View>
-            </NavigationContainer>
-          </AuthProvider>
-        </ThemeProvider>
-      </SafeAreaProvider>
-    </GestureHandlerRootView>
+                </NavigationWrapper>
+              </NavigationContainer>
+              </NavigationProvider>
+            </AppProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </SafeAreaProvider>
+  </GestureHandlerRootView>
   );
 }

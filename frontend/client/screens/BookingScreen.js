@@ -19,20 +19,27 @@ import {
   Modal,
   FlatList,
   PanResponder,
+  Dimensions,
 } from 'react-native';
 import dayjs from 'dayjs';
 import 'dayjs/locale/he';
 import * as Haptics from 'expo-haptics';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import api from '../utils/api';
 import { Ionicons } from '@expo/vector-icons';
+import { formatForAPI, convertFromUTC, formatForDisplay, addHoursInIsrael, getIsraelMinutesFromDate, setTimeInIsrael } from '../utils/timezone';
 import { scheduleBookingNotifications, cancelBookingNotifications } from '../utils/notify';
 import { useTheme } from '@shopify/restyle';
 import ZpButton from '../components/ui/ZpButton';
-import { LinearGradient } from 'expo-linear-gradient';
-import api from '../utils/api';
-import { useAuth } from '../contexts/AuthContext';
 import { createBooking } from '../services/api/bookings';
+import { LinearGradient } from 'expo-linear-gradient';
+import TimePickerWheel, { roundTo15Minutes } from '../components/ui/TimePickerWheel';
+import { useAuth } from '../contexts/AuthContext';
+import { useAvailability } from '../hooks';
+import ParkingAvailability from '../components/ParkingAvailability';
+import BookingValidator from '../components/BookingValidator';
 import NetworkStatus from '../components/NetworkStatus';
+import { API_BASE } from '../consts';
+import { BOOKING_TYPES, isImmediateBooking, isFutureBooking } from '../constants/bookingTypes';
 
 dayjs.locale('he');
 
@@ -70,12 +77,19 @@ function hasOverlap(bookings, startISO, endISO, excludeId = null) {
     return s < be && e > bs;
   });
 }
-const roundTo5 = (d) => {
+// 🔧 תוקן: משתמש במערכת השעות החדשה במקום המרות ידניות
+const roundTo15 = (d) => {
   const dt = new Date(d);
-  const m = dt.getMinutes();
-  const rounded = Math.round(m / 5) * 5;
-  dt.setMinutes(rounded, 0, 0);
-  return dt;
+  const m = getIsraelMinutesFromDate(dt); // שימוש בפונקציית העזר החדשה
+  const rounded = Math.round(m / 15) * 15;
+  if (rounded >= 60) {
+    // במקום setHours ישירות, נשתמש בפונקציות העזר החדשות
+    const currentHour = getIsraelHourFromDate(dt);
+    return setTimeInIsrael(dt, currentHour + 1, 0);
+  } else {
+    const currentHour = getIsraelHourFromDate(dt);
+    return setTimeInIsrael(dt, currentHour, rounded);
+  }
 };
 
 // ===== WheelPicker כללי עם Snap =====
@@ -134,196 +148,79 @@ function WheelPicker({
   );
 }
 
-// ===== עזר לפאנל =====
-const roundTo5local = (d) => { const x = new Date(d); x.setMinutes(Math.round(x.getMinutes()/5)*5, 0, 0); return x; };
-const clampToMin = (date, min) => (!min || date >= min) ? date : new Date(min);
 
-const daysArray = (baseMin, span = 180) => {
-  const out = [];
-  const startDay = baseMin ? new Date(baseMin) : new Date();
-  startDay.setHours(0,0,0,0);
-  for (let i=0; i<=span; i++){
-    const d = new Date(startDay);
-    d.setDate(d.getDate() + i);
-    out.push({ value: d.getTime(), label: dayjs(d).format('DD/MM ddd') });
-  }
-  return out;
-};
-const hoursArray = () => Array.from({ length: 24 }, (_, h) => ({ value: h, label: String(h).padStart(2,'0') }));
-const minutesArray = (step = 5) => Array.from({ length: 60/step }, (_, i) => {
-  const m = i*step;
-  return { value: m, label: String(m).padStart(2,'0') };
-});
-
-// ===== הפאנל התחתון לבחירת תאריך/שעה =====
-function WheelsDateTimePanel({ visible, initial, onClose, onConfirm, minimumDate, title='בחרו תאריך ושעה' }) {
-  const theme = useTheme();
-  const styles = makeStyles(theme);
-
-  const gradStart = theme.colors?.gradientStart ?? theme.colors.primary;
-  const gradEnd   = theme.colors?.gradientEnd ?? theme.colors.primary;
-
-  const min = minimumDate ? roundTo5local(new Date(minimumDate)) : null;
-  const init = clampToMin(roundTo5local(initial), min);
-
-  const [selDay, setSelDay]   = useState(new Date(init.getFullYear(), init.getMonth(), init.getDate(), 0, 0, 0, 0).getTime());
-  const [selHour, setSelHour] = useState(init.getHours());
-  const [selMin, setSelMin]   = useState(init.getMinutes());
-
-  useEffect(() => {
-    if (!visible) return;
-    const i = clampToMin(roundTo5local(initial), min);
-    const d0 = new Date(i); d0.setHours(0,0,0,0);
-    setSelDay(d0.getTime());
-    setSelHour(i.getHours());
-    setSelMin(i.getMinutes());
-  }, [visible, initial, minimumDate]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const isMinDay = !!min && new Date(selDay).getTime() === new Date(min.getFullYear(),min.getMonth(),min.getDate(),0,0,0,0).getTime();
-  const minHour  = isMinDay ? min.getHours() : 0;
-  const minMin   = (isMinDay && selHour === minHour) ? min.getMinutes() : 0;
-
-  const dayData = daysArray(min);
-  const hourData = hoursArray().map(it => ({
-    ...it, label: (isMinDay && it.value < minHour) ? `· ${String(it.value).padStart(2,'0')}` : it.label
-  }));
-  const minuteData = minutesArray(5).map(it => ({
-    ...it, label: (isMinDay && selHour === minHour && it.value < minMin) ? `· ${String(it.value).padStart(2,'0')}` : it.label
-  }));
-
-  // חיצים + החלקה ימ/שמ לשינוי יום
-  const swipeResponder = React.useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 14 && Math.abs(g.dy) < 10,
-      onPanResponderRelease: (_, g) => {
-        const i = dayData.findIndex(d => d.value === selDay);
-        if (g.dx > 30 && i > 0) setSelDay(dayData[i - 1].value);               // ימינה = יום קודם
-        else if (g.dx < -30 && i < dayData.length - 1) setSelDay(dayData[i + 1].value); // שמאלה = יום הבא
-      },
-    })
-  ).current;
-
-  const compose = () => {
-    let dt = new Date(selDay);
-    dt.setHours(selHour, selMin, 0, 0);
-    dt = roundTo5local(dt);
-    dt = clampToMin(dt, min);
-    return dt;
-  };
-
-  const headerStr = dayjs(compose()).format('dddd • DD/MM/YYYY • HH:mm');
-
-  return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalBackdrop}>
-        <View style={styles.modalSheet}>
-          <LinearGradient colors={[gradStart, gradEnd]} start={{ x:0,y:1 }} end={{ x:1,y:0 }} style={styles.modalHeaderGrad}>
-            <View style={styles.dragHandle} />
-            <Text style={styles.modalTitle}>{title}</Text>
-            <Text style={styles.modalSubtitle}>{headerStr}</Text>
-          </LinearGradient>
-
-          <View style={styles.dayRow} {...swipeResponder.panHandlers}>
-            {/* ימני = יום קודם */}
-            <TouchableOpacity
-              onPress={() => {
-                const i = dayData.findIndex(d => d.value === selDay);
-                if (i > 0) setSelDay(dayData[i - 1].value);
-              }}
-              style={styles.arrowBtn}
-              activeOpacity={0.9}
-            >
-              <Ionicons name="chevron-back" size={20} color={theme.colors.text} />
-            </TouchableOpacity>
-
-            <View style={{ flex:1, alignItems:'center' }}>
-              <WheelPicker
-                data={dayData}
-                value={selDay}
-                onChange={(val) => {
-                  setSelDay(val);
-                  if (isMinDay && selHour < minHour) setSelHour(minHour);
-                  if (isMinDay && selHour === minHour && selMin < minMin) setSelMin(minMin);
-                }}
-                height={ITEM_H * 5}
-              />
-            </View>
-
-            {/* שמאלי = יום הבא */}
-            <TouchableOpacity
-              onPress={() => {
-                const i = dayData.findIndex(d => d.value === selDay);
-                if (i < dayData.length - 1) setSelDay(dayData[i + 1].value);
-              }}
-              style={styles.arrowBtn}
-              activeOpacity={0.9}
-            >
-              <Ionicons name="chevron-forward" size={20} color={theme.colors.text} />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.hmWrapWheels}>
-            <View style={styles.hmColWheel}>
-              <Text style={styles.hmLabel}>שעה</Text>
-              <WheelPicker
-                data={hourData}
-                value={Math.max(selHour, minHour)}
-                onChange={(h) => {
-                  if (isMinDay && h < minHour) h = minHour;
-                  setSelHour(h);
-                  if (isMinDay && h === minHour && selMin < minMin) setSelMin(minMin);
-                }}
-              />
-            </View>
-
-            <View style={styles.hmColWheel}>
-              <Text style={styles.hmLabel}>דקות</Text>
-              <WheelPicker
-                data={minuteData}
-                value={Math.max(selMin, (isMinDay && selHour === minHour) ? minMin : 0)}
-                onChange={(m) => {
-                  if (isMinDay && selHour === minHour && m < minMin) m = minMin;
-                  setSelMin(m);
-                }}
-              />
-            </View>
-          </View>
-
-          <View style={styles.modalFooter}>
-            <TouchableOpacity onPress={onClose} style={[styles.modalBtn, styles.modalBtnGhost, { marginStart: 8 }]} activeOpacity={0.9}>
-              <Text style={styles.modalBtnGhostText}>ביטול</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => onConfirm(compose())} style={[styles.modalBtn, styles.modalBtnPrimary]} activeOpacity={0.9}>
-              <Text style={styles.modalBtnPrimaryText}>אישור</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </View>
-    </Modal>
-  );
-}
 
 export default function BookingScreen({ route, navigation }) {
   const theme = useTheme();
   const styles = makeStyles(theme);
-  const { token } = useAuth();
+  const { token, isAuthenticated } = useAuth();
 
   const params = route?.params || {};
   const spot = params.spot || params.parkingSpot || null; // תמיכה בשני שמות פרופס
   const editingId = params.bookingId || null;
+  
+  // זיהוי סוג הזמנה ופרמטרים נוספים
+  const bookingType = params.bookingType || BOOKING_TYPES.IMMEDIATE; // ברירת מחדל: מיידי
+  const isImmediate = isImmediateBooking(bookingType);
+  const isFuture = isFutureBooking(bookingType);
+  const searchStartDate = params.searchStartDate || null;
+  const searchEndDate = params.searchEndDate || null;
+  const immediateDuration = params.immediateDuration || 2.5;
+  
+  console.log('🔍 BookingScreen - Booking type:', bookingType);
+  console.log('🔍 BookingScreen - Is immediate:', isImmediate);
+  console.log('🔍 BookingScreen - Is future:', isFuture);
+  console.log('🔍 BookingScreen - Times editable:', areTimesEditable);
+  
+  if (isFuture) {
+    console.log('📅 Future booking times:', {
+      searchStart: searchStartDate ? new Date(searchStartDate).toLocaleString('he-IL') : 'None',
+      searchEnd: searchEndDate ? new Date(searchEndDate).toLocaleString('he-IL') : 'None'
+    });
+  } else {
+    console.log('⚡ Immediate booking setup:', {
+      duration: immediateDuration + ' hours',
+      maxHours: 12,
+      endOfDay: '23:45'
+    });
+  }
+
+  // לוגים לבדיקת נתוני החניה
+  console.log('🏁 BookingScreen - Full spot data:', JSON.stringify(spot, null, 2));
+  console.log('🏁 BookingScreen - Spot pricing field:', spot?.pricing);
+  console.log('🏁 BookingScreen - Spot price field:', spot?.price);
 
   const pricePerHour = typeof spot?.price === 'number' ? spot.price : 10;
 
   const [start, setStart] = useState(() => {
-    const s = params.initialStart ? new Date(params.initialStart) : new Date();
-    s.setSeconds(0, 0);
-    return roundTo5(s);
+    if (isFuture && searchStartDate) {
+      // הזמנה עתידית: השתמש בזמן מהחיפוש
+      const futureStart = new Date(searchStartDate);
+      console.log('📅 Future booking - Using search start time:', futureStart.toISOString());
+      return futureStart;
+    } else {
+      // הזמנה מיידית: עגל לרבע שעה הקרובה
+      const now = new Date();
+      const s = params.initialStart ? new Date(params.initialStart) : now;
+      s.setSeconds(0, 0);
+      
+      // וודא שהזמן לא בעבר
+      const currentTime = new Date();
+      
+      if (s <= currentTime) {
+        const rounded = roundTo15Minutes(currentTime);
+        console.log('⚡ Immediate booking - Using rounded current time:', rounded.toISOString());
+        return rounded;
+      }
+      
+      const rounded = roundTo15Minutes(s);
+      console.log('⚡ Immediate booking - Using rounded time:', rounded.toISOString());
+      return rounded;
+    }
   });
-  const [end, setEnd] = useState(() => {
-    const e = params.initialEnd ? new Date(params.initialEnd) : new Date();
-    e.setHours(e.getHours() + 1, 0, 0, 0); // ברירת מחדל: שעה אחרי ההתחלה
-    return e;
-  });
+  
+  // זמן הסיום יוגדר בuseEffect אחרי שstart מוכן
+  const [end, setEnd] = useState(new Date());
 
   const [paymentMethod, setPaymentMethod] = useState('card');
   const [vehicles, setVehicles] = useState([]);
@@ -333,48 +230,385 @@ export default function BookingScreen({ route, navigation }) {
 
   // פאנל גלגלים
   const [panelVisible, setPanelVisible] = useState(false);
-  const [panelMode, setPanelMode] = useState('start'); // 'start' | 'end'
+  const [panelMode, setPanelMode] = useState('start');
+  
+  // האם זמנים ניתנים לעריכה (רק בהזמנה מיידית)
+  const areTimesEditable = isImmediate;
+
+  // פונקציה לקבלת הודעות הנחיה דינמיות
+  const getBookingInstructions = useCallback(() => {
+    if (isFuture) {
+      return {
+        title: 'הזמנה עתידית',
+        subtitle: 'הזמנים נקבעו לפי החיפוש שביצעת ולא ניתן לשנותם',
+        icon: '📅',
+        color: '#3B82F6',
+        backgroundColor: 'rgba(59, 130, 246, 0.1)'
+      };
+    } else {
+      return {
+        title: 'הזמנה מיידית',
+        subtitle: 'ניתן לבחור זמן התחלה וסיום עד סוף היום (מקסימום 12 שעות)',
+        icon: '⚡',
+        color: '#10B981',
+        backgroundColor: 'rgba(16, 185, 129, 0.1)'
+      };
+    }
+  }, [isFuture]);
+
+  // פונקציה לחישוב זמן סיום מקסימלי לפי זמינות החניה
+  const getMaxEndTime = useCallback(() => {
+    if (!isImmediate) return null;
+    
+    // 🔧 תוקן: משתמש בפונקציית העזר החדשה במקום המרה ידנית
+    const endOfDay = setTimeInIsrael(new Date(), 23, 45);
+    
+    // אם יש נתוני זמינות מהשרת, השתמש בהם
+    if (availability && availability.availableUntil) {
+      const availableUntil = new Date(availability.availableUntil);
+      return availableUntil < endOfDay ? availableUntil : endOfDay;
+    }
+    
+    // אחרת, השתמש בסוף היום
+    return endOfDay;
+  }, [isImmediate, availability]);
+
+  // פונקציית ולידציה להזמנה מיידית
+  const validateImmediateBooking = useCallback((startTime, endTime) => {
+    if (!isImmediate) return { isValid: true };
+
+    // בדיקות בסיסיות
+    if (!startTime || !endTime) {
+      return { isValid: false, error: 'זמני התחלה וסיום נדרשים' };
+    }
+
+    const now = new Date();
+    
+    // בדיקה שההתחלה לא בעבר
+    if (startTime <= now) {
+      return {
+        isValid: false,
+        error: 'זמן ההתחלה חייב להיות בעתיד'
+      };
+    }
+    
+    // בדיקה שהסיום אחרי ההתחלה
+    if (endTime <= startTime) {
+      return {
+        isValid: false,
+        error: 'זמן הסיום חייב להיות אחרי זמן ההתחלה'
+      };
+    }
+    
+    // בדיקה שלא עובר את זמן הזמינות המקסימלי
+    const maxEndTime = getMaxEndTime();
+    if (endTime > maxEndTime) {
+      const maxTimeStr = maxEndTime.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' });
+      return {
+        isValid: false,
+        error: `ניתן להזמין עד ${maxTimeStr} לכל היותר`
+      };
+    }
+    
+    // בדיקת מינימום שעה
+    const diffMs = endTime - startTime;
+    const diffHours = diffMs / (1000 * 60 * 60);
+    
+    if (diffHours < 1) {
+      return {
+        isValid: false,
+        error: 'מינימום זמן הזמנה הוא שעה אחת'
+      };
+    }
+    
+    // בדיקת מקסימום 12 שעות
+    if (diffHours > 12) {
+      return {
+        isValid: false,
+        error: 'ניתן להזמין מקסימום 12 שעות'
+      };
+    }
+    
+    return { isValid: true };
+  }, [isImmediate]); // 'start' | 'end'
+
+  // זמינות החניה - משתמש בhook החדש
+  const { checkAvailability, validateBooking, loading: availabilityLoading, error: availabilityError } = useAvailability();
+  const [availability, setAvailability] = useState(null);
+  const [validationResult, setValidationResult] = useState(null);
+  
+  // הוסר קוד serverPrice - משתמשים בחישוב client-side מעודכן
+
+  // הגדרת זמן סיום ראשוני ועדכון כשזמן ההתחלה משתנה
+  useEffect(() => {
+    if (isFuture && searchEndDate) {
+      // הזמנה עתידית: השתמש בזמן מהחיפוש
+      const futureEnd = new Date(searchEndDate);
+      console.log('📅 Future booking - Setting search end time:', futureEnd.toISOString());
+      setEnd(futureEnd);
+    } else if (start) {
+      // הזמנה מיידית: חשב מזמן ההתחלה + שעה אחת (לא immediateDuration)
+      // 🔧 תוקן: משתמש בפונקציית העזר החדשה במקום המרה ידנית
+      const newEnd = addHoursInIsrael(start, 1); // שעה אחת
+      console.log('⚡ Setting end time based on start time (1 hour):', {
+        start: start.toISOString(),
+        newEnd: newEnd.toISOString(),
+        duration: '1 hour'
+      });
+      setEnd(newEnd);
+    }
+  }, [start, isImmediate, isFuture, immediateDuration, searchEndDate]);
 
   useEffect(() => {
     (async () => {
       try {
-        const rawProfile = await AsyncStorage.getItem(PROFILE_KEY);
-        if (rawProfile) {
-          const p = JSON.parse(rawProfile);
-          if (p?.payment) setPaymentMethod(p.payment);
+        // טעינת פרופיל מהשרת
+        try {
+          const profileResponse = await api.get('/api/auth/me');
+          if (profileResponse.data?.payment) setPaymentMethod(profileResponse.data.payment);
+        } catch (error) {
+          console.log('Failed to load profile from server:', error);
         }
-        const rawVehicles = await AsyncStorage.getItem(VEHICLES_KEY);
-        const list = rawVehicles ? JSON.parse(rawVehicles) : [];
-        setVehicles(list);
-        const def = list.find(v => v.isDefault) || list[0];
-        if (def) {
-          setSelectedVehicleId(def.id);
-          setPlate(def.plate || '');
-          setCarDesc(def.desc || '');
-        } else {
-          const savedPlate = await AsyncStorage.getItem('plate');
-          const savedDesc  = await AsyncStorage.getItem('carDesc');
-          if (savedPlate) setPlate(savedPlate);
-          if (savedDesc)  setCarDesc(savedDesc);
+        
+        // טעינת רכבים מהשרת
+        try {
+          console.log('🚗 Loading vehicles from server...');
+          const vehiclesResponse = await api.get('/api/vehicles');
+          const userVehicles = vehiclesResponse.data?.data || [];
+          console.log('🚗 Loaded vehicles:', userVehicles);
+          
+          setVehicles(userVehicles);
+          
+          // בחירת רכב ברירת מחדל אוטומטית
+          if (userVehicles.length > 0) {
+            const defaultVehicle = userVehicles.find(v => v.isDefault) || userVehicles[0];
+            console.log('🚗 Selected default vehicle:', defaultVehicle);
+            
+            setSelectedVehicleId(defaultVehicle.id);
+            setPlate(defaultVehicle.licensePlate || '');
+            
+            // בניית תיאור הרכב - עדיפות לתיאור מותאם אישית, אחר כך יצרן ודגם
+            let vehicleDescription = '';
+            if (defaultVehicle.description && defaultVehicle.description.trim()) {
+              // יש תיאור מותאם אישית - נשתמש בו
+              vehicleDescription = defaultVehicle.description.trim();
+              console.log('🚗 Using custom description:', vehicleDescription);
+            } else {
+              // אין תיאור מותאם - נבנה מיצרן ודגם
+              const makeModel = `${defaultVehicle.make || ''} ${defaultVehicle.model || ''}`.trim();
+              if (makeModel) {
+                vehicleDescription = makeModel;
+                console.log('🚗 Using make/model description:', vehicleDescription);
+              } else {
+                console.log('🚗 No description available, leaving empty');
+              }
+            }
+            setCarDesc(vehicleDescription);
+          } else {
+            console.log('🚗 No vehicles found, clearing fields');
+            setPlate('');
+            setCarDesc('');
+          }
+        } catch (error) {
+          console.error('🚗 Failed to load vehicles:', error);
+          setVehicles([]);
+          setPlate('');
+          setCarDesc('');
         }
       } catch {
-        try {
-          const savedPlate = await AsyncStorage.getItem('plate');
-          const savedDesc  = await AsyncStorage.getItem('carDesc');
-          if (savedPlate) setPlate(savedPlate);
-          if (savedDesc)  setCarDesc(savedDesc);
-        } catch {}
+        // הוסרנו שמירה מקומית - רק שרת
       }
     })();
   }, []);
 
+  // טעינת זמינות החניה
+  const loadAvailability = useCallback(async () => {
+    if (!spot?.parkingId || !start) {
+      console.log('🔍 CLIENT DEBUG: Skipping availability load - missing data:', { 
+        parkingId: spot?.parkingId, 
+        hasStart: !!start 
+      });
+      return;
+    }
+    
+    console.log('🔍 CLIENT DEBUG: Loading availability...', {
+      parkingId: spot.parkingId,
+      startTime: start.toISOString(),
+      startTimeLocal: start.toString()
+    });
+    
+    try {
+      const result = await checkAvailability(spot.parkingId, formatForAPI(start));
+      
+      console.log('🔍 CLIENT DEBUG: Availability result:', result);
+      
+      if (result.success) {
+        console.log('🔍 CLIENT DEBUG: Setting availability:', result.data);
+        setAvailability(result.data);
+      } else {
+        console.error('Failed to load availability:', result.error);
+        setAvailability(null);
+      }
+    } catch (error) {
+      console.error('Error loading availability:', error);
+      setAvailability(null);
+    }
+  }, [spot?.parkingId, start]);
+
+  // טען זמינות כשהחניה או זמן ההתחלה משתנים
+  useEffect(() => {
+    console.log('🔍 CLIENT DEBUG: useEffect for availability triggered', {
+      parkingId: spot?.parkingId,
+      startTime: start?.toISOString(),
+      loadAvailabilityExists: typeof loadAvailability === 'function'
+    });
+    loadAvailability();
+  }, [loadAvailability]);
+
+  // הוסר useEffect של חישוב מחיר מהשרת - משתמשים בחישוב client-side מעודכן
+
   const MIN_MS = 60 * 60 * 1000; // מינימום שעה
 
-  const { hours, total, invalid } = useMemo(() => {
+  // פונקציה לחישוב מחיר proportional (מדויק)
+  const calculateProportionalPrice = (diffMs, spot) => {
+    if (!spot) {
+      console.log('💰 ❌ No spot data provided');
+      return { total: 0, exactHours: 0, breakdown: [] };
+    }
+    
+    const exactHours = diffMs / (1000 * 60 * 60);
+    const wholeHours = Math.floor(exactHours);
+    const fractionalPart = exactHours - wholeHours;
+    
+    console.log(`💰 🔢 Proportional calculation: ${exactHours.toFixed(2)} hours (${wholeHours} whole + ${fractionalPart.toFixed(2)} fractional)`);
+    
+    // אם יש מחירון מדורג
+    if (spot.pricing) {
+      try {
+        const pricingData = typeof spot.pricing === 'string' ? JSON.parse(spot.pricing) : spot.pricing;
+        console.log('💰 ✅ Using tiered pricing:', pricingData);
+        
+        let total = 0;
+        const breakdown = [];
+        
+        // חישוב שעות שלמות
+        for (let i = 1; i <= wholeHours; i++) {
+          const rawHourPrice = pricingData[`hour${i}`] || pricingData.hour1 || pricePerHour;
+          const hourPrice = typeof rawHourPrice === 'string' ? parseFloat(rawHourPrice) : rawHourPrice;
+          total += hourPrice;
+          breakdown.push({ hour: i, price: hourPrice, isFractional: false });
+          console.log(`💰 ✅ Hour ${i}: ₪${hourPrice}`);
+        }
+        
+        // חישוב חלק שברי (אם קיים)
+        if (fractionalPart > 0) {
+          const nextHourIndex = wholeHours + 1;
+          const rawNextHourPrice = pricingData[`hour${nextHourIndex}`] || pricingData.hour1 || pricePerHour;
+          const nextHourPrice = typeof rawNextHourPrice === 'string' ? parseFloat(rawNextHourPrice) : rawNextHourPrice;
+          const fractionalPrice = fractionalPart * nextHourPrice;
+          total += fractionalPrice;
+          breakdown.push({ 
+            hour: nextHourIndex, 
+            price: fractionalPrice, 
+            isFractional: true, 
+            fractionalPart: fractionalPart 
+          });
+          console.log(`💰 ✅ Hour ${nextHourIndex} (${(fractionalPart * 100).toFixed(0)}%): ₪${fractionalPrice.toFixed(2)}`);
+        }
+        
+        console.log(`💰 ✅ Proportional total: ₪${total.toFixed(2)}`);
+        return { total: total, exactHours: exactHours, breakdown: breakdown };
+      } catch (error) {
+        console.error('💰 ❌ Failed to parse pricing JSON:', error);
+      }
+    }
+    
+    // fallback למחיר יחיד
+    const flatTotal = exactHours * pricePerHour;
+    console.log(`💰 ⚠️ Using flat rate: ${exactHours.toFixed(2)} × ₪${pricePerHour} = ₪${flatTotal.toFixed(2)}`);
+    return { total: flatTotal, exactHours: exactHours, breakdown: [] };
+  };
+
+  const calculateTotalPrice = (hours, spot) => {
+    if (!spot) {
+      console.log('💰 ❌ No spot data provided');
+      return 0;
+    }
+    
+    console.log(`💰 🎯 Calculating price for ${hours} hours (client-side fallback)`);
+    console.log('💰 🎯 Spot pricing field:', spot.pricing);
+    console.log('💰 🎯 Spot pricing type:', typeof spot.pricing);
+    
+    // אם יש מחירון מדורג
+    if (spot.pricing && typeof spot.pricing === 'string') {
+      try {
+        const pricingData = JSON.parse(spot.pricing);
+        console.log('💰 ✅ Using tiered pricing:', pricingData);
+        
+        let total = 0;
+        for (let i = 1; i <= hours; i++) {
+          const rawHourPrice = pricingData[`hour${i}`] || pricingData.hour1 || pricePerHour;
+          // המרה לnumber כי הנתונים מגיעים כstrings
+          const hourPrice = typeof rawHourPrice === 'string' ? parseFloat(rawHourPrice) : rawHourPrice;
+          total += hourPrice;
+          console.log(`💰 ✅ Hour ${i}: ₪${hourPrice} (from ${pricingData[`hour${i}`] ? `hour${i}` : 'fallback'}, raw: ${rawHourPrice})`);
+        }
+        
+        console.log(`💰 ✅ Total for ${hours} hours: ₪${total}`);
+        return total;
+      } catch (error) {
+        console.error('💰 ❌ Failed to parse pricing JSON:', error);
+      }
+    } else if (spot.pricing && typeof spot.pricing === 'object') {
+      // אם זה כבר אובייקט
+      console.log('💰 ✅ Using tiered pricing (object):', spot.pricing);
+      
+      let total = 0;
+      for (let i = 1; i <= hours; i++) {
+        const rawHourPrice = spot.pricing[`hour${i}`] || spot.pricing.hour1 || pricePerHour;
+        // המרה לnumber כי הנתונים יכולים להגיע כstrings
+        const hourPrice = typeof rawHourPrice === 'string' ? parseFloat(rawHourPrice) : rawHourPrice;
+        total += hourPrice;
+        console.log(`💰 ✅ Hour ${i}: ₪${hourPrice} (from ${spot.pricing[`hour${i}`] ? `hour${i}` : 'fallback'}, raw: ${rawHourPrice})`);
+      }
+      
+      console.log(`💰 ✅ Total for ${hours} hours: ₪${total}`);
+      return total;
+    }
+    
+    // fallback למחיר יחיד
+    console.log(`💰 ⚠️ Using flat rate: ${hours} × ₪${pricePerHour} = ₪${hours * pricePerHour}`);
+    return hours * pricePerHour;
+  };
+
+  const { hours, exactHours, total, breakdown, invalid } = useMemo(() => {
     const diffMs = end - start;
+    if (diffMs <= 0) {
+      return { hours: 1, exactHours: 0, total: 0, breakdown: [], invalid: true };
+    }
+    
+    // 🆕 חישוב proportional מדויק
+    const proportionalResult = calculateProportionalPrice(diffMs, spot);
+    
+    // וידוא שהתוצאה תקינה
+    if (!proportionalResult || typeof proportionalResult.total !== 'number') {
+      console.error('💰 ❌ Invalid proportional result:', proportionalResult);
+      return { hours: 1, exactHours: 0, total: 0, breakdown: [], invalid: true };
+    }
+    
+    // חישוב שעות מעוגלות למעלה (לצורך תצוגה)
     const h = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60)));
-    return { hours: h, total: h * pricePerHour, invalid: diffMs <= 0 };
-  }, [start, end, pricePerHour]);
+    
+    console.log(`💰 🎯 Final calculation: ${proportionalResult.exactHours.toFixed(2)} exact hours → ₪${proportionalResult.total.toFixed(2)}`);
+    
+    return { 
+      hours: h, 
+      exactHours: proportionalResult.exactHours || 0,
+      total: proportionalResult.total || 0, 
+      breakdown: proportionalResult.breakdown || [],
+      invalid: false 
+    };
+  }, [start, end, pricePerHour, spot]);
 
   const now = new Date();
   const isActive = spot && start <= now && now < end;
@@ -414,9 +648,9 @@ export default function BookingScreen({ route, navigation }) {
         
         const serverBooking = {
           parkingId: parkingId,
-          startTime: booking.start,
-          endTime: booking.end,
-          status: booking.status === 'confirmed' ? 'CONFIRMED' : 'PENDING'
+          startTime: formatForAPI(booking.start), // המרה ל-UTC לפני שליחה
+          endTime: formatForAPI(booking.end)      // המרה ל-UTC לפני שליחה
+          // הסטטוס יקבע בשרת לפי מוד האישור של החניה
         };
         
         console.log('🚀 Creating booking on server:', serverBooking);
@@ -432,11 +666,35 @@ export default function BookingScreen({ route, navigation }) {
           booking.serverId = result.data.id;
           serverSuccess = true;
           
-          // הודעת הצלחה
-          Alert.alert(
-            'הזמנה נשלחה בהצלחה! ✅',
-            'ההזמנה נשמרה בשרת ותוצג בכל המכשירים שלך.'
-          );
+          // הודעת הצלחה מותאמת לסטטוס
+          const bookingStatus = result.data.status;
+          
+          if (bookingStatus === 'CONFIRMED') {
+            Alert.alert(
+              '✅ הזמנה אושרה!',
+              'ההזמנה אושרה מיד ותוצג בכל המכשירים שלך.'
+            );
+          } else if (bookingStatus === 'PENDING_APPROVAL') {
+            Alert.alert(
+              '⏳ הזמנה נשלחה לאישור',
+              'הבקשה נשלחה לבעל החניה לאישור. תקבל התראה תוך 5 דקות.',
+              [
+                { text: 'הבנתי', style: 'default' },
+                { 
+                  text: 'צפה בסטטוס', 
+                  onPress: () => {
+                    // נווט למסך הזמנות כדי לראות את הסטטוס
+                    navigation.navigate('MyBookings');
+                  }
+                }
+              ]
+            );
+          } else {
+            Alert.alert(
+              '📋 הזמנה נשלחה',
+              'ההזמנה נשמרה בשרת ותוצג בכל המכשירים שלך.'
+            );
+          }
         } else {
           throw new Error(result.error);
         }
@@ -475,51 +733,113 @@ export default function BookingScreen({ route, navigation }) {
       }
     }
     
-    // שמירה מקומית (תמיד - כגיבוי או כפתרון זמני)
-    try {
-      const raw = await AsyncStorage.getItem(BOOKINGS_KEY);
-      const list = raw ? JSON.parse(raw) : [];
-      
-      // סמן אם ההזמנה נשלחה לשרת בהצלחה
-      booking.syncedToServer = serverSuccess;
-      booking.lastSyncAttempt = new Date().toISOString();
-      
-      if (booking.id) {
-        const idx = list.findIndex(b => b.id === booking.id);
-        if (idx !== -1) list[idx] = booking;
-        else list.unshift(booking);
-      } else {
-        list.unshift(booking);
-      }
-      
-      await AsyncStorage.setItem(BOOKINGS_KEY, JSON.stringify(list));
-      console.log('💾 Booking saved locally');
-    } catch (localError) {
-      console.error('❌ Failed to save booking locally:', localError);
-      Alert.alert('שגיאה קריטית', 'לא ניתן לשמור את ההזמנה גם לא מקומית');
+    // הוסרנו שמירה מקומית - רק שרת
+    if (serverSuccess) {
+      console.log('✅ Booking saved to server successfully');
     }
     
     return serverSuccess;
   };
 
   const openPanel = (mode) => {
+    if (!areTimesEditable) {
+      // הזמנה עתידית - זמנים קבועים
+      Alert.alert(
+        '📅 הזמנה עתידית', 
+        `הזמנים נקבעו לפי החיפוש שביצעת:\n\n• התחלה: ${dayjs(start).format('DD/MM/YYYY בשעה HH:mm')}\n• סיום: ${dayjs(end).format('DD/MM/YYYY בשעה HH:mm')}\n\nלשינוי זמנים, בצע חיפוש חדש מהדף הראשי.`,
+        [
+          { text: 'הבנתי', style: 'default' },
+          { 
+            text: 'חזור לחיפוש', 
+            style: 'default',
+            onPress: () => navigation.navigate('Home')
+          }
+        ]
+      );
+      return;
+    }
+    
+    // הזמנה מיידית - אפשר עריכה
     setPanelMode(mode);
     setPanelVisible(true);
   };
 
   const handlePanelConfirm = (picked) => {
+    const now = new Date();
+    
+    console.log('🔍 CLIENT DEBUG: Panel confirm called', {
+      panelMode,
+      pickedTime: picked.toISOString(),
+      pickedTimeLocal: picked.toString(),
+      currentStart: start.toISOString(),
+      currentEnd: end.toISOString(),
+      bookingType,
+      isImmediate
+    });
+    
+    // ולידציה מתקדמת להזמנה מיידית
+    if (isImmediate) {
+      // 🔧 תוקן: משתמש בפונקציית העזר החדשה במקום המרה ידנית
+      const endOfDay = setTimeInIsrael(new Date(), 23, 45);
+      
+      if (picked > endOfDay) {
+        Alert.alert(
+          'זמן לא תקין', 
+          'בהזמנה מיידית ניתן לבחור רק עד סוף היום הנוכחי (23:45).',
+          [{ text: 'הבנתי', style: 'default' }]
+        );
+        setPanelVisible(false);
+        return;
+      }
+      
+      // בדיקת מקסימום 12 שעות
+      if (panelMode === 'end') {
+        const maxDuration = 12 * 60 * 60 * 1000; // 12 שעות במילישניות
+        if (picked - start > maxDuration) {
+          Alert.alert(
+            'משך זמן מקסימלי', 
+            'בהזמנה מיידית ניתן להזמין מקסימום 12 שעות.',
+            [{ text: 'הבנתי', style: 'default' }]
+          );
+          setPanelVisible(false);
+          return;
+        }
+      }
+    }
+    
     if (panelMode === 'start') {
-      setStart(roundTo5(picked));
-      if (end - picked < MIN_MS) {
-        const e = new Date(picked.getTime() + MIN_MS);
-        setEnd(roundTo5(e));
+      // ולידציה: מניעת בחירת זמן עבר
+      if (picked <= now) {
+        Alert.alert(
+          'זמן לא תקין', 
+          'לא ניתן לבחור זמן התחלה בעבר. נבחר הזמן הקרוב ביותר.',
+          [{ text: 'הבנתי', style: 'default' }]
+        );
+        const nextValidTime = roundTo15Minutes(now);
+        setStart(nextValidTime);
+        
+        // עדכון זמן סיום בהתאם
+        if (end - nextValidTime < MIN_MS) {
+          const e = new Date(nextValidTime.getTime() + MIN_MS);
+          setEnd(roundTo15Minutes(e));
+        }
+      } else {
+        const newStart = roundTo15Minutes(picked);
+        console.log('🔍 CLIENT DEBUG: Setting NEW start time:', newStart.toISOString());
+        console.log('🔍 CLIENT DEBUG: Previous start time was:', start.toISOString());
+        setStart(newStart);
+        if (end - picked < MIN_MS) {
+          const e = new Date(picked.getTime() + MIN_MS);
+          setEnd(roundTo15Minutes(e));
+        }
       }
     } else {
+      // ולידציה לזמן סיום
       if (picked - start < MIN_MS) {
         const e = new Date(start.getTime() + MIN_MS);
-        setEnd(roundTo5(e));
+        setEnd(roundTo15Minutes(e));
       } else {
-        setEnd(roundTo5(picked));
+        setEnd(roundTo15Minutes(picked));
       }
     }
     setPanelVisible(false);
@@ -528,34 +848,56 @@ export default function BookingScreen({ route, navigation }) {
   const confirm = useCallback(async () => {
     if (!spot) { navigation.goBack(); return; }
     if (!plate.trim()) { Alert.alert('שגיאה', 'נא להזין מספר רכב.'); return; }
+    
+    // בדיקת תקינות ההזמנה באמצעות הvalidator החדש
+    // רק אם יש תוצאה ברורה שהיא לא תקינה
+    if (validationResult && validationResult.success && !validationResult.valid) {
+      Alert.alert('שגיאה', validationResult.error || 'ההזמנה לא תקינה');
+      return;
+    }
+    
+    // ולידציה: וודא שזמן ההתחלה לא בעבר
+    const now = new Date();
+    if (start <= now) {
+      Alert.alert('שגיאה', 'זמן ההתחלה לא יכול להיות בעבר. נא לבחור זמן עתידי.');
+      return;
+    }
+    
     if (end - start < MIN_MS) {
       Alert.alert('שגיאה', 'הסיום חייב להיות לפחות שעה אחרי ההתחלה.');
       return;
     }
 
+    // במקום ליצור הזמנה ישירות, ננווט למסך תשלום
+    console.log('🚀 Navigating to payment screen...');
+    
+    const selectedVehicle = vehicles.find(v => v.id === selectedVehicleId) || null;
+    
+    navigation.navigate('Payment', {
+      spot,
+      startTime: formatForAPI(start),
+      endTime: formatForAPI(end),
+      vehicle: selectedVehicle,
+      totalPrice: total,
+      totalHours: hours,
+      selectedVehicleId,
+      plate: plate.trim(),
+      carDesc: carDesc.trim()
+    });
+    
+    return; // יציאה מוקדמת - לא ממשיכים עם הקוד הישן
+
     let serverSyncSuccess = false;
 
     try {
-      const raw = await AsyncStorage.getItem(BOOKINGS_KEY);
-      const existing = raw ? JSON.parse(raw) : [];
-      const startISO = new Date(start).toISOString();
-      const endISO   = new Date(end).toISOString();
-      if (hasOverlap(existing, startISO, endISO, editingId)) {
-        Alert.alert('חפיפת הזמנות', 'יש כבר הזמנה אחרת בשעות האלו. עדכן את הזמנים ונסה שוב.');
-        return;
-      }
+      // הוסרנו בדיקת חפיפות מקומית - השרת יטפל בזה
 
-      await AsyncStorage.setItem('plate', plate.trim());
-      await AsyncStorage.setItem('carDesc', (carDesc || '').trim());
+      // הוסרנו שמירת פרטי רכב מקומית
 
       let approvalMode = 'auto';
       try {
-        if (spot?.ownerListingId) {
-          const rawL = await AsyncStorage.getItem(LISTINGS_KEY);
-          const list = rawL ? JSON.parse(rawL) : [];
-          const item = list.find(x => x.id === spot.ownerListingId);
-          if (item?.approvalMode === 'manual') approvalMode = 'manual';
-        }
+        // TODO: בדיקת approval mode מהשרת
+        // לעכשיו auto כברירת מחדל
       } catch {}
 
       if (editingId) {
@@ -582,8 +924,8 @@ export default function BookingScreen({ route, navigation }) {
         carDesc: (carDesc || '').trim(),
         vehicleId: selectedVehicle ? selectedVehicle.id : null,
         paymentMethod,
-        start: new Date(start).toISOString(),
-        end: new Date(end).toISOString(),
+        start: formatForAPI(start),
+        end: formatForAPI(end),
         hours,
         total,
         alerted30: false,
@@ -643,41 +985,114 @@ export default function BookingScreen({ route, navigation }) {
         keyboardShouldPersistTaps="handled"
         style={{ direction: 'rtl' }}
       >
-        {/* מצב חיבור לשרת */}
-        <NetworkStatus showDetails={true} />
-        
+
+
         {/* כרטיס מידע על החניה */}
         <View style={styles.card}>
-          {images.length > 0 && (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 10 }} contentContainerStyle={{ flexDirection: 'row-reverse' }}>
-              {images.map((img, idx) => (
-                <Image key={`${img?.uri || 'img'}-${idx}`} source={{ uri: img.uri }} style={styles.heroImg} />
-              ))}
-            </ScrollView>
-          )}
-
           {/* כותרת שם החניה — במרכז */}
           <Text style={styles.title}>{spot.title || spot.address || 'חניה'}</Text>
 
-          <Text style={styles.line}>כתובת: {spot.address || '—'}</Text>
-          {!!spot.distanceKm && <Text style={styles.line}>מרחק: {Number(spot.distanceKm).toFixed(2)} ק״מ</Text>}
-          <Text style={styles.line}>מחיר לשעה: ₪{pricePerHour}</Text>
-
-          {isActive && (
-            <View style={styles.activeBadge}>
-              <Ionicons name="time-outline" size={14} color={theme.colors.success} style={{ marginStart: 6 }} />
-              <Text style={styles.activeText}>פעיל עכשיו • נותר: {msToHhMm(timeLeft)}</Text>
+          {/* באנר סוג הזמנה */}
+          {isFuture && (
+            <View style={styles.futureBookingBanner}>
+              <View style={styles.bannerContent}>
+                <Text style={styles.bannerIcon}>📅</Text>
+                <View style={styles.bannerTextContainer}>
+                  <Text style={styles.bannerTitle}>הזמנה עתידית</Text>
+                  <Text style={styles.bannerSubtitle}>
+                    זמנים נקבעו לפי החיפוש שביצעת ({dayjs(start).format('HH:mm')} - {dayjs(end).format('HH:mm')}) • לא ניתן לעריכה
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+          
+          {isImmediate && (
+            <View style={styles.immediateBookingBanner}>
+              <View style={styles.bannerContent}>
+                <Text style={styles.bannerIcon}>⚡</Text>
+                <View style={styles.bannerTextContainer}>
+                  <Text style={styles.bannerTitle}>הזמנה מיידית</Text>
+                  <Text style={styles.bannerSubtitle}>ניתן לבחור זמנים עד סוף היום (מקסימום 12 שעות)</Text>
+                </View>
+              </View>
             </View>
           )}
 
-          <Text style={[styles.hint, { marginTop: 6 }]}>
-            {spot.ownerListingId ? 'ייתכן וההזמנה תדרוש אישור בעל/ת החניה.' : 'חניית דמו – אישור מיידי.'}
-          </Text>
+          
+          {/* גלריית תמונות החניה - בסדר קבוע */}
+          {(() => {
+            // סידור התמונות לפי סדר קבוע: כניסה, ריקה, עם רכב, נוסף
+            const imageTypes = ['entrance', 'empty', 'with_car', 'additional'];
+            let orderedImages = imageTypes
+              .map(type => spot.images?.find(img => img.type === type))
+              .filter(Boolean); // מסנן תמונות שקיימות
+            
+            // אם אין תמונות במבנה הישן, נשתמש בתמונות מהשרת
+            if (orderedImages.length === 0) {
+              const serverImages = [];
+              if (spot.entranceImageUrl) serverImages.push({ uri: spot.entranceImageUrl, type: 'entrance' });
+              if (spot.emptyImageUrl) serverImages.push({ uri: spot.emptyImageUrl, type: 'empty' });
+              if (spot.withCarImageUrl) serverImages.push({ uri: spot.withCarImageUrl, type: 'with_car' });
+              orderedImages = serverImages;
+            }
+            
+            return orderedImages.length > 0 && (
+              <ScrollView 
+                horizontal 
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                style={styles.galleryContainer}
+                contentContainerStyle={styles.galleryContent}
+              >
+                {orderedImages.map((image, index) => {
+                  // תיקון URL של התמונות - הוספת base URL אם חסר
+                  let imageUri = image.uri;
+                  if (imageUri && imageUri.startsWith('/api/')) {
+                    imageUri = `${API_BASE}${imageUri}`;
+                  }
+                  
+                  return (
+                    <View 
+                      key={`${image.type}-${index}`} 
+                      style={[styles.gallerySlide, { width: Dimensions.get('window').width - 80 }]}
+                    >
+                      <Image 
+                        source={{ uri: imageUri }} 
+                        style={styles.galleryImage}
+                        resizeMode="cover"
+                        onError={(error) => {
+                          console.log('🚨 Gallery Image load error:', error.nativeEvent.error);
+                          console.log('🚨 Gallery Image URI:', imageUri);
+                        }}
+                        onLoad={() => {
+                          console.log('✅ Gallery Image loaded successfully:', imageUri);
+                        }}
+                      />
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            );
+          })()}
+
+
+          {!!spot.distanceKm && <Text style={styles.line}>מרחק: {Number(spot.distanceKm).toFixed(2)} ק״מ</Text>}
         </View>
 
         {/* בחירת זמנים – התחלה/סיום (כפתור פותח פאנל גלגלים) */}
         <View style={styles.card}>
           <Text style={styles.section}>בחרו תאריך ושעה</Text>
+
+          {/* הצגת זמינות החניה */}
+          {spot?.parkingId && start && (
+            <ParkingAvailability 
+              parkingId={spot.parkingId}
+              startTime={formatForAPI(start)}
+              onAvailabilityChange={(data) => setAvailability(data)}
+              style={{ marginVertical: 8 }}
+            />
+          )}
 
           {/* התחלה */}
           <View style={{ marginTop: 6, alignItems: 'flex-start' }}>
@@ -686,9 +1101,22 @@ export default function BookingScreen({ route, navigation }) {
               <Text style={styles.labelStrong}>התחלה</Text>
             </View>
             <View style={styles.fieldsRow}>
-              <TouchableOpacity style={styles.fieldButton} onPress={() => openPanel('start')} activeOpacity={0.9}>
+              <TouchableOpacity 
+                style={[
+                  styles.fieldButton,
+                  !areTimesEditable && styles.fieldButtonDisabled
+                ]} 
+                onPress={() => openPanel('start')} 
+                activeOpacity={areTimesEditable ? 0.9 : 1}
+                disabled={!areTimesEditable}
+              >
                 <Ionicons name="calendar-outline" size={16} style={styles.fieldIcon} />
-                <Text style={styles.fieldButtonText}>{dayjs(start).format('DD/MM/YYYY • HH:mm')}</Text>
+                <Text style={[
+                  styles.fieldButtonText,
+                  !areTimesEditable && styles.fieldButtonTextDisabled
+                ]}>
+                  {dayjs(start).format('DD/MM/YYYY • HH:mm')}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -700,12 +1128,63 @@ export default function BookingScreen({ route, navigation }) {
               <Text style={styles.labelStrong}>סיום</Text>
             </View>
             <View style={styles.fieldsRow}>
-              <TouchableOpacity style={styles.fieldButton} onPress={() => openPanel('end')} activeOpacity={0.9}>
+              <TouchableOpacity 
+                style={[
+                  styles.fieldButton,
+                  !areTimesEditable && styles.fieldButtonDisabled
+                ]} 
+                onPress={() => openPanel('end')} 
+                activeOpacity={areTimesEditable ? 0.9 : 1}
+                disabled={!areTimesEditable}
+              >
                 <Ionicons name="time-outline" size={16} style={styles.fieldIcon} />
-                <Text style={styles.fieldButtonText}>{dayjs(end).format('DD/MM/YYYY • HH:mm')}</Text>
+                <Text style={[
+                  styles.fieldButtonText,
+                  !areTimesEditable && styles.fieldButtonTextDisabled
+                ]}>
+                  {dayjs(end).format('DD/MM/YYYY • HH:mm')}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* הודעת שגיאה להזמנה מיידית */}
+          {isImmediate && (() => {
+            const validation = validateImmediateBooking(start, end);
+            if (!validation.isValid) {
+              return (
+                <View style={styles.immediateValidationError}>
+                  <Ionicons name="warning" size={16} color="#EF4444" style={{ marginLeft: 6 }} />
+                  <Text style={styles.immediateValidationErrorText}>{validation.error}</Text>
+                </View>
+              );
+            }
+            return null;
+          })()}
+
+          {/* הודעת עזרה להזמנה עתידית */}
+          {isFuture && (
+            <View style={styles.futureHelpMessage}>
+              <Ionicons name="information-circle" size={16} color="#3B82F6" style={{ marginLeft: 6 }} />
+              <Text style={styles.futureHelpMessageText}>
+                הזמנים נקבעו לפי החיפוש שביצעת ולא ניתן לשנותם. לשינוי זמנים, בצע חיפוש חדש.
+              </Text>
+            </View>
+          )}
+
+          {/* בדיקת תקינות ההזמנה */}
+          {spot?.parkingId && start && end && (
+            <BookingValidator 
+              parkingId={spot.parkingId}
+              startTime={formatForAPI(start)}
+              endTime={formatForAPI(end)}
+              onValidationChange={(result) => {
+                console.log('🔍 Validation result received:', result);
+                setValidationResult(result);
+              }}
+              style={{ marginTop: 12 }}
+            />
+          )}
 
           {/* הוסרה תיבת הטווח */}
           <Text style={[styles.hint, { marginTop: theme.spacing.xs }]}>
@@ -715,7 +1194,49 @@ export default function BookingScreen({ route, navigation }) {
 
         {/* פרטי רכב */}
         <View style={styles.card}>
-          <Text style={styles.section}>הרכב להזמנה</Text>
+          <Text style={styles.section}>פרטי רכב</Text>
+          
+          {/* רכב ברירת מחדל */}
+          {selectedVehicleId && vehicles.find(v => v.id === selectedVehicleId) && (
+            <View style={styles.defaultVehicleContainer}>
+              <Text style={styles.defaultVehicleText}>
+                נטען רכב ברירת מחדל מהפרופיל שלך
+              </Text>
+              {vehicles.length > 1 && (
+                <TouchableOpacity 
+                  style={styles.changeVehicleBtn}
+                  onPress={() => {
+                    // כאן נוכל להוסיף modal לבחירת רכב אחר
+                    Alert.alert(
+                      'בחירת רכב',
+                      'בחר רכב אחר מהרשימה:',
+                      vehicles.map(v => ({
+                        text: `${v.licensePlate} - ${v.description || `${v.make || ''} ${v.model || ''}`.trim() || 'רכב'}`,
+                        onPress: () => {
+                          setSelectedVehicleId(v.id);
+                          setPlate(v.licensePlate || '');
+                          
+                          // אותה לוגיקה כמו בטעינה הראשונית
+                          let vehicleDescription = '';
+                          if (v.description && v.description.trim()) {
+                            vehicleDescription = v.description.trim();
+                          } else {
+                            const makeModel = `${v.make || ''} ${v.model || ''}`.trim();
+                            if (makeModel) {
+                              vehicleDescription = makeModel;
+                            }
+                          }
+                          setCarDesc(vehicleDescription);
+                        }
+                      })).concat([{ text: 'ביטול', style: 'cancel' }])
+                    );
+                  }}
+                >
+                  <Text style={styles.changeVehicleText}>שנה</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
 
           <Text style={styles.label}>מספר רכב</Text>
           <TextInput
@@ -727,7 +1248,7 @@ export default function BookingScreen({ route, navigation }) {
             placeholderTextColor={theme.colors.subtext}
           />
 
-        <Text style={styles.label}>תיאור רכב (לא חובה)</Text>
+          <Text style={styles.label}>תיאור רכב (לא חובה)</Text>
           <TextInput
             style={styles.input}
             placeholder="לדוגמה: מאזדה 3 לבנה"
@@ -739,42 +1260,39 @@ export default function BookingScreen({ route, navigation }) {
 
         {/* סיכום — עכשיו מעל התשלום, כולל כותרת */}
         <View style={styles.summary}>
-          <Text style={styles.section}>סיכום ההזמנה</Text>
-
-          <View style={styles.summaryItem}>
-            <Ionicons name="play" size={16} style={{ marginEnd: 6 }} />
-            <Text style={styles.summaryText}>התחלה: {dayjs(start).format('DD/MM/YYYY HH:mm')}</Text>
-          </View>
-          <View style={styles.summaryItem}>
-            <Ionicons name="square" size={14} style={{ marginEnd: 6 }} />
-            <Text style={styles.summaryText}>סיום: {dayjs(end).format('DD/MM/YYYY HH:mm')}</Text>
+          <View style={styles.summaryHeader}>
+            <Text style={styles.summaryHeaderIcon}>{getBookingInstructions().icon}</Text>
+            <Text style={styles.section}>סיכום {getBookingInstructions().title}</Text>
           </View>
 
           <View style={styles.summaryDivider} />
 
+          {/* זמן מדויק ומחיר - חישוב proportional */}
+          {exactHours > 0 && (
+            <View style={styles.summaryItem}>
+              <Ionicons name="time-outline" size={16} style={{ marginEnd: 16 }} />
+              <Text style={styles.summaryText}>
+                זמן מדויק: {exactHours.toFixed(2)} שעות
+              </Text>
+            </View>
+          )}
+          
           <View style={styles.summaryItem}>
-            <Ionicons name="hourglass-outline" size={16} style={{ marginEnd: 6 }} />
-            <Text style={styles.summaryText}>סה״כ שעות: {hours}</Text>
+            <Ionicons name="cash-outline" size={16} style={{ marginEnd: 16 }} />
+            <Text style={styles.summaryText}>
+              סה״כ לתשלום: ₪{(total || 0).toFixed(2)} 🆕
+            </Text>
           </View>
-          <View style={styles.summaryItem}>
-            <Ionicons name="cash-outline" size={16} style={{ marginEnd: 6 }} />
-            <Text style={styles.summaryText}>סה״כ לתשלום: ₪{total}</Text>
-          </View>
+
         </View>
 
-        {/* תשלום — הועבר לתחתית העמוד (לפני הכפתור) */}
-        <View style={styles.card}>
-          <Text style={styles.section}>תשלום</Text>
-          <Text style={styles.line}>אמצעי תשלום: {paymentLabel(paymentMethod)}</Text>
-          <Text style={styles.hint}>אפשר לערוך את ברירת המחדל במסך ״הפרופיל שלי״.</Text>
-        </View>
 
         {/* פעולות */}
         <ZpButton
-          title={editingId ? 'שמור שינויים' : 'שלח הזמנה'}
+          title={editingId ? 'שמור שינויים' : 'המשך לתשלום'}
           onPress={confirm}
-          disabled={invalid || !plate.trim()}
-          style={{ opacity: (invalid || !plate.trim()) ? 0.6 : 1 }}
+          disabled={!plate.trim() || (validationResult && validationResult.success && !validationResult.valid)}
+          style={{ opacity: (!plate.trim() || (validationResult && validationResult.success && !validationResult.valid)) ? 0.6 : 1 }}
           textStyle={{ textAlign: 'left' }}
         />
 
@@ -782,13 +1300,61 @@ export default function BookingScreen({ route, navigation }) {
       </ScrollView>
 
       {/* פאנל גלגלים */}
-      <WheelsDateTimePanel
+      <TimePickerWheel
         visible={panelVisible}
         initial={panelMode === 'start' ? start : end}
-        minimumDate={panelMode === 'start' ? new Date() : new Date(start.getTime() + MIN_MS)}
+        minimumDate={panelMode === 'start' ? (() => {
+          // עבור זמן התחלה בהזמנה מיידית - מינימום עכשיו
+          if (isImmediate) {
+            const now = new Date();
+            console.log('⚡ Setting minimum date for immediate booking:', now.toISOString());
+            return now;
+          }
+          return new Date();
+        })() : new Date(start.getTime() + MIN_MS)}
+        maximumDate={isImmediate ? (() => {
+                  const now = new Date();
+                  // 🔧 תוקן: משתמש בפונקציית העזר החדשה במקום המרה ידנית
+                  const endOfToday = setTimeInIsrael(now, 23, 45);
+                  
+                  if (panelMode === 'start') {
+                    // הגבלת זמן התחלה ל-15 דקות קדימה בלבד - בדיוק כמו בTimePickerWheel
+                    const maxStartTime = new Date(now.getTime() + (15 * 60 * 1000)); // +15 דקות
+                    
+                    // בדוק אם באמת צריך יום הבא (אותה לוגיקה כמו בTimePickerWheel)
+                    // 🔧 תוקן: משתמש בפונקציית העזר החדשה במקום המרה ידנית
+                    const realEndOfToday = setTimeInIsrael(now, 23, 59);
+                    
+                    console.log('🔍 BookingScreen maximumDate check:', {
+                      now: now.toISOString(),
+                      maxStartTime: maxStartTime.toISOString(),
+                      realEndOfToday: realEndOfToday.toISOString(),
+                      needsNextDay: maxStartTime > realEndOfToday
+                    });
+                    
+                    if (maxStartTime > realEndOfToday) {
+                      // רק אם באמת חורג - אפשר עד הזמן המקסימלי (אבל לא יותר מ-01:00 למחרת)
+                      // 🔧 תוקן: משתמש בפונקציית העזר החדשה במקום המרה ידנית
+                      const nextDay = new Date(realEndOfToday.getTime() + (24 * 60 * 60 * 1000));
+                      const nextDayLimit = setTimeInIsrael(nextDay, 1, 0); // עד 01:00 למחרת
+                      console.log('⚡ Allowing next day until:', nextDayLimit.toISOString());
+                      return maxStartTime < nextDayLimit ? maxStartTime : nextDayLimit;
+                    } else {
+                      // לא צריך יום הבא - הגבל לסוף היום הנוכחי
+                      console.log('⚡ Limiting to today only');
+                      return maxStartTime;
+                    }
+                  } else {
+                    // מקסימום 12 שעות מההתחלה או עד סוף היום
+                    // 🔧 תוקן: משתמש בפונקציית העזר החדשה במקום המרה ידנית
+                    const maxFromStart = addHoursInIsrael(start, 12);
+                    return maxFromStart < endOfToday ? maxFromStart : endOfToday;
+                  }
+                })() : null}
+        bookingType={bookingType}
+        title={panelMode === 'start' ? 'בחרו זמן התחלה' : 'בחרו זמן סיום'}
         onClose={() => setPanelVisible(false)}
         onConfirm={handlePanelConfirm}
-        title={panelMode === 'start' ? 'בחרו התחלה' : 'בחרו סיום'}
       />
     </KeyboardAvoidingView>
   );
@@ -816,8 +1382,16 @@ function makeStyles(theme) {
       direction:'rtl'
     },
 
-    // טקסטים שמאלה
-    section:{ ...textBase, fontSize:16, fontWeight:'800', marginBottom: 6 },
+    // טקסטים שמאלה - מותאם למסך התשלום
+    section:{ 
+      ...textBase, 
+      fontSize: 22,        // גדול יותר כמו במסך התשלום
+      fontWeight: '800', 
+      marginBottom: 20,    // מרווח גדול יותר
+      textAlign: 'center', // במרכז כמו במסך התשלום
+      letterSpacing: 0.5,  // ריווח בין אותיות
+      color: colors.text,  // שחור
+    },
     title:{ ...textBase, textAlign:'center', fontSize:18, fontWeight:'800', marginBottom:6 },
     line:{ ...textBase, fontSize:15, marginVertical:2 },
     hint:{ textAlign:'left', writingDirection:'rtl', color: colors.subtext, fontSize:12 },
@@ -850,13 +1424,13 @@ function makeStyles(theme) {
     fieldButtonText:{ ...textBase, fontSize:16, fontWeight:'800' },
     fieldIcon:{ position:'absolute', right:12, color: colors.subtext },
 
-    // Summary — מעוצב מעט יותר מזמין
+    // Summary — מותאם למסך התשלום
     summary:{
-      backgroundColor:'#F7F9FF',
+      backgroundColor: colors.surface, // רקע אחיד כמו במסך התשלום
       borderColor: colors.border,
-      borderWidth:1,
-      borderRadius: borderRadii.md,
-      padding: spacing.lg,
+      borderWidth: 1,
+      borderRadius: 16, // עגול יותר כמו במסך התשלום
+      padding: 20, // padding אחיד
       marginTop: 4,
       marginBottom: spacing.md,
       shadowColor:'#000', shadowOpacity:0.04, shadowRadius:10, shadowOffset:{ width:0, height:4 }, elevation:1,
@@ -864,8 +1438,18 @@ function makeStyles(theme) {
     summaryDivider:{
       height:1, backgroundColor:'#E6ECF5', marginVertical:8, alignSelf:'stretch'
     },
-    summaryItem:{ flexDirection:'row', alignItems:'center', marginBottom: 6 },
-    summaryText:{ ...textBase, fontSize:16, fontWeight:'700' },
+    summaryItem:{ 
+      flexDirection:'row', 
+      alignItems:'center', 
+      marginBottom: 12, // מרווח גדול יותר
+      paddingVertical: 8, // padding אנכי
+    },
+    summaryText:{ 
+      ...textBase, 
+      fontSize: 16, 
+      fontWeight: '600', // קצת פחות עבה
+      textAlign: 'left', // יישור לשמאל כמו במסך התשלום
+    },
 
     // Active badge
     activeBadge:{
@@ -876,7 +1460,7 @@ function makeStyles(theme) {
     activeText:{ color: colors.success, fontWeight:'800', textAlign:'right', writingDirection:'rtl' },
 
     // Images
-    heroImg:{ width: 200, height: 120, borderRadius: borderRadii.sm, marginStart:8, backgroundColor: colors.bg },
+    heroImg:{ width: 240, height: 150, borderRadius: borderRadii.sm, marginStart:8, backgroundColor: colors.bg },
 
     // ===== Styles לפאנל =====
     modalBackdrop:{ flex:1, backgroundColor:'rgba(0,0,0,0.45)', justifyContent:'flex-end' },
@@ -916,5 +1500,201 @@ function makeStyles(theme) {
     modalBtnGhostText:{ color: colors.text, fontWeight:'800' },
     modalBtnPrimary:{ backgroundColor: colors.primary, borderColor: colors.primary },
     modalBtnPrimaryText:{ color:'#fff', fontWeight:'800' },
+    
+    // סטיילים לרכב ברירת מחדל
+    defaultVehicleInfo: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.success + '15',
+      borderColor: colors.success + '40',
+      borderWidth: 1,
+      borderRadius: 8,
+      padding: 12,
+      marginBottom: 16,
+    },
+    defaultVehicleText: {
+      color: colors.success,
+      fontSize: 14,
+      fontWeight: '600',
+      textAlign: 'right',
+      writingDirection: 'rtl',
+      flex: 1,
+    },
+    changeVehicleBtn: {
+      backgroundColor: colors.primary,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      borderRadius: 6,
+      marginStart: 8,
+    },
+    changeVehicleText: {
+      color: '#fff',
+      fontSize: 12,
+      fontWeight: '600',
+    },
+    
+    // סטיילים לזמינות החניה
+    availabilityContainer: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(139, 92, 246, 0.1)', // סגול בהיר
+      borderColor: 'rgba(139, 92, 246, 0.3)', // סגול כהה יותר
+      borderWidth: 1,
+      borderRadius: 8,
+      padding: 10,
+      marginTop: 8,
+      marginBottom: 4,
+    },
+    availabilityText: {
+      color: '#8B5CF6', // סגול
+      fontSize: 14,
+      fontWeight: '700',
+      textAlign: 'center',
+      writingDirection: 'rtl',
+    },
+    availabilityLoading: {
+      color: colors.subtext,
+      fontSize: 14,
+      fontWeight: '600',
+      textAlign: 'center',
+      writingDirection: 'rtl',
+    },
+    unavailableText: {
+      color: colors.error,
+      fontSize: 14,
+      fontWeight: '700',
+      textAlign: 'center',
+      writingDirection: 'rtl',
+    },
+
+    // גלריית תמונות החניה
+    galleryContainer: {
+      marginTop: 12,
+      marginBottom: 16,
+      height: 200, // גובה קבוע לגלריה
+    },
+    galleryContent: {
+      flexDirection: 'row-reverse', // RTL
+      paddingRight: 16, // מקום לרמיזה של התמונה הבאה
+    },
+    gallerySlide: {
+      width: '100%', // רוחב מלא
+      paddingHorizontal: 8,
+      justifyContent: 'center',
+      marginLeft: 0, // רווח בין תמונות
+    },
+    galleryImage: {
+      width: '100%',
+      height: 240, // הגדלה מ-180 ל-240 פיקסלים
+      borderRadius: 10,
+      backgroundColor: colors.bg,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+
+    // באנרי סוג הזמנה
+    immediateBookingBanner: {
+      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+      borderColor: '#10B981',
+      borderWidth: 1,
+      borderRadius: 8,
+      padding: 12,
+      marginTop: 12,
+      marginBottom: 8,
+    },
+    futureBookingBanner: {
+      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+      borderColor: '#3B82F6',
+      borderWidth: 1,
+      borderRadius: 8,
+      padding: 12,
+      marginTop: 12,
+      marginBottom: 8,
+    },
+    bannerContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
+    bannerIcon: {
+      fontSize: 18,
+      marginLeft: 8,
+    },
+    bannerTextContainer: {
+      flex: 1,
+    },
+    bannerTitle: {
+      fontSize: 14,
+      fontWeight: '700',
+      textAlign: 'right',
+      writingDirection: 'rtl',
+      color: colors.text,
+    },
+    bannerSubtitle: {
+      fontSize: 12,
+      textAlign: 'right',
+      writingDirection: 'rtl',
+      color: colors.subtext,
+      marginTop: 2,
+    },
+
+    // כפתורי זמן מבוטלים (הזמנה עתידית)
+    fieldButtonDisabled: {
+      opacity: 0.6,
+      backgroundColor: '#f5f5f5',
+    },
+    fieldButtonTextDisabled: {
+      color: '#999',
+    },
+
+    // הודעת שגיאה להזמנה מיידית
+    immediateValidationError: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: 'rgba(239, 68, 68, 0.1)',
+      borderColor: '#EF4444',
+      borderWidth: 1,
+      borderRadius: 6,
+      padding: 8,
+      marginTop: 8,
+    },
+    immediateValidationErrorText: {
+      fontSize: 12,
+      color: '#EF4444',
+      textAlign: 'right',
+      writingDirection: 'rtl',
+      flex: 1,
+    },
+
+    // הודעת עזרה להזמנה עתידית
+    futureHelpMessage: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: 'rgba(59, 130, 246, 0.1)',
+      borderColor: '#3B82F6',
+      borderWidth: 1,
+      borderRadius: 6,
+      padding: 8,
+      marginTop: 8,
+    },
+    futureHelpMessageText: {
+      fontSize: 12,
+      color: '#3B82F6',
+      textAlign: 'right',
+      writingDirection: 'rtl',
+      flex: 1,
+    },
+
+
+    // כותרת סיכום
+    summaryHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 12,
+    },
+    summaryHeaderIcon: {
+      fontSize: 18,
+      marginLeft: 8,
+    },
   });
 }

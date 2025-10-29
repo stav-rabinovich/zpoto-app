@@ -1,5 +1,8 @@
 // utils/availability.js
 // מודל זמינות בסיסי + בדיקה אם טווח זמן זמין לפי שבוע
+// 🔧 תוקן: משתמש במערכת השעות החדשה
+
+import { getIsraelHourFromDate, getIsraelMinutesFromDate, setTimeInIsrael } from './timezone';
 
 export const HEB_DAYS = [
   { key: 'sun', label: 'א׳' },
@@ -9,6 +12,16 @@ export const HEB_DAYS = [
   { key: 'thu', label: 'ה׳' },
   { key: 'fri', label: 'ו׳' },
   { key: 'sat', label: 'ש׳' },
+];
+
+// בלוקי זמן של 4 שעות - מבנה חדש
+export const TIME_BLOCKS = [
+  { key: 'block1', label: '00:00-04:00', from: '00:00', to: '04:00' },
+  { key: 'block2', label: '04:00-08:00', from: '04:00', to: '08:00' },
+  { key: 'block3', label: '08:00-12:00', from: '08:00', to: '12:00' },
+  { key: 'block4', label: '12:00-16:00', from: '12:00', to: '16:00' },
+  { key: 'block5', label: '16:00-20:00', from: '16:00', to: '20:00' },
+  { key: 'block6', label: '20:00-24:00', from: '20:00', to: '24:00' },
 ];
 
 export function defaultAlwaysAvailable() {
@@ -75,20 +88,22 @@ export function isAvailableForRange(availability, startISO, endISO) {
   let dayStart = new Date(start);
   while (dayStart < end) {
     const nextDay = new Date(dayStart);
-    nextDay.setHours(23, 59, 59, 999);
+    // 🔧 תוקן: משתמש בפונקציית העזר החדשה במקום המרה ידנית
+    const nextDayEnd = setTimeInIsrael(nextDay, 23, 59);
+    nextDay = nextDayEnd;
     const segmentEnd = end < nextDay ? end : nextDay;
 
-    const segStartMin = dayStart.getHours() * 60 + dayStart.getMinutes();
-    const segEndMin   = segmentEnd.getHours() * 60 + segmentEnd.getMinutes() + 1; // לכלול את הדקה האחרונה
+    // 🔧 תוקן: משתמש בפונקציות העזר החדשות במקום המרות ידניות
+    const segStartMin = getIsraelHourFromDate(dayStart) * 60 + getIsraelMinutesFromDate(dayStart);
+    const segEndMin = getIsraelHourFromDate(segmentEnd) * 60 + getIsraelMinutesFromDate(segmentEnd) + 1; // לכלול את הדקה האחרונה
     if (!isDayWindowCovered(availability.weekly, dayStart, segStartMin, segEndMin)) {
       return false;
     }
 
     // מעבר ליום הבא 00:00
-    const next = cloneDate(dayStart);
-    next.setDate(next.getDate() + 1);
-    next.setHours(0,0,0,0);
-    dayStart = next;
+    // 🔧 תוקן: משתמש בחישוב מילישניות במקום המרות ידניות
+    const nextDayStart = new Date(dayStart.getTime() + (24 * 60 * 60 * 1000));
+    dayStart = setTimeInIsrael(nextDayStart, 0, 0);
   }
   return true;
 }
@@ -100,4 +115,91 @@ export function setAllDays(availability, enabled, from='00:00', to='23:59') {
     next.weekly[d.key] = { enabled, from, to };
   });
   return next;
+}
+
+// === פונקציות חדשות לעבודה עם בלוקי זמן ===
+
+// מחזיר את כל הבלוקים הפעילים עבור יום מסוים
+export function getActiveBlocksForDay(availability, dayKey) {
+  if (!availability || availability.mode === 'always') {
+    return TIME_BLOCKS.map(block => block.key); // כל הבלוקים פעילים
+  }
+  
+  if (!availability.weekly || !availability.weekly[dayKey]) {
+    return []; // אין בלוקים פעילים
+  }
+  
+  const dayRule = availability.weekly[dayKey];
+  if (!dayRule.enabled) {
+    return []; // היום כבוי
+  }
+  
+  // אם השימוש הוא בפורמט הישן (from/to), נמיר לבלוקים
+  if (dayRule.from && dayRule.to) {
+    return convertTimeRangeToBlocks(dayRule.from, dayRule.to);
+  }
+  
+  // אם השימוש הוא בפורמט החדש (blocks), נחזיר אותו
+  return dayRule.blocks || [];
+}
+
+// ממיר טווח שעות (HH:mm - HH:mm) לבלוקי זמן
+export function convertTimeRangeToBlocks(from, to) {
+  const fromMinutes = minutesOfDay(from);
+  const toMinutes = minutesOfDay(to);
+  
+  return TIME_BLOCKS.filter(block => {
+    const blockStart = minutesOfDay(block.from);
+    const blockEnd = minutesOfDay(block.to === '24:00' ? '23:59' : block.to);
+    
+    // בלוק נכלל אם יש חפיפה עם הטווח המבוקש
+    return blockStart < toMinutes && blockEnd > fromMinutes;
+  }).map(block => block.key);
+}
+
+// מעדכן זמינות יום בפורמט בלוקים חדש
+export function setDayBlocks(availability, dayKey, blockKeys) {
+  const next = { 
+    ...availability, 
+    mode: 'weekly', 
+    weekly: { ...availability.weekly } 
+  };
+  
+  next.weekly[dayKey] = {
+    enabled: blockKeys.length > 0,
+    blocks: [...blockKeys]
+  };
+  
+  return next;
+}
+
+// ממיר מבנה ישן (from/to) למבנה חדש (blocks)
+export function migrateToBlockFormat(availability) {
+  if (!availability || availability.mode === 'always') {
+    return availability;
+  }
+  
+  const migrated = { 
+    ...availability, 
+    weekly: { ...availability.weekly } 
+  };
+  
+  HEB_DAYS.forEach(day => {
+    const dayRule = migrated.weekly[day.key];
+    if (dayRule && dayRule.from && dayRule.to && !dayRule.blocks) {
+      // מיגרציה מפורמט ישן לחדש
+      migrated.weekly[day.key] = {
+        enabled: dayRule.enabled,
+        blocks: dayRule.enabled ? convertTimeRangeToBlocks(dayRule.from, dayRule.to) : []
+      };
+    }
+  });
+  
+  return migrated;
+}
+
+// בודק אם בלוק זמן מסוים זמין ביום נתון
+export function isBlockAvailable(availability, dayKey, blockKey) {
+  const activeBlocks = getActiveBlocksForDay(availability, dayKey);
+  return activeBlocks.includes(blockKey);
 }

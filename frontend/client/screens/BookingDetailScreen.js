@@ -1,315 +1,415 @@
-// screens/BookingDetailScreen.js
-import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+// screens/BookingDetailScreenNew.js - מסך פרטי הזמנה מחודש
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, Alert } from 'react-native';
 import { useTheme } from '@shopify/restyle';
+import { Ionicons } from '@expo/vector-icons';
 import { useAuth } from '../contexts/AuthContext';
-import { getBooking, getStatusText, getStatusColor, formatBookingDate, isBookingActive, isBookingUpcoming, calculateBookingPrice } from '../services/api/bookings';
+import api from '../utils/api';
+import { formatBookingDate, getStatusColor, isBookingActive } from '../services/api/bookings';
+import { checkExtensionEligibility, isEligibleForExtension } from '../services/api/extensions';
 
 export default function BookingDetailScreen({ route, navigation }) {
   const bookingId = route?.params?.id || route?.params?.bookingId;
-  const [booking, setBooking] = useState(null);
-  const [loading, setLoading] = useState(true);
   const theme = useTheme();
   const styles = makeStyles(theme);
   const { token } = useAuth();
 
+  const [booking, setBooking] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [extending, setExtending] = useState(false);
+
   useEffect(() => {
-    loadBooking();
-  }, [bookingId]);
+    if (token && bookingId) {
+      loadBooking();
+    }
+  }, [token, bookingId]);
+
+  // רענון נתונים אחרי הארכה
+  useEffect(() => {
+    const refreshData = route.params?.refreshData;
+    if (refreshData && token && bookingId) {
+      console.log('🔄 Refreshing booking data after extension');
+      loadBooking();
+      
+      // ניקוי הפרמטר לאחר הרענון
+      navigation.setParams({ refreshData: false });
+    }
+  }, [route.params?.refreshData, token, bookingId]);
 
   const loadBooking = async () => {
-    if (!bookingId) {
-      setLoading(false);
-      return;
-    }
-
+    if (!bookingId || !token) return;
+    
+    setLoading(true);
     try {
-      setLoading(true);
-      const result = await getBooking(bookingId);
-      if (result.success) {
-        setBooking(result.data);
-      } else {
-        console.error('Failed to load booking:', result.error);
-        setBooking(null);
+      const response = await api.get(`/api/bookings/${bookingId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      // השרת מחזיר את הנתונים ישירות או בתוך data
+      const bookingData = response.data?.data || response.data;
+      
+      if (!bookingData) {
+        Alert.alert('שגיאה', 'ההזמנה לא נמצאה');
+        navigation.goBack();
+        return;
       }
+      
+      setBooking(bookingData);
     } catch (error) {
       console.error('Load booking error:', error);
-      setBooking(null);
+      const errorMsg = error.response?.status === 404 
+        ? 'ההזמנה לא נמצאה' 
+        : error.response?.status === 400
+        ? 'מזהה הזמנה לא תקין'
+        : 'לא הצלחנו לטעון את פרטי ההזמנה';
+      
+      Alert.alert('שגיאה', errorMsg, [
+        { text: 'אישור', onPress: () => navigation.goBack() }
+      ]);
     } finally {
       setLoading(false);
     }
   };
-
-  const formatDate = (dateString) => {
-    // שימוש בפונקציה מהשירות החדש
-    return formatBookingDate(dateString) || '-';
-  };
-
-  const calculateDuration = (start, end) => {
-    if (!start || !end) return '-';
-    const diff = new Date(end) - new Date(start);
-    const hours = Math.floor(diff / (1000 * 60 * 60));
-    const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    return `${hours} שעות ו-${minutes} דקות`;
-  };
-
-  const getBookingStatusText = (status) => {
-    // שימוש בפונקציה מהשירות החדש
-    return getStatusText(status) || status;
+  const requestExtension = async () => {
+    Alert.alert(
+      'בקשת הארכה',
+      'האם ברצונך לבקש הארכה של 30 דקות?',
+      [
+        { text: 'ביטול', style: 'cancel' },
+        {
+          text: 'בקש הארכה',
+          onPress: async () => {
+            setExtending(true);
+            try {
+              // שליחה לשרת - בקשת הארכה
+              // 📝 LEGACY CODE - Old extension API (commented out)
+              // await api.post(`/api/bookings/${bookingId}/extend`, {
+              //   minutes: 30
+              // }, {
+              //   headers: { Authorization: `Bearer ${token}` }
+              // });
+              
+              // 🔧 NEW: Use new extension API
+              console.log(`🔍 Checking extension eligibility for booking #${bookingId}`);
+              const result = await checkExtensionEligibility(bookingId);
+              
+              console.log(`✅ Extension check result:`, result);
+              
+              if (!result.success) {
+                console.log(`❌ Extension check failed:`, result.error);
+                throw new Error(result.error || 'Extension check failed');
+              }
+              
+              if (!result.data.canExtend) {
+                console.log(`❌ Extension not allowed:`, result.data.reason);
+                let message = 'לא ניתן להאריך את החניה כרגע.';
+                
+                switch (result.data.reason) {
+                  case 'BOOKING_NOT_ACTIVE':
+                    message = 'החניה אינה פעילה כרגע.';
+                    break;
+                  case 'PARKING_OCCUPIED':
+                    message = 'החניה תפוסה לאחר זמן ההארכה.';
+                    break;
+                  case 'OWNER_UNAVAILABLE':
+                    message = result.data.message || 'החניה לא זמינה להארכה.\n\nבעל החניה הגדיר שעות פעילות מוגבלות לחניה זו.\n\nההארכה המבוקשת תחרוג מהשעות הפעילות שקבע בעל החניה.';
+                    break;
+                  case 'TOO_CLOSE_TO_END':
+                    message = 'נשארו פחות מ-10 דקות - לא ניתן להאריך.';
+                    break;
+                  case 'UNAUTHORIZED':
+                    message = 'אין הרשאה להאריך חניה זו.';
+                    break;
+                }
+                
+                // הצגת הודעה ידידותית למשתמש
+                const alertTitle = result.data.reason === 'OWNER_UNAVAILABLE' ? 'הארכה לא זמינה' : 'לא ניתן להאריך';
+                Alert.alert(alertTitle, message);
+                return;
+              }
+              
+              // מעבר לתשלום הארכה
+              navigation.navigate('Payment', {
+                type: 'extension',
+                bookingId: booking.id,
+                parkingId: booking.parking?.id,
+                parkingTitle: booking.parking?.title || 'חניה',
+                amount: result.data.extensionPrice,
+                extensionMinutes: 30,
+                newEndTime: result.data.newEndTime,
+                description: `הארכת חניה ב-30 דקות - ${booking.parking?.title || 'חניה'}`
+              });
+            } catch (error) {
+              console.error('Extension request error:', error);
+              Alert.alert('שגיאה', error.message || 'לא הצלחנו לשלוח את הבקשה');
+            } finally {
+              setExtending(false);
+            }
+          }
+        }
+      ]
+    );
   };
 
   if (loading) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color={theme.colors.primary} />
-        <Text style={styles.loadingText}>טוען פרטי הזמנה...</Text>
+        <Text style={{ marginTop: 16, color: theme.colors.subtext }}>טוען...</Text>
       </View>
     );
   }
 
   if (!booking) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.errorText}>לא נמצאה הזמנה</Text>
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: theme.colors.error, fontSize: 16 }}>הזמנה לא נמצאה</Text>
       </View>
     );
   }
 
-  const totalCost = booking.totalPriceCents ? (booking.totalPriceCents / 100).toFixed(2) : '0.00';
+  const parking = booking.parking || {};
+  const isActive = booking.status === 'CONFIRMED' || booking.status === 'ACTIVE';
+
+  // חישוב הסכום הכולל שמחפש החניה שילם
+  // לאחר התשלום, totalPriceCents כבר מכיל את המחיר הסופי שהמשתמש שילם (כולל הנחות)
+  const totalPaidByUser = booking.totalPriceCents ? (booking.totalPriceCents / 100) : 0;
+  const totalCost = totalPaidByUser.toFixed(2);
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.card}>
-        <Text style={styles.header}>פרטי ההזמנה</Text>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📍 מיקום החניה</Text>
-          <Text style={styles.value}>{booking.parking?.address || 'לא זמין'}</Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>💰 עלות כוללת</Text>
-          <Text style={styles.priceValue}>₪{totalCost}</Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>⏱️ משך ההזמנה</Text>
-          <Text style={styles.value}>{calculateDuration(booking.startTime, booking.endTime)}</Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📅 תאריך התחלה</Text>
-          <Text style={styles.value}>{formatDate(booking.startTime)}</Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📅 תאריך סיום</Text>
-          <Text style={styles.value}>{formatDate(booking.endTime)}</Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>🚗 מספר רכב</Text>
-          <Text style={styles.value}>{booking.vehicleNumber || 'לא צוין'}</Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>💳 אמצעי תשלום</Text>
-          <Text style={styles.value}>{booking.paymentMethod || 'כרטיס אשראי'}</Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📊 סטטוס</Text>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(booking.status) }]}>
-            <Text style={styles.statusText}>{getBookingStatusText(booking.status)}</Text>
-          </View>
-        </View>
-
-        {/* אינדיקטורים נוספים */}
-        {isBookingActive(booking) && (
-          <View style={styles.activeIndicator}>
-            <Text style={styles.activeText}>🟢 ההזמנה פעילה כעת</Text>
-          </View>
-        )}
+    <ScrollView style={styles.container} contentContainerStyle={{ padding: 24 }}>
+      {/* מלבן עליון עם פרטי ההזמנה */}
+      <View style={styles.mainCard}>
+        {/* שם החניה */}
+        <Text style={styles.parkingTitle}>{parking.title || parking.address || 'חניה'}</Text>
         
-        {!isBookingActive(booking) && isBookingUpcoming(booking) && (
-          <View style={styles.upcomingIndicator}>
-            <Text style={styles.upcomingText}>⏰ הזמנה עתידית</Text>
-          </View>
-        )}
+        {/* סטטוס מאושרת */}
+        <Text style={styles.approvedStatus}>מאושרת</Text>
+        
+        {/* תאריך ושעה */}
+        <View style={styles.dateTimeSection}>
+          <Text style={styles.dateTimeText}>
+            {formatDateTime(booking.startTime)} - {formatDateTime(booking.endTime)}
+          </Text>
+        </View>
+        
+        {/* עלות מעודכנת */}
+        <View style={styles.costSection}>
+          <Text style={styles.costLabel}>עלות:</Text>
+          <Text style={styles.costValue}>₪{totalCost} סה"כ</Text>
+        </View>
       </View>
+
+      {/* פרטים נוספים */}
+      <View style={styles.detailsCard}>
+        <View style={styles.infoRow}>
+          <Ionicons name="location" size={20} color={theme.colors.primary} />
+          <Text style={styles.infoText}>{parking.address || 'כתובת לא זמינה'}</Text>
+        </View>
+
+        <View style={styles.infoRow}>
+          <Ionicons name="time" size={20} color={theme.colors.primary} />
+          <Text style={styles.infoText}>
+            משך: {calculateDuration(booking.startTime, booking.endTime)}
+          </Text>
+        </View>
+
+        <View style={styles.infoRow}>
+          <Ionicons name="car" size={20} color={theme.colors.primary} />
+          <Text style={styles.infoText}>רכב: {booking.licensePlate || 'לא צוין'}</Text>
+        </View>
+      </View>
+
+      {/* Extension Button - for eligible active and upcoming bookings */}
+      {isEligibleForExtension(booking) && (
+        <TouchableOpacity
+          style={[styles.extensionButton, extending && { opacity: 0.6 }]}
+          onPress={requestExtension}
+          disabled={extending}
+          activeOpacity={0.8}
+        >
+          {extending ? (
+            <ActivityIndicator color="white" />
+          ) : (
+            <>
+              <Ionicons name="time-outline" size={24} color="white" style={{ marginLeft: 12 }} />
+              <Text style={styles.extensionButtonText}>בקש הארכה של 30 דקות</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      )}
+
     </ScrollView>
   );
 }
 
-// הפונקציה מוחלפת בשירות החדש
+function getStatusText(status) {
+  switch (status) {
+    case 'PENDING': return 'ממתינה';
+    case 'CONFIRMED': return 'מאושרת';
+    case 'ACTIVE': return 'פעילה';
+    case 'COMPLETED': return 'הושלמה';
+    case 'CANCELED': return 'בוטלה';
+    default: return status;
+  }
+}
+
+function formatDateTime(dateString) {
+  if (!dateString) return '-';
+  const date = new Date(dateString);
+  return date.toLocaleString('he-IL', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+}
+
+function calculateDuration(start, end) {
+  if (!start || !end) return '-';
+  const diff = new Date(end) - new Date(start);
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  return `${hours} שעות ו-${minutes} דקות`;
+}
 
 function makeStyles(theme) {
-  const { colors, spacing, borderRadii } = theme;
+  const { colors, spacing } = theme;
+  
   return StyleSheet.create({
     container: {
       flex: 1,
       backgroundColor: colors.bg,
     },
-    content: {
-      padding: spacing.lg,
-    },
-    loadingText: {
-      marginTop: spacing.md,
-      fontSize: 16,
-      color: colors.subtext,
-      textAlign: 'center',
-    },
-    errorText: {
-      fontSize: 16,
-      color: colors.error,
-      textAlign: 'center',
-    },
-    card: {
+    // מלבן עליון עם פרטי ההזמנה העיקריים
+    mainCard: {
       backgroundColor: colors.surface,
-      borderRadius: borderRadii.md,
-      padding: spacing.lg,
-      borderWidth: 1,
-      borderColor: colors.border,
+      borderRadius: 20,
+      padding: 32,
+      marginBottom: 20,
       shadowColor: '#000',
-      shadowOpacity: 0.08,
-      shadowRadius: 12,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 3,
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.15,
+      shadowRadius: 16,
+      elevation: 8,
     },
-    header: {
+    parkingTitle: {
       fontSize: 24,
       fontWeight: '800',
       color: colors.text,
-      marginBottom: spacing.lg,
-      textAlign: 'right',
+      textAlign: 'center',
+      marginBottom: 12,
     },
-    section: {
-      marginBottom: spacing.md,
-      paddingBottom: spacing.md,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.border,
+    approvedStatus: {
+      fontSize: 18,
+      fontWeight: '600',
+      color: '#4CAF50',
+      textAlign: 'center',
+      marginBottom: 20,
     },
-    sectionTitle: {
+    dateTimeSection: {
+      backgroundColor: '#F8F9FA',
+      borderRadius: 12,
+      padding: 16,
+      marginBottom: 20,
+    },
+    dateTimeText: {
       fontSize: 16,
-      fontWeight: '700',
       color: colors.text,
-      marginBottom: spacing.xs,
-      textAlign: 'right',
+      textAlign: 'center',
+      fontWeight: '500',
     },
-    value: {
-      fontSize: 15,
+    costSection: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      alignItems: 'center',
+      gap: 8,
+    },
+    costLabel: {
+      fontSize: 18,
       color: colors.subtext,
-      textAlign: 'right',
+      fontWeight: '500',
     },
-    priceValue: {
-      fontSize: 28,
+    costValue: {
+      fontSize: 22,
       fontWeight: '800',
       color: colors.primary,
-      textAlign: 'right',
-    },
-    statusBadge: {
-      paddingVertical: 8,
-      paddingHorizontal: 16,
-      borderRadius: borderRadii.md,
-      alignSelf: 'flex-start',
-    },
-    statusText: {
-      color: '#FFFFFF',
-      fontSize: 14,
-      fontWeight: '700',
-    },
-    statusActive: {
-      color: colors.primary,
-      borderColor: colors.primary,
-      backgroundColor: '#EEF3FF',
-    },
-    statusDone: {
-      color: colors.subtext,
-      borderColor: colors.border,
-      backgroundColor: '#F4F6FA',
-    },
-    statusRejected: {
-      color: '#FFFFFF',
-      borderColor: colors.error,
-      backgroundColor: colors.error,
-    },
-    statusCanceled: {
-      color: '#FFFFFF',
-      borderColor: colors.warning,
-      backgroundColor: colors.warning,
-    },
-
-    // קאונטר
-    countWrap: {
-      marginTop: spacing.lg,
-      alignItems: 'center',
-    },
-    countLabel: {
-      fontSize: 12,
-      color: colors.subtext,
-      marginBottom: 4,
-    },
-    countValue: {
-      fontSize: 20,
-      fontWeight: '700',
-      color: colors.text,
-      letterSpacing: 1,
-    },
-
-    // פעולות
-    actions: {
-      flexDirection: 'row',
-      gap: spacing.sm,
-      marginTop: spacing.lg,
-    },
-    btn: {
-      flex: 1,
-      borderRadius: borderRadii.md,
-      paddingVertical: 12,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    danger: {
-      backgroundColor: colors.error,
-      shadowColor: '#000',
-      shadowOpacity: 0.08,
-      shadowRadius: 12,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 3,
-    },
-    btnTxt: {
-      color: '#fff',
-      fontWeight: '700',
     },
     
-    // אינדיקטורים חדשים
-    activeIndicator: {
-      backgroundColor: '#E8F5E8',
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      borderRadius: borderRadii.md,
-      marginTop: spacing.md,
-      alignSelf: 'flex-start',
+    // כרטיס פרטים נוספים
+    detailsCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 16,
+      padding: 24,
+      marginBottom: 16,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 3,
     },
-    activeText: {
+    title: {
+      fontSize: 24,
+      fontWeight: '700',
+      color: colors.text,
+      flex: 1,
+    },
+    statusBadge: {
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 20,
+    },
+    statusText: {
+      color: 'white',
       fontSize: 14,
-      color: '#2E7D32',
       fontWeight: '600',
-      textAlign: 'right',
     },
-    upcomingIndicator: {
-      backgroundColor: '#FFF3E0',
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      borderRadius: borderRadii.md,
-      marginTop: spacing.md,
-      alignSelf: 'flex-start',
+    infoRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 16,
+      gap: 12,
     },
-    upcomingText: {
-      fontSize: 14,
-      color: '#F57C00',
+    infoText: {
+      fontSize: 16,
+      color: colors.text,
+      flex: 1,
+    },
+    extensionButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.primary,
+      paddingVertical: 18,
+      paddingHorizontal: 24,
+      borderRadius: 16,
+      marginTop: 16,
+      shadowColor: colors.primary,
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      elevation: 6,
+    },
+    extensionButtonText: {
+      color: 'white',
+      fontSize: 16,
+      fontWeight: '700',
+      marginLeft: 8,
+    },
+    secondaryButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.surface,
+      padding: 16,
+      borderRadius: 12,
+      borderWidth: 2,
+      borderColor: colors.border,
+    },
+    secondaryButtonText: {
+      color: colors.primary,
+      fontSize: 16,
       fontWeight: '600',
-      textAlign: 'right',
     },
   });
 }

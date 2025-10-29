@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { useTheme } from '@shopify/restyle';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// הוסרנו AsyncStorage - עובדים רק מהשרת
 import { useAuth } from '../contexts/AuthContext';
 import api from '../utils/api';
 import ZpButton from '../components/ui/ZpButton';

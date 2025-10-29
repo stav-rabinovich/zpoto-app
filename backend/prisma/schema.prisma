@@ -8,177 +8,531 @@ datasource db {
 }
 
 model User {
-  id        Int       @id @default(autoincrement())
-  email     String    @unique
-  password  String
-  name      String?
-  phone     String?
-  role      String    @default("USER") // USER, ADMIN
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-
-  // יחסים
-  bookings        Booking[]
-  listingRequests ListingRequest[]
-  chats           Chat[]
-  vehicles        Vehicle[]
-  savedPlaces     SavedPlace[]
-  recentSearches  RecentSearch[]
-  favorites       Favorite[]
-  paymentMethods  PaymentMethod[]
-  ownedParkings   Parking[] @relation("UserOwnedParkings")
+  id                   Int                @id @default(autoincrement())
+  email                String             @unique
+  password             String?
+  name                 String?
+  phone                String?
+  role                 String             @default("USER")
+  googleId             String?            @unique
+  facebookId           String?            @unique
+  appleId              String?            @unique
+  profilePicture       String?
+  isEmailVerified      Boolean            @default(false)
+  isBlocked            Boolean            @default(false)
+  ownershipBlocked     Boolean            @default(false)
+  lastLoginAt          DateTime?
+  registrationSource   String?
+  migratedFromDeviceId String?
+  migrationCompletedAt DateTime?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  bookings             Booking[]
+  chats                Chat[]
+  uploadedDocuments    Document[]         @relation("DocumentUploader")
+  documents            Document[]
+  documentAuditLogs    DocumentAuditLog[]
+  documentVersions     DocumentVersion[]
+  favorites            Favorite[]
+  listingRequests      ListingRequest[]
+  migrationLogs        MigrationLog[]
+  notifications        Notification[]
+  ownedParkings        Parking[]          @relation("UserOwnedParkings")
+  paymentMethods       PaymentMethod[]
+  recentSearches       RecentSearch[]
+  savedPlaces          SavedPlace[]
+  vehicles             Vehicle[]
+  ownerPayouts         OwnerPayout[]      @relation("OwnerPayouts")
+  createdCoupons       Coupon[]           @relation("CouponCreator")
+  couponUsages         CouponUsage[]
 }
 
 model Parking {
-  id           Int       @id @default(autoincrement())
-  title        String
-  address      String?   // כתובת החניה (nullable)
-  lat          Float
-  lng          Float
-  priceHr      Float
-  isActive     Boolean   @default(true)
-  approvalMode String    @default("AUTO") // AUTO, MANUAL
-  availability String?   // JSON: { sunday: [0,6,12], monday: [6,12,18], ... }
-  pricing      String?   // JSON: { hour1: 15, hour2: 14, hour3: 13, ... }
-  createdAt    DateTime  @default(now())
-
-  ownerId      Int
-  owner        User      @relation(fields: [ownerId], references: [id], name: "UserOwnedParkings")
-
-  bookings     Booking[]
-  chats        Chat[]
-  favorites    Favorite[]
+  id                 Int                 @id @default(autoincrement())
+  title              String
+  lat                Float
+  lng                Float
+  priceHr            Float
+  isActive           Boolean             @default(true)
+  approvalMode       String              @default("AUTO")
+  availability       String?
+  pricing            String?
+  createdAt          DateTime            @default(now())
+  ownerId            Int
+  address            String?
+  entranceImageUrl   String?
+  emptyImageUrl      String?
+  withCarImageUrl    String?
+  additionalImageUrl String?
+  anonymousFavorites AnonymousFavorite[]
+  bookings           Booking[]
+  chats              Chat[]
+  favorites          Favorite[]
+  owner              User                @relation("UserOwnedParkings", fields: [ownerId], references: [id])
 }
 
 model Booking {
-  id         Int       @id @default(autoincrement())
-  startTime  DateTime
-  endTime    DateTime
-  status     String    @default("PENDING") // PENDING, CONFIRMED, CANCELED
-  totalPriceCents Int?
-  createdAt  DateTime  @default(now())
+  id                 Int             @id @default(autoincrement())
+  startTime          DateTime
+  endTime            DateTime
+  status             String          @default("PENDING")
+  totalPriceCents    Int?
+  createdAt          DateTime        @default(now())
+  userId             Int
+  parkingId          Int
+  licensePlate       String?
+  paidAt             DateTime?
+  paymentId          String?
+  paymentMethod      String?
+  paymentStatus      String?         @default("PENDING")
+  vehicleDescription String?
+  vehicleId          Int?
+  approvalExpiresAt  DateTime?
+  approvedAt         DateTime?
+  rejectedAt         DateTime?
+  rejectionReason    String?
+  // Commission fields
+  commissionCents    Int? // עמלת זפוטו בעגורות
+  netOwnerCents      Int? // הכנסה נטו לבעל החניה
+  commissionRate     Float?          @default(0.15) // שיעור עמלה (15%)
+  parking            Parking         @relation(fields: [parkingId], references: [id])
+  user               User            @relation(fields: [userId], references: [id])
+  commission         Commission?
+  operationalFee     OperationalFee?
+  couponUsages       CouponUsage[]
 
-  userId     Int
-  user       User      @relation(fields: [userId], references: [id])
-  
-  parkingId  Int
-  parking    Parking   @relation(fields: [parkingId], references: [id])
-  
   @@index([userId])
   @@index([parkingId, startTime, endTime])
+  @@index([paymentStatus])
+  @@index([paidAt])
 }
 
 model ListingRequest {
-  id          Int       @id @default(autoincrement())
-  userId      Int
-  user        User      @relation(fields: [userId], references: [id])
-  
-  title       String
-  address     String
-  fullAddress String?   // כתובת מלאה (רחוב ומספר)
-  city        String?   // עיר
-  lat         Float
-  lng         Float
-  priceHr     Float
-  description String?
-  phone       String?   // מספר טלפון של בעל החניה
-  onboarding  String?   // JSON: נתוני אונבורדינג מלאים
-  
-  status          String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  id              Int                       @id @default(autoincrement())
+  userId          Int
+  title           String
+  address         String
+  fullAddress     String?
+  city            String?
+  lat             Float
+  lng             Float
+  priceHr         Float
+  description     String?
+  phone           String?
+  onboarding      String?
+  status          String                    @default("PENDING")
   rejectionReason String?
-  
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  
+  documentsStatus DocumentsCompletionStatus @default(INCOMPLETE)
+  createdAt       DateTime                  @default(now())
+  updatedAt       DateTime                  @updatedAt
+  user            User                      @relation(fields: [userId], references: [id])
+
   @@index([userId])
   @@index([status])
 }
 
 model Chat {
-  id        Int       @id @default(autoincrement())
-  message   String
-  isFromUser Boolean  @default(true) // true = מלקוח, false = מאדמין
-  createdAt DateTime  @default(now())
-  
-  userId    Int
-  user      User      @relation(fields: [userId], references: [id])
-  
-  parkingId Int?      // אופציונלי - אם הצ'אט קשור לחניה מסוימת
-  parking   Parking?  @relation(fields: [parkingId], references: [id])
-  
+  id         Int      @id @default(autoincrement())
+  message    String
+  isFromUser Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  userId     Int
+  parkingId  Int?
+  parking    Parking? @relation(fields: [parkingId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+
   @@index([userId])
   @@index([createdAt])
 }
 
 model Vehicle {
-  id          Int       @id @default(autoincrement())
-  licensePlate String   // מספר רכב
-  make        String?   // יצרן (טויוטה, הונדה וכו')
-  model       String?   // דגם (קורולה, סיוויק וכו')
-  color       String?   // צבע
-  year        Int?      // שנת ייצור
-  description String?   // תיאור נוסף
-  isDefault   Boolean   @default(false) // רכב ברירת מחדל
-  createdAt   DateTime  @default(now())
-  
-  userId      Int
-  user        User      @relation(fields: [userId], references: [id])
-  
+  id           Int      @id @default(autoincrement())
+  licensePlate String
+  make         String?
+  model        String?
+  color        String?
+  year         Int?
+  description  String?
+  isDefault    Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  userId       Int
+  user         User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, licensePlate])
   @@index([userId])
-  @@unique([userId, licensePlate]) // מספר רכב יחיד לכל משתמש
 }
 
-// מקומות שמורים
 model SavedPlace {
   id        Int      @id @default(autoincrement())
   userId    Int
-  user      User     @relation(fields: [userId], references: [id])
-  name      String   // "בית", "עבודה", "חניה קבועה"
+  name      String
   address   String
   lat       Float
   lng       Float
-  type      String   // "home", "work", "custom"
+  type      String
   createdAt DateTime @default(now())
-  
+  user      User     @relation(fields: [userId], references: [id])
+
   @@index([userId])
 }
 
-// חיפושים אחרונים
 model RecentSearch {
   id        Int      @id @default(autoincrement())
   userId    Int
-  user      User     @relation(fields: [userId], references: [id])
   query     String
   lat       Float?
   lng       Float?
   createdAt DateTime @default(now())
-  
+  user      User     @relation(fields: [userId], references: [id])
+
   @@index([userId, createdAt])
 }
 
-// מועדפים
 model Favorite {
-  id        Int     @id @default(autoincrement())
+  id        Int      @id @default(autoincrement())
   userId    Int
-  user      User    @relation(fields: [userId], references: [id])
   parkingId Int
-  parking   Parking @relation(fields: [parkingId], references: [id])
   createdAt DateTime @default(now())
-  
+  parking   Parking  @relation(fields: [parkingId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
   @@unique([userId, parkingId])
   @@index([userId])
 }
 
-// אמצעי תשלום
 model PaymentMethod {
-  id          Int      @id @default(autoincrement())
-  userId      Int
-  user        User     @relation(fields: [userId], references: [id])
-  type        String   // "credit_card", "paypal", "apple_pay"
-  name        String   // "ויזה ****1234"
-  isDefault   Boolean  @default(false)
-  metadata    String?  // JSON עם פרטים נוספים
-  createdAt   DateTime @default(now())
-  
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  type      String
+  name      String
+  isDefault Boolean  @default(false)
+  metadata  String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+
   @@index([userId])
+}
+
+model AnonymousRecentSearch {
+  id        Int      @id @default(autoincrement())
+  deviceId  String
+  query     String
+  lat       Float?
+  lng       Float?
+  createdAt DateTime @default(now())
+
+  @@index([deviceId, createdAt])
+  @@index([deviceId])
+}
+
+model AnonymousSavedPlace {
+  id        Int      @id @default(autoincrement())
+  deviceId  String
+  name      String
+  address   String
+  lat       Float
+  lng       Float
+  type      String
+  createdAt DateTime @default(now())
+
+  @@index([deviceId, createdAt])
+  @@index([deviceId])
+}
+
+model AnonymousFavorite {
+  id        Int      @id @default(autoincrement())
+  deviceId  String
+  parkingId Int
+  createdAt DateTime @default(now())
+  parking   Parking  @relation(fields: [parkingId], references: [id])
+
+  @@unique([deviceId, parkingId])
+  @@index([deviceId, createdAt])
+  @@index([deviceId])
+}
+
+model MigrationLog {
+  id                     Int       @id @default(autoincrement())
+  userId                 Int
+  deviceId               String
+  favoritesMigrated      Int       @default(0)
+  savedPlacesMigrated    Int       @default(0)
+  recentSearchesMigrated Int       @default(0)
+  status                 String    @default("PENDING")
+  errorMessage           String?
+  startedAt              DateTime  @default(now())
+  completedAt            DateTime?
+  user                   User      @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([deviceId])
+  @@index([status])
+}
+
+model DocumentType {
+  id                Int        @id @default(autoincrement())
+  name              String     @unique
+  nameHe            String
+  nameEn            String?
+  description       String?
+  isRequired        Boolean    @default(false)
+  allowedMimeTypes  String
+  maxFileSizeKB     Int        @default(5120)
+  requiresSignature Boolean    @default(false)
+  displayOrder      Int        @default(0)
+  isActive          Boolean    @default(true)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+  documents         Document[]
+}
+
+model Document {
+  id                 Int                @id @default(autoincrement())
+  userId             Int
+  documentTypeId     Int
+  originalFileName   String
+  storedFileName     String             @unique
+  filePath           String
+  mimeType           String
+  fileSizeBytes      Int
+  fileHash           String?
+  status             DocumentStatus     @default(UPLOADED)
+  requiresSignature  Boolean            @default(false)
+  signatureRequestId String?
+  signatureStatus    SignatureStatus    @default(NONE)
+  signedAt           DateTime?
+  signedDocumentPath String?
+  isEncrypted        Boolean            @default(false)
+  encryptionKey      String?
+  uploadedByUserId   Int?
+  notes              String?
+  rejectionReason    String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  approvedAt         DateTime?
+  expiresAt          DateTime?
+  uploadedBy         User?              @relation("DocumentUploader", fields: [uploadedByUserId], references: [id])
+  documentType       DocumentType       @relation(fields: [documentTypeId], references: [id])
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  auditLogs          DocumentAuditLog[]
+  versions           DocumentVersion[]
+
+  @@index([userId, status])
+  @@index([documentTypeId, status])
+  @@index([signatureStatus])
+}
+
+model DocumentVersion {
+  id            Int      @id @default(autoincrement())
+  documentId    Int
+  versionNumber Int      @default(1)
+  filePath      String
+  changeReason  String?
+  isActive      Boolean  @default(true)
+  createdBy     Int
+  createdAt     DateTime @default(now())
+  creator       User     @relation(fields: [createdBy], references: [id])
+  document      Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, isActive])
+}
+
+model DocumentAuditLog {
+  id           Int            @id @default(autoincrement())
+  documentId   Int?
+  userId       Int
+  action       DocumentAction
+  details      Json?
+  ipAddress    String?
+  userAgent    String?
+  success      Boolean        @default(true)
+  errorMessage String?
+  createdAt    DateTime       @default(now())
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document     Document?      @relation(fields: [documentId], references: [id])
+
+  @@index([documentId, createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+}
+
+model Notification {
+  id           Int       @id @default(autoincrement())
+  userId       Int
+  type         String
+  title        String
+  body         String
+  data         String?
+  isRead       Boolean   @default(false)
+  isSent       Boolean   @default(false)
+  sentAt       DateTime?
+  scheduledFor DateTime?
+  pushToken    String?
+  pushSent     Boolean   @default(false)
+  pushError    String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([scheduledFor])
+  @@index([type, createdAt])
+}
+
+enum DocumentStatus {
+  UPLOADED
+  PROCESSING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum SignatureStatus {
+  NONE
+  PENDING
+  SENT
+  SIGNED
+  FAILED
+}
+
+enum DocumentAction {
+  UPLOAD
+  VIEW
+  DOWNLOAD
+  APPROVE
+  REJECT
+  SIGN_REQUEST
+  SIGN_COMPLETE
+  DELETE
+  UPDATE
+}
+
+enum DocumentsCompletionStatus {
+  INCOMPLETE
+  PENDING
+  APPROVED
+}
+
+// =====================
+// COMMISSION SYSTEM
+// =====================
+
+model Commission {
+  id              Int          @id @default(autoincrement())
+  bookingId       Int          @unique
+  totalPriceCents Int // סכום כולל של ההזמנה
+  commissionCents Int // עמלת זפוטו בעגורות
+  netOwnerCents   Int // הכנסה נטו לבעל החניה
+  commissionRate  Float // שיעור עמלה שהוחל
+  hourlyBreakdown String? // פירוט עמלה לפי שעות (JSON)
+  calculatedAt    DateTime     @default(now())
+  payoutProcessed Boolean      @default(false)
+  payoutId        Int?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  booking         Booking      @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  payout          OwnerPayout? @relation(fields: [payoutId], references: [id])
+
+  @@index([calculatedAt])
+  @@index([payoutProcessed])
+  @@index([payoutId])
+}
+
+// OPERATIONAL FEES SYSTEM (דמי תפעול)
+// =====================
+
+model OperationalFee {
+  id                  Int      @id @default(autoincrement())
+  bookingId           Int      @unique
+  parkingCostCents    Int // עלות החניה הבסיסית
+  operationalFeeCents Int // דמי תפעול (10%)
+  totalPaymentCents   Int // סכום כולל שמחפש החניה משלם
+  operationalFeeRate  Float    @default(0.1) // 10%
+  calculatedAt        DateTime @default(now())
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  booking             Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([calculatedAt])
+}
+
+model OwnerPayout {
+  id                   Int          @id @default(autoincrement())
+  ownerId              Int
+  periodStart          DateTime // תחילת התקופה (1 לחודש)
+  periodEnd            DateTime // סוף התקופה (סוף החודש)
+  totalCommissionCents Int // סכום עמלות התקופה
+  netPayoutCents       Int // סכום נטו לתשלום לבעל החניה
+  status               String       @default("PENDING") // PENDING, PROCESSED, FAILED
+  processedAt          DateTime?
+  paymentReference     String? // אסמכתא תשלום
+  paymentMethod        String? // אמצעי תשלום
+  notes                String?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  owner                User         @relation("OwnerPayouts", fields: [ownerId], references: [id])
+  commissions          Commission[]
+
+  @@index([ownerId, periodStart])
+  @@index([status])
+  @@index([processedAt])
+}
+
+// =====================
+// COUPON SYSTEM
+// =====================
+
+model Coupon {
+  id            Int                @id @default(autoincrement())
+  code          String             @unique
+  discountType  CouponDiscountType
+  discountValue Float // ערך ההנחה (אחוז או סכום)
+  applyTo       CouponApplyTo // על מה להחיל את ההנחה
+  validUntil    DateTime // תאריך ושעת תפוגה
+  isActive      Boolean            @default(true)
+  usageCount    Int                @default(0) // כמה פעמים נוצל
+  maxUsage      Int? // מגבלת שימושים (null = ללא מגבלה)
+  createdById   Int // מי יצר את הקופון
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  // Relations
+  createdBy User          @relation("CouponCreator", fields: [createdById], references: [id])
+  usages    CouponUsage[]
+
+  @@index([code])
+  @@index([validUntil])
+  @@index([isActive])
+  @@index([createdById])
+}
+
+model CouponUsage {
+  id                  Int      @id @default(autoincrement())
+  couponId            Int
+  bookingId           Int
+  userId              Int
+  discountAmountCents Int // סכום ההנחה בעגורות
+  originalAmountCents Int // סכום מקורי בעגורות
+  finalAmountCents    Int // סכום סופי אחרי הנחה בעגורות
+  usedAt              DateTime @default(now())
+
+  // Relations
+  coupon  Coupon  @relation(fields: [couponId], references: [id])
+  booking Booking @relation(fields: [bookingId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@index([couponId])
+  @@index([bookingId])
+  @@index([userId])
+  @@index([usedAt])
+}
+
+enum CouponDiscountType {
+  PERCENTAGE // אחוז הנחה
+  FIXED // סכום קבוע
+}
+
+enum CouponApplyTo {
+  SERVICE_FEE // דמי תפעול בלבד
+  TOTAL_AMOUNT // סכום כולל
 }

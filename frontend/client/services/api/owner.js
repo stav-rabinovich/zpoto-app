@@ -105,10 +105,16 @@ export const getOwnerBookings = async () => {
       data: response.data.data || []
     };
   } catch (error) {
-    console.error('Failed to fetch owner bookings:', error);
+    // רק מדפיס לוגים אם זה לא חסימה (403)
+    if (error.response?.status !== 403 && !error.isUserBlocked) {
+      console.error('Failed to fetch owner bookings:', error);
+    }
     return {
       success: false,
-      error: error.response?.data?.error || 'שגיאה בטעינת ההזמנות',
+      error: {
+        message: error.response?.data?.error || error.message || 'שגיאה בטעינת ההזמנות',
+        response: error.response
+      },
       data: []
     };
   }
@@ -128,10 +134,13 @@ export const updateBookingStatus = async (bookingId, status) => {
       data: response.data.data
     };
   } catch (error) {
-    console.error('Failed to update booking status:', error);
+    // רק מדפיס לוגים אם זה לא חסימה (403)
+    if (error.response?.status !== 403 && !error.isUserBlocked) {
+      console.error('Failed to update booking status:', error);
+    }
     return {
       success: false,
-      error: error.response?.data?.error || 'שגיאה בעדכון סטטוס ההזמנה',
+      error: error.response?.data?.error || error.message || 'שגיאה בעדכון סטטוס ההזמנה',
       data: null
     };
   }
@@ -318,6 +327,91 @@ export const formatCurrency = (amount) => {
 export const getPendingApprovalBookings = (bookings) => {
   if (!Array.isArray(bookings)) return [];
   return bookings.filter(booking => booking.status === 'PENDING');
+};
+
+/**
+ * קבלת בקשות הזמנה הממתינות לאישור מהשרת
+ * @returns {Promise<Object>} תוצאה עם רשימת בקשות ממתינות
+ */
+export const fetchPendingApprovalBookings = async () => {
+  try {
+    const response = await api.get('/api/bookings/pending-approval');
+    return {
+      success: true,
+      data: response.data.data || []
+    };
+  } catch (error) {
+    console.error('❌ Error fetching pending approval bookings:', error);
+    return {
+      success: false,
+      error: error.response?.data?.error || error.message || 'שגיאה בטעינת בקשות ממתינות',
+      data: []
+    };
+  }
+};
+
+/**
+ * אישור בקשת הזמנה
+ * @param {number} bookingId - מזהה ההזמנה
+ * @returns {Promise<Object>} תוצאה
+ */
+export const approveBookingRequest = async (bookingId) => {
+  try {
+    const response = await api.post(`/api/bookings/${bookingId}/approve`);
+    return {
+      success: true,
+      data: response.data.data
+    };
+  } catch (error) {
+    console.error('❌ Error approving booking:', error);
+    return {
+      success: false,
+      error: error.response?.data?.error || error.message || 'שגיאה באישור הבקשה'
+    };
+  }
+};
+
+/**
+ * דחיית בקשת הזמנה
+ * @param {number} bookingId - מזהה ההזמנה
+ * @param {string} reason - סיבת הדחייה
+ * @returns {Promise<Object>} תוצאה
+ */
+export const rejectBookingRequest = async (bookingId, reason = '') => {
+  try {
+    const response = await api.post(`/api/bookings/${bookingId}/reject`, { reason });
+    return {
+      success: true,
+      data: response.data.data
+    };
+  } catch (error) {
+    console.error('❌ Error rejecting booking:', error);
+    return {
+      success: false,
+      error: error.response?.data?.error || error.message || 'שגיאה בדחיית הבקשה'
+    };
+  }
+};
+
+/**
+ * קבלת זמן שנותר לאישור בקשה
+ * @param {number} bookingId - מזהה ההזמנה
+ * @returns {Promise<Object>} תוצאה עם זמן שנותר
+ */
+export const getBookingTimeLeft = async (bookingId) => {
+  try {
+    const response = await api.get(`/api/bookings/${bookingId}/time-left`);
+    return {
+      success: true,
+      data: response.data
+    };
+  } catch (error) {
+    console.error('❌ Error getting time left:', error);
+    return {
+      success: false,
+      error: error.response?.data?.error || error.message || 'שגיאה בקבלת זמן שנותר'
+    };
+  }
 };
 
 /**

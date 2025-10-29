@@ -1,59 +1,30 @@
-// data/listingsRepo.js
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// data/listingsRepo.js - DISABLED
+// המערכת עובדת כעת 100% מול השרת
 
 const KEY = 'zp_listings';
 
 function nowTs() { return Date.now(); }
 
-// קרא את כל החניות
 export async function getAll() {
-  try {
-    const raw = await AsyncStorage.getItem(KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
-  } catch {
-    return [];
-  }
+  console.log(' Local listings disabled - returning empty array');
+  return [];
 }
 
-// שמירה/עדכון חניה
+// שמירה/עדכון חניה - DISABLED
 export async function upsert(listing) {
-  const arr = await getAll();
-  const idx = arr.findIndex(x => x.id === listing.id);
-  const normalized = {
-    id: listing.id,
-    title: listing.title?.trim() || '',
-    address: listing.address?.trim() || '',
-    pricePerHour: Number(listing.pricePerHour ?? 0),
-    approvalMode: listing.approvalMode === 'manual' ? 'manual' : 'auto',
-    photos: Array.isArray(listing.photos) ? listing.photos : [],
-    latitude: isFinite(listing.latitude) ? Number(listing.latitude) : null,
-    longitude: isFinite(listing.longitude) ? Number(listing.longitude) : null,
-    // הכי חשוב: ברירת מחדל ACTIVE אם לא הוגדר
-    status: listing.status || 'active',
-    createdAt: listing.createdAt || nowTs(),
-    updatedAt: nowTs(),
-  };
-  if (idx >= 0) arr[idx] = { ...arr[idx], ...normalized };
-  else arr.push(normalized);
-  await AsyncStorage.setItem(KEY, JSON.stringify(arr));
-  return normalized;
+  console.log(' Local listings disabled - not saving');
+  return listing; // מחזיר את הנתונים כמו שהם
 }
 
-// שינוי סטטוס (הפעל/השהה)
+// שינוי סטטוס - DISABLED
 export async function setStatus(id, status) {
-  const arr = await getAll();
-  const idx = arr.findIndex(x => x.id === id);
-  if (idx < 0) return null;
-  arr[idx].status = status;
-  arr[idx].updatedAt = nowTs();
-  await AsyncStorage.setItem(KEY, JSON.stringify(arr));
-  return arr[idx];
+  console.log('📝 Local listings disabled - not updating status');
+  return null;
 }
 
 export async function getById(id) {
-  const arr = await getAll();
-  return arr.find(x => x.id === id) || null;
+  console.log('📝 Local listings disabled - returning null');
+  return null;
 }
 
 // עזר לחיפוש: מסנן לפי מילת חיפוש/מרחק

@@ -1,14 +1,10 @@
 // screens/OwnerApplyScreen.js
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, TextInput, Alert, ScrollView, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '@shopify/restyle';
-import { useAuthContext } from '../contexts/ServerOnlyAuthContext';
 import api from '../utils/api';
 import ZpButton from '../components/ui/ZpButton';
-
-const PROFILE_KEY = 'profile';
-const OWNER_APP_KEY = 'owner_application';
+import { useAuth } from '../contexts/AuthContext';
 
 function emailValid(email) {
   if (!email) return false;
@@ -19,24 +15,43 @@ function emailValid(email) {
 export default function OwnerApplyScreen({ navigation }) {
   const theme = useTheme();
   const styles = makeStyles(theme);
-  const { isAuthenticated, user } = useAuthContext();
+  const { user, isAuthenticated } = useAuth();
 
   const [name, setName]   = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
+  const [city, setCity] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(true);
 
+  // Auto-fill פרטים עבור משתמשים מחוברים
   useEffect(() => {
-    (async () => {
-      const raw = await AsyncStorage.getItem(PROFILE_KEY);
-      if (raw) {
-        const p = JSON.parse(raw);
-        if (p.name) setName(p.name);
-        if (p.email) setEmail(p.email);
+    const loadUserData = async () => {
+      if (isAuthenticated && user) {
+        console.log('📋 Auto-filling form for authenticated user:', user.email);
+        
+        // מילוי אוטומטי של פרטים קיימים
+        setName(user.name || '');
+        setEmail(user.email || '');
+        
+        // ניסיון לטעון פרטים נוספים מהפרופיל
+        try {
+          const profileResponse = await api.get('/api/profile');
+          if (profileResponse.data.success && profileResponse.data.data) {
+            const profile = profileResponse.data.data;
+            setPhone(profile.phone || '');
+            // לא ממלאים כתובת ועיר אוטומטית כי זה ספציפי לחניה
+          }
+        } catch (error) {
+          console.log('Could not load profile data for auto-fill:', error);
+        }
       }
-    })();
-  }, []);
+      setLoading(false);
+    };
+    
+    loadUserData();
+  }, [isAuthenticated, user]);
 
   const submit = useCallback(async () => {
     if (submitting) return;
@@ -46,62 +61,75 @@ export default function OwnerApplyScreen({ navigation }) {
     if (!name.trim())  { Alert.alert('שגיאה', 'נא להזין שם מלא.'); return; }
     if (!emailValid(email)) { Alert.alert('שגיאה', 'אימייל לא תקין.'); return; }
     if (!phone.trim()) { Alert.alert('שגיאה', 'נא להזין טלפון.'); return; }
-    if (!address.trim()) { Alert.alert('שגיאה', 'נא להזין כתובת חניה.'); return; }
+    if (!address.trim()) { Alert.alert('שגיאה', 'נא להזין כתובת מלאה.'); return; }
+    if (!city.trim()) { Alert.alert('שגיאה', 'נא להזין עיר.'); return; }
 
     try {
       setSubmitting(true);
 
-      // שמירה מקומית (לתצוגה מיידית)
-      const profileRaw = await AsyncStorage.getItem(PROFILE_KEY);
-      const prev = profileRaw ? JSON.parse(profileRaw) : {};
-
-      const profile = {
-        ...prev,
-        name: name.trim(),
+      // בדיקה ראשונה: האם כבר יש בקשה עם פרטים אלה?
+      console.log('🔍 Checking for existing requests...');
+      const checkResponse = await api.post('/api/owner/check-existing', {
         email: email.trim(),
-        owner_status: 'pending',
-        roles: Array.isArray(prev.roles)
-          ? Array.from(new Set([...prev.roles, 'owner']))
-          : ['seeker', 'owner'],
-      };
-
-      const application = {
-        id: `oa-${Date.now()}`,
-        name: profile.name,
-        email: profile.email,
-        phone: phone.trim(),
-        address: address.trim(),
-        createdAt: new Date().toISOString(),
-        status: 'pending',
-      };
-
-      await Promise.all([
-        AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile)),
-        AsyncStorage.setItem(OWNER_APP_KEY, JSON.stringify(application)),
-      ]);
-
-      // שליחה לשרת - בקשה פשוטה עם פרטי הבעלים
-      await api.post('/api/owner/listing-requests', {
-        title: `חניה של ${name.trim()}`,
-        address: address.trim(),
-        lat: 32.0853, // ברירת מחדל - תל אביב (ניתן לשנות בעתיד)
-        lng: 34.7818,
-        priceHr: 15, // ברירת מחדל
-        description: `בקשה מ-${name.trim()}`,
         phone: phone.trim()
       });
 
-      Alert.alert('הבקשה נשלחה', 'נעדכן אותך לאחר האישור.', [
+      if (checkResponse.data.exists) {
+        console.log('⚠️ Existing request found:', checkResponse.data);
+        Alert.alert(
+          'בקשה קיימת',
+          checkResponse.data.message || 'כבר קיימת בקשה עם פרטים אלה',
+          [{ text: 'הבנתי', onPress: () => navigation.replace('OwnerIntro') }]
+        );
+        return;
+      }
+
+      // אם אין בקשה קיימת - ממשיכים כרגיל
+      console.log('✅ No existing request found, proceeding with new application');
+      
+      // הערה חשובה: המערכת תקשר את הבקשה למשתמש הקיים אם הוא מחובר
+      const requestData = {
+        name: name.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+        city: city.trim()
+      };
+      
+      if (isAuthenticated) {
+        console.log('📝 Submitting owner request for authenticated user');
+        // הבקשה תאוגד אוטומטית עם המשתמש הקיים
+      }
+      
+      await api.post('/api/owner/apply', requestData);
+      
+      const successMessage = isAuthenticated 
+        ? `הבקשה נשלחה בהצלחה! הנתונים שלך כמחפש חניה נשמרו.\n\nנעדכן אותך לאחר אישור הבקשה.`
+        : 'הבקשה נשלחה בהצלחה! נעדכן אותך לאחר האישור.';
+      
+      Alert.alert('בקשה נשלחה', successMessage, [
         { text: 'אשר', onPress: () => navigation.replace('OwnerIntro') }
       ]);
-    } catch (e) {
-      console.error('owner apply error', e);
-      const errorMsg = e.response?.data?.error || 'לא ניתן לשלוח כעת, נסה שוב.';
-      Alert.alert('שגיאה', errorMsg);
+    } catch (error) {
+      console.error('Submit error:', error);
+      if (error.response?.status === 400 && error.response?.data?.error === 'Missing email or phone') {
+        Alert.alert('שגיאה', 'נא למלא אימייל וטלפון');
+      } else {
+        Alert.alert('שגיאה', 'אירעה שגיאה בשליחת הבקשה.');
+      }
     } finally {
       setSubmitting(false);
     }
-  }, [name, email, phone, address, navigation, submitting, isAuthenticated]);
+  }, [name, email, phone, address, city, navigation, submitting, isAuthenticated]);
+
+  if (loading) {
+    return (
+      <View style={[styles.wrap, { flex: 1, justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
+        <Text style={[styles.label, { marginTop: 16, textAlign: 'center' }]}>טוען נתונים...</Text>
+      </View>
+    );
+  }
 
   return (
     <KeyboardAvoidingView style={{ flex:1 }} behavior={Platform.select({ ios:'padding' })}>
@@ -111,22 +139,24 @@ export default function OwnerApplyScreen({ navigation }) {
         <View style={styles.card}>
           <Text style={styles.label}>שם מלא</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, isAuthenticated && user?.name && { backgroundColor: theme.colors.border }]}
             value={name}
             onChangeText={setName}
             placeholder="לדוגמה: ישראל ישראלי"
             placeholderTextColor={theme.colors.subtext}
+            editable={!(isAuthenticated && user?.name)} // לא ניתן לעריכה אם מילוי אוטומטי
           />
 
           <Text style={styles.label}>אימייל</Text>
           <TextInput
-            style={styles.input}
+            style={[styles.input, isAuthenticated && user?.email && { backgroundColor: theme.colors.border }]}
             value={email}
             onChangeText={setEmail}
             placeholder="you@example.com"
             placeholderTextColor={theme.colors.subtext}
             keyboardType="email-address"
             autoCapitalize="none"
+            editable={!(isAuthenticated && user?.email)} // לא ניתן לעריכה אם מילוי אוטומטי
           />
 
           <Text style={styles.label}>טלפון <Text style={{ color: theme.colors.error }}>*</Text></Text>
@@ -139,12 +169,21 @@ export default function OwnerApplyScreen({ navigation }) {
             keyboardType="phone-pad"
           />
 
-          <Text style={styles.label}>כתובת חניה (ראשית)</Text>
+          <Text style={styles.label}>כתובת מלאה</Text>
           <TextInput
             style={styles.input}
             value={address}
             onChangeText={setAddress}
-            placeholder="רחוב, מספר, עיר"
+            placeholder="רחוב, מספר בית"
+            placeholderTextColor={theme.colors.subtext}
+          />
+
+          <Text style={styles.label}>עיר</Text>
+          <TextInput
+            style={styles.input}
+            value={city}
+            onChangeText={setCity}
+            placeholder="תל אביב, חיפה, ירושלים..."
             placeholderTextColor={theme.colors.subtext}
           />
         </View>

@@ -11,7 +11,7 @@ export default function OwnerPricingScreen({ route, navigation }) {
   const { id } = route.params;
   const theme = useTheme();
   const styles = makeStyles(theme);
-  const { token } = useAuth();
+  const { token, logout, handleUserBlocked } = useAuth();
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -54,6 +54,13 @@ export default function OwnerPricingScreen({ route, navigation }) {
         }
       }
     } catch (error) {
+      // בדיקה אם המשתמש חסום
+      if (error.isUserBlocked || error.response?.status === 403) {
+        console.log('🚫 User blocked in pricing - using central handler');
+        await handleUserBlocked(navigation, Alert);
+        return;
+      }
+      
       console.error('Load parking error:', error);
       Alert.alert('שגיאה', 'לא הצלחנו לטעון את פרטי החניה');
     } finally {
@@ -65,23 +72,35 @@ export default function OwnerPricingScreen({ route, navigation }) {
     // בדיקה שכל השדות מלאים
     const allFilled = Object.values(pricing).every(val => val && !isNaN(parseFloat(val)));
     if (!allFilled) {
-      Alert.alert('שגיאה', 'יש למלא את כל המחירים');
+      Alert.alert(
+        'מחירון לא מלא', 
+        'יש למלא את כל המחירים (12 שעות).\n\n⚠️ חשוב: ללא מחירון מלא החניה שלך לא תופיע בתוצאות החיפוש ללקוחות!',
+        [{ text: 'הבנתי', style: 'default' }]
+      );
       return;
     }
 
     setSaving(true);
     try {
-      await api.patch(`/api/owner/parkings/${id}`, {
+      console.log('🔄 Frontend: Saving pricing for parking', id);
+      console.log('💰 Frontend: Pricing data to save:', pricing);
+      console.log('📤 Frontend: JSON to send:', JSON.stringify(pricing));
+      
+      const response = await api.patch(`/api/owner/parkings/${id}`, {
         pricing: JSON.stringify(pricing)
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });
       
+      console.log('✅ Frontend: Pricing saved successfully:', response.data);
+      
       Alert.alert('הצלחה', 'המחירון עודכן בהצלחה', [
         { text: 'אישור', onPress: () => navigation.goBack() }
       ]);
     } catch (error) {
-      console.error('Save pricing error:', error);
+      console.error('❌ Frontend: Save pricing error:', error);
+      console.error('❌ Frontend: Error response:', error.response?.data);
+      console.error('❌ Frontend: Error status:', error.response?.status);
       Alert.alert('שגיאה', 'לא הצלחנו לשמור את המחירון');
     } finally {
       setSaving(false);

@@ -3,19 +3,19 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, FlatList } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
+import { useNavigation } from '@react-navigation/native';
 import { useTheme } from '@shopify/restyle';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import ZpButton from '../components/ui/ZpButton';
 import { osmAutocomplete } from '../utils/osm';
 import { useAuth } from '../contexts/AuthContext';
+import { useNavigationContext } from '../contexts/NavigationContext';
 import { getUserProfile, updateUserProfile, getUserStats, validatePhoneNumber, validateName, getDefaultAvatar } from '../services/api/profile';
 import { getUserVehicles, createVehicle, updateVehicle, deleteVehicle, setDefaultVehicle, formatLicensePlate, validateLicensePlate } from '../services/api/vehicles';
 
-const PROFILE_KEY = 'profile';
-const VEHICLES_KEY = 'vehicles';
-const SAVED_PLACES_KEY = 'savedPlaces_v1';
+// הוסרו AsyncStorage keys - עובדים רק מהשרת
 
 const PAYMENT_OPTIONS = [
   { key: 'card',     label: 'כרטיס אשראי', icon: 'card' },
@@ -38,9 +38,15 @@ function iconForType(type) {
 const normLabel = (s='') => s.trim().toLowerCase();
 
 export default function ProfileScreen() {
+  const navigation = useNavigation();
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = makeStyles(theme);
-  const { user, isAuthenticated } = useAuth();
+  const { user, isAuthenticated, logout } = useAuth();
+  const { clearIntendedDestination } = useNavigationContext();
+
+  // Debug log for ProfileScreen access
+  console.log('👤 ProfileScreen loaded - isAuthenticated:', isAuthenticated, 'user exists:', !!user);
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -78,7 +84,7 @@ export default function ProfileScreen() {
         getUserProfile(),
         getUserVehicles(),
         getUserStats(),
-        AsyncStorage.getItem(SAVED_PLACES_KEY), // מקומות שמורים עדיין מקומיים
+        // TODO: העברת מקומות שמורים לשרת
       ]);
 
       // עדכון פרופיל
@@ -148,9 +154,7 @@ export default function ProfileScreen() {
       });
 
       if (result.success) {
-        // שמירה מקומית גם (לתשלום)
-        const localProfile = { name: name.trim(), email: email.trim(), payment };
-        await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(localProfile));
+        // הוסרנו שמירה מקומית - רק שרת
         
         Alert.alert('נשמר', 'הפרופיל עודכן בהצלחה.');
       } else {
@@ -354,7 +358,7 @@ export default function ProfileScreen() {
     }
 
     setSavedPlaces(next);
-    await AsyncStorage.setItem(SAVED_PLACES_KEY, JSON.stringify(next));
+    // TODO: שמירה בשרת
 
     setPlaceType(null);
     setCustomLabel('');
@@ -368,8 +372,42 @@ export default function ProfileScreen() {
   const removePlace = useCallback(async (id) => {
     const next = savedPlaces.filter(p => p.id !== id);
     setSavedPlaces(next);
-    await AsyncStorage.setItem(SAVED_PLACES_KEY, JSON.stringify(next));
+    // TODO: מחיקה בשרת
   }, [savedPlaces]);
+
+  // פונקציית התנתקות
+  const handleLogout = useCallback(async () => {
+    Alert.alert(
+      'התנתקות',
+      'האם אתה בטוח שברצונך להתנתק?',
+      [
+        { text: 'ביטול', style: 'cancel' },
+        {
+          text: 'התנתק',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              console.log('🚪 User requested logout from ProfileScreen');
+              
+              // ניקוי NavigationContext לפני logout
+              await clearIntendedDestination();
+              console.log('🎯 Cleared navigation intended destinations');
+              
+              await logout();
+              console.log('✅ Logout completed successfully');
+              navigation.reset({
+                index: 0,
+                routes: [{ name: 'Home' }],
+              });
+            } catch (error) {
+              console.error('❌ Logout failed:', error);
+              Alert.alert('שגיאה', 'אירעה שגיאה בהתנתקות. נסה שוב.');
+            }
+          }
+        }
+      ]
+    );
+  }, [logout, navigation, clearIntendedDestination]);
 
   if (loading) {
     return (
@@ -381,7 +419,6 @@ export default function ProfileScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <Text style={styles.header}>הפרופיל שלי</Text>
 
       {/* פרטים אישיים */}
       <View style={styles.card}>
@@ -667,7 +704,21 @@ export default function ProfileScreen() {
         </View>
       )}
 
-      <View style={{ height: theme.spacing.xl }} />
+      {/* כפתור התנתקות */}
+      {isAuthenticated && (
+        <View style={styles.logoutSection}>
+          <TouchableOpacity
+            style={styles.logoutButton}
+            onPress={handleLogout}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Ionicons name="log-out-outline" size={20} color="#FFFFFF" style={styles.logoutIcon} />
+            <Text style={styles.logoutText}>התנתק</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <View style={{ height: Math.max(insets.bottom + 70, theme.spacing.xl) }} />
     </ScrollView>
   );
 }
@@ -896,6 +947,61 @@ function makeStyles(theme) {
       color: colors.subtext,
       textAlign: 'center',
       marginTop: spacing.xs,
+    },
+
+    // Header עם כפתור חזרה
+    headerContainer: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: spacing.lg,
+      paddingBottom: spacing.md,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.border,
+    },
+    backButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: spacing.sm,
+      borderRadius: borderRadii.sm,
+      backgroundColor: colors.surface,
+    },
+    backText: {
+      color: colors.primary,
+      fontWeight: '600',
+      marginLeft: spacing.xs,
+      fontSize: 16,
+    },
+
+    // כפתור התנתקות
+    logoutSection: {
+      marginTop: spacing.xl,
+      paddingTop: spacing.lg,
+      borderTopWidth: 1,
+      borderTopColor: colors.border,
+      alignItems: 'center',
+    },
+    logoutButton: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#DC2626', // אדום
+      paddingVertical: spacing.md,
+      paddingHorizontal: spacing.xl,
+      borderRadius: borderRadii.lg,
+      minWidth: 140,
+      shadowColor: '#DC2626',
+      shadowOpacity: 0.3,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 6,
+    },
+    logoutIcon: {
+      marginRight: spacing.sm,
+    },
+    logoutText: {
+      color: '#FFFFFF',
+      fontSize: 16,
+      fontWeight: '700',
     },
   });
 }
