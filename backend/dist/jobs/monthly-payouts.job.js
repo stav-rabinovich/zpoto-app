@@ -19,21 +19,21 @@ async function processMonthlyPayouts() {
             where: {
                 calculatedAt: {
                     gte: lastMonth,
-                    lte: endOfLastMonth
+                    lte: endOfLastMonth,
                 },
-                payoutProcessed: false
+                payoutProcessed: false,
             },
             include: {
                 booking: {
                     include: {
                         parking: {
                             select: {
-                                ownerId: true
-                            }
-                        }
-                    }
-                }
-            }
+                                ownerId: true,
+                            },
+                        },
+                    },
+                },
+            },
         });
         console.log(`💰 Found ${unpaidCommissions.length} unpaid commissions`);
         if (unpaidCommissions.length === 0) {
@@ -68,25 +68,25 @@ async function processMonthlyPayouts() {
                         status: 'PENDING',
                         paymentMethod: 'bank_transfer',
                         paymentReference: `AUTO_PAYOUT_${ownerId}_${lastMonth.getFullYear()}_${lastMonth.getMonth() + 1}`,
-                        notes: `תשלום אוטומטי עבור ${lastMonth.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' })}`
-                    }
+                        notes: `תשלום אוטומטי עבור ${lastMonth.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' })}`,
+                    },
                 });
                 // עדכון העמלות כמעובדות
                 const commissionIds = commissions.map(c => c.id);
                 await prisma_1.prisma.commission.updateMany({
                     where: {
-                        id: { in: commissionIds }
+                        id: { in: commissionIds },
                     },
                     data: {
                         payoutProcessed: true,
-                        payoutId: payout.id
-                    }
+                        payoutId: payout.id,
+                    },
                 });
                 payoutsCreated.push({
                     ownerId,
                     payoutId: payout.id,
                     amount: totalNetOwnerCents / 100,
-                    commissionsCount: commissions.length
+                    commissionsCount: commissions.length,
                 });
                 console.log(`✅ Payout created for owner ${ownerId}: ID ${payout.id}`);
             }
@@ -102,8 +102,8 @@ async function processMonthlyPayouts() {
             payoutsCreated,
             period: {
                 start: lastMonth.toISOString(),
-                end: endOfLastMonth.toISOString()
-            }
+                end: endOfLastMonth.toISOString(),
+            },
         };
     }
     catch (error) {
@@ -111,7 +111,7 @@ async function processMonthlyPayouts() {
         return {
             success: false,
             error: error?.message || 'Unknown error',
-            payoutsCreated: 0
+            payoutsCreated: 0,
         };
     }
 }

@@ -606,17 +606,39 @@ export default function PaymentScreen({ navigation, route }) {
             </View>
           </View>
 
-          {/* סיכום מחיר - עיצוב נקי */}
+          {/* סיכום מחיר - עיצוב נקי ומפורט */}
           <View style={styles.priceContainer}>
-            <Text style={styles.priceTitle}>פירוט תשלום</Text>
+            <Text style={styles.priceTitle}>פירוט תשלום שקוף</Text>
             
-            {/* עלות חניה */}
+            {/* עלות חניה בסיסית */}
             <View style={styles.priceRow}>
               <Text style={styles.priceLabel}>עלות חניה</Text>
               <Text style={styles.priceValue}>
                 ₪{isExtension 
                   ? (paymentAmount / 1.1).toFixed(2) 
                   : bookingDetails.price.toFixed(2)
+                }
+              </Text>
+            </View>
+            
+            {/* פירוט לאן הולך הכסף - עמלה לזפוטו */}
+            <View style={styles.priceSubRow}>
+              <Text style={styles.priceSubLabel}>• עמלה לזפוטו (15%)</Text>
+              <Text style={styles.priceSubValue}>
+                ₪{isExtension 
+                  ? ((paymentAmount / 1.1) * 0.15).toFixed(2)
+                  : (bookingDetails.price * 0.15).toFixed(2)
+                }
+              </Text>
+            </View>
+            
+            {/* פירוט לאן הולך הכסף - נטו לבעל חניה */}
+            <View style={styles.priceSubRow}>
+              <Text style={styles.priceSubLabel}>• נטו לבעל החניה</Text>
+              <Text style={styles.priceSubValue}>
+                ₪{isExtension 
+                  ? ((paymentAmount / 1.1) * 0.85).toFixed(2)
+                  : (bookingDetails.price * 0.85).toFixed(2)
                 }
               </Text>
             </View>
@@ -632,13 +654,37 @@ export default function PaymentScreen({ navigation, route }) {
               </Text>
             </View>
             
+            {/* הנחת קופון אם יש */}
+            {appliedCoupon && discount && discount.amount && (
+              <View style={styles.priceRow}>
+                <Text style={[styles.priceLabel, styles.discountLabel]}>
+                  הנחת קופון {appliedCoupon.code}
+                </Text>
+                <Text style={[styles.priceValue, styles.discountValue]}>
+                  -₪{discount.amount.toFixed(2)}
+                </Text>
+              </View>
+            )}
+            
             {/* קו הפרדה */}
             <View style={styles.priceDivider} />
             
             {/* סה"כ */}
             <View style={styles.totalPriceRow}>
               <Text style={styles.totalPriceLabel}>סה"כ לתשלום</Text>
-              <Text style={styles.totalPriceValue}>₪{paymentAmount.toFixed(2)}</Text>
+              <Text style={styles.totalPriceValue}>
+                ₪{(appliedCoupon && discount && discount.amount 
+                  ? paymentAmount - discount.amount 
+                  : paymentAmount
+                ).toFixed(2)}
+              </Text>
+            </View>
+            
+            {/* הסבר על השקיפות */}
+            <View style={styles.transparencyNote}>
+              <Text style={styles.transparencyText}>
+                💡 זפוטו מאמינה בשקיפות מלאה - אתה רואה בדיוק לאן הולך כל שקל
+              </Text>
             </View>
           </View>
         </View>
@@ -1397,5 +1443,46 @@ const makeStyles = (colors) => StyleSheet.create({
     color: colors.success,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  
+  // סגנונות חדשים לפירוט מפורט
+  priceSubRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 4,
+    marginLeft: 12,
+  },
+  priceSubLabel: {
+    fontSize: 13,
+    color: colors.subtext,
+    fontWeight: '500',
+  },
+  priceSubValue: {
+    fontSize: 13,
+    color: colors.subtext,
+    fontWeight: '600',
+  },
+  discountLabel: {
+    color: colors.success,
+  },
+  discountValue: {
+    color: colors.success,
+  },
+  transparencyNote: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: colors.primary + '10',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.primary + '20',
+  },
+  transparencyText: {
+    fontSize: 12,
+    color: colors.primary,
+    fontWeight: '500',
+    textAlign: 'center',
+    lineHeight: 16,
   },
 });

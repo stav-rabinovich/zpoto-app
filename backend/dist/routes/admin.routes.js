@@ -163,7 +163,7 @@ r.post('/listing-requests/:id/send-for-signature', async (req, res) => {
     try {
         // שמירת הנתונים עם קואורדינטות מעודכנות
         const updateData = {
-            onboarding: JSON.stringify(onboardingData)
+            onboarding: JSON.stringify(onboardingData),
         };
         // אם יש קואורדינטות מהגיאוקודינג, עדכן גם אותן
         if (onboardingData.lat && onboardingData.lng) {
@@ -202,7 +202,7 @@ r.post('/listing-requests/:id/send-for-signature', async (req, res) => {
             message: 'Data saved successfully. Email configuration needed for sending.',
             email: request.user.email,
             signatureUrl: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/sign/${id}`,
-            note: 'Configure EMAIL_USER and EMAIL_PASS in .env to enable email sending'
+            note: 'Configure EMAIL_USER and EMAIL_PASS in .env to enable email sending',
         });
     }
     catch (e) {
@@ -225,8 +225,8 @@ r.get('/users/:id/temp-password', async (req, res) => {
                 name: true,
                 role: true,
                 createdAt: true,
-                updatedAt: true
-            }
+                updatedAt: true,
+            },
         });
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
@@ -240,7 +240,7 @@ r.get('/users/:id/temp-password', async (req, res) => {
         if (!isRecentlyCreated) {
             return res.json({
                 hasRecentPassword: false,
-                message: 'No recent temporary password available. User created more than 24 hours ago.'
+                message: 'No recent temporary password available. User created more than 24 hours ago.',
             });
         }
         // חיפוש הסיסמה הזמנית שנוצרה בטרמינל
@@ -252,7 +252,7 @@ r.get('/users/:id/temp-password', async (req, res) => {
             name: user.name,
             message: 'הסיסמה הזמנית נוצרה בעת אישור הבקשה. בדוק בטרמינל הודעה עם הפורמט: zpoto######',
             note: 'אם השכחת את הסיסמה, השתמש בכפתור "שנה סיסמה" למטה ליצירת סיסמה חדשה',
-            terminalHint: 'חפש בטרמינל: "Generated temporary password for owner"'
+            terminalHint: 'חפש בטרמינל: "Generated temporary password for owner"',
         });
     }
     catch (e) {
@@ -309,7 +309,7 @@ r.get('/parkings/:id', async (req, res, next) => {
                         createdAt: true,
                         password: true, // נכלול כדי לבדוק אם יש סיסמה
                         isBlocked: true, // סטטוס חסימה
-                    }
+                    },
                 },
                 bookings: {
                     select: {
@@ -322,19 +322,19 @@ r.get('/parkings/:id', async (req, res, next) => {
                         user: {
                             select: {
                                 name: true,
-                                email: true
-                            }
-                        }
+                                email: true,
+                            },
+                        },
                     },
                     orderBy: { createdAt: 'desc' },
-                    take: req.query.includeFullBookingHistory === 'true' ? undefined : 10
+                    take: req.query.includeFullBookingHistory === 'true' ? undefined : 10,
                 },
                 _count: {
                     select: {
-                        bookings: true
-                    }
-                }
-            }
+                        bookings: true,
+                    },
+                },
+            },
         });
         if (!parking) {
             return res.status(404).json({ error: 'Parking not found' });
@@ -345,10 +345,10 @@ r.get('/parkings/:id', async (req, res, next) => {
             const listingRequest = await prisma_1.prisma.listingRequest.findFirst({
                 where: {
                     userId: parking.owner.id,
-                    status: 'APPROVED'
+                    status: 'APPROVED',
                 },
                 orderBy: { createdAt: 'desc' },
-                select: { onboarding: true }
+                select: { onboarding: true },
             });
             if (listingRequest?.onboarding) {
                 try {
@@ -364,13 +364,15 @@ r.get('/parkings/:id', async (req, res, next) => {
         const { password, ...safeOwner } = parking.owner || {};
         res.json({
             ...parking,
-            owner: parking.owner ? {
-                ...safeOwner,
-                hasPassword: !!password,
-                isBlocked: parking.owner.isBlocked
-                // לא מחזירים את הסיסמה המוצפנת כלל - זה חסר תועלת
-            } : null,
-            onboardingData // הוספת נתוני האונבורדינג
+            owner: parking.owner
+                ? {
+                    ...safeOwner,
+                    hasPassword: !!password,
+                    isBlocked: parking.owner.isBlocked,
+                    // לא מחזירים את הסיסמה המוצפנת כלל - זה חסר תועלת
+                }
+                : null,
+            onboardingData, // הוספת נתוני האונבורדינג
         });
     }
     catch (e) {
@@ -409,13 +411,13 @@ r.patch('/parkings/:id/owner-password', async (req, res, next) => {
         const { newPassword } = req.body;
         if (!newPassword || typeof newPassword !== 'string' || newPassword.length < 6) {
             return res.status(400).json({
-                error: 'New password is required and must be at least 6 characters'
+                error: 'New password is required and must be at least 6 characters',
             });
         }
         // מציאת החניה ובעליה
         const parking = await prisma_1.prisma.parking.findUnique({
             where: { id: parkingId },
-            include: { owner: true }
+            include: { owner: true },
         });
         if (!parking) {
             return res.status(404).json({ error: 'Parking not found' });
@@ -435,15 +437,15 @@ r.patch('/parkings/:id/owner-password', async (req, res, next) => {
                 name: true,
                 email: true,
                 phone: true,
-                role: true
-            }
+                role: true,
+            },
         });
         console.log(`✅ Admin updated owner password for parking ${parkingId}, owner: ${updatedOwner.email}`);
         res.json({
             success: true,
             message: 'Owner password updated successfully',
             owner: updatedOwner,
-            newPasswordPreview: `${newPassword.substring(0, 6)}...`
+            newPasswordPreview: `${newPassword.substring(0, 6)}...`,
         });
     }
     catch (e) {
@@ -471,8 +473,8 @@ r.patch('/users/:id/block', async (req, res, next) => {
                 id: true,
                 email: true,
                 name: true,
-                isBlocked: true
-            }
+                isBlocked: true,
+            },
         });
         // אם חוסמים - מכבים את כל החניות של הבעלים
         if (block) {
@@ -481,22 +483,22 @@ r.patch('/users/:id/block', async (req, res, next) => {
                 data: {
                     isActive: false,
                     // מאפסים שעות פעילות (availability) כדי שיגדיר מחדש אחרי שחרור
-                    availability: null
-                }
+                    availability: null,
+                },
             });
         }
         else {
             // אם משחררים - מפעילים את החניות אבל שעות הפעילות נשארות null
             await prisma_1.prisma.parking.updateMany({
                 where: { ownerId: userId },
-                data: { isActive: true }
+                data: { isActive: true },
             });
         }
         console.log(`${block ? '🚫 Blocked' : '✅ Unblocked'} user ${user.email} (ID: ${userId})`);
         res.json({
             success: true,
             message: block ? 'User blocked successfully' : 'User unblocked successfully',
-            user
+            user,
         });
     }
     catch (e) {
@@ -546,8 +548,8 @@ r.get('/parkings', async (_req, res, next) => {
                             },
                             orderBy: { createdAt: 'desc' },
                             take: 1,
-                        }
-                    }
+                        },
+                    },
                 },
                 bookings: {
                     select: {
@@ -559,19 +561,19 @@ r.get('/parkings', async (_req, res, next) => {
                         user: {
                             select: {
                                 name: true,
-                                email: true
-                            }
-                        }
+                                email: true,
+                            },
+                        },
                     },
-                    orderBy: { createdAt: 'desc' }
+                    orderBy: { createdAt: 'desc' },
                 },
                 _count: {
                     select: {
-                        bookings: true
-                    }
-                }
+                        bookings: true,
+                    },
+                },
             },
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: 'desc' },
         });
         // חישוב נתונים מסונכרנים לכל חניה
         const parkingsWithStats = parkings.map(parking => {
@@ -590,13 +592,9 @@ r.get('/parkings', async (_req, res, next) => {
                 return total + (booking.totalPriceCents || 0);
             }, 0);
             // חישוב ממוצע הכנסה לשעה
-            const averageRevenuePerHour = totalParkingHours > 0
-                ? (totalRevenueCents / 100) / totalParkingHours
-                : 0;
+            const averageRevenuePerHour = totalParkingHours > 0 ? totalRevenueCents / 100 / totalParkingHours : 0;
             // חישוב ממוצע משך חניה
-            const averageParkingDuration = confirmedBookings.length > 0
-                ? totalParkingHours / confirmedBookings.length
-                : 0;
+            const averageParkingDuration = confirmedBookings.length > 0 ? totalParkingHours / confirmedBookings.length : 0;
             // חישוב הזמנות השבוע האחרון
             const weekAgo = new Date();
             weekAgo.setDate(weekAgo.getDate() - 7);
@@ -617,8 +615,8 @@ r.get('/parkings', async (_req, res, next) => {
                     totalRevenueILS: (totalRevenueCents / 100).toFixed(2),
                     averageRevenuePerHour: averageRevenuePerHour.toFixed(2),
                     recentBookingsWeek: recentBookings,
-                    utilizationRate: totalParkingHours > 0 ? ((totalParkingHours / (24 * 7)) * 100).toFixed(1) : '0' // אחוז ניצול שבועי משוער
-                }
+                    utilizationRate: totalParkingHours > 0 ? ((totalParkingHours / (24 * 7)) * 100).toFixed(1) : '0', // אחוז ניצול שבועי משוער
+                },
             };
         });
         console.log(`🏢 Admin parkings loaded: ${parkingsWithStats.length} parkings with full stats`);
@@ -755,11 +753,11 @@ r.get('/users', async (req, res, next) => {
                         bookings: true,
                         favorites: true,
                         vehicles: true,
-                        ownedParkings: true
-                    }
-                }
+                        ownedParkings: true,
+                    },
+                },
             },
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: 'desc' },
         });
         // ספירה כוללת
         const total = await prisma_1.prisma.user.count({ where });
@@ -767,15 +765,19 @@ r.get('/users', async (req, res, next) => {
         const usersWithStats = users.map(user => ({
             ...user,
             isSocialLogin: !!(user.googleId || user.facebookId || user.appleId),
-            registrationSource: user.googleId ? 'google' :
-                user.facebookId ? 'facebook' :
-                    user.appleId ? 'apple' : 'email',
+            registrationSource: user.googleId
+                ? 'google'
+                : user.facebookId
+                    ? 'facebook'
+                    : user.appleId
+                        ? 'apple'
+                        : 'email',
             stats: {
                 totalBookings: user._count.bookings,
                 totalFavorites: user._count.favorites,
                 totalVehicles: user._count.vehicles,
-                totalParkings: user._count.ownedParkings
-            }
+                totalParkings: user._count.ownedParkings,
+            },
         }));
         res.json({
             data: usersWithStats,
@@ -783,8 +785,8 @@ r.get('/users', async (req, res, next) => {
                 page: Number(page),
                 limit: Number(limit),
                 total,
-                pages: Math.ceil(total / Number(limit))
-            }
+                pages: Math.ceil(total / Number(limit)),
+            },
         });
     }
     catch (e) {
@@ -807,12 +809,12 @@ r.get('/users/:id', async (req, res, next) => {
                             select: {
                                 id: true,
                                 title: true,
-                                address: true
-                            }
-                        }
+                                address: true,
+                            },
+                        },
                     },
                     orderBy: { createdAt: 'desc' },
-                    take: req.query.includeFullBookingHistory === 'true' ? undefined : 10
+                    take: req.query.includeFullBookingHistory === 'true' ? undefined : 10,
                 },
                 favorites: {
                     include: {
@@ -820,10 +822,10 @@ r.get('/users/:id', async (req, res, next) => {
                             select: {
                                 id: true,
                                 title: true,
-                                address: true
-                            }
-                        }
-                    }
+                                address: true,
+                            },
+                        },
+                    },
                 },
                 vehicles: true,
                 ownedParkings: {
@@ -832,15 +834,15 @@ r.get('/users/:id', async (req, res, next) => {
                         title: true,
                         address: true,
                         isActive: true,
-                        createdAt: true
-                    }
+                        createdAt: true,
+                    },
                 },
                 savedPlaces: true,
                 recentSearches: {
                     orderBy: { createdAt: 'desc' },
-                    take: 5
-                }
-            }
+                    take: 5,
+                },
+            },
         });
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
@@ -872,15 +874,15 @@ r.get('/stats/users', async (req, res, next) => {
         const weekAgo = new Date();
         weekAgo.setDate(weekAgo.getDate() - 7);
         const newUsersThisWeek = await prisma_1.prisma.user.count({
-            where: { createdAt: { gte: weekAgo } }
+            where: { createdAt: { gte: weekAgo } },
         });
         // משתמשים פעילים (עם הזמנות)
         const activeUsers = await prisma_1.prisma.user.count({
             where: {
                 bookings: {
-                    some: {}
-                }
-            }
+                    some: {},
+                },
+            },
         });
         res.json({
             data: {
@@ -888,19 +890,19 @@ r.get('/stats/users', async (req, res, next) => {
                 byRole: {
                     admin: totalAdmins,
                     owner: totalOwners,
-                    user: totalRegularUsers
+                    user: totalRegularUsers,
                 },
                 byRegistrationSource: {
                     email: totalUsers - googleUsers - facebookUsers - appleUsers,
                     google: googleUsers,
                     facebook: facebookUsers,
-                    apple: appleUsers
+                    apple: appleUsers,
                 },
                 activity: {
                     newThisWeek: newUsersThisWeek,
-                    activeUsers
-                }
-            }
+                    activeUsers,
+                },
+            },
         });
     }
     catch (e) {
@@ -925,12 +927,12 @@ r.put('/users/:id/role', async (req, res, next) => {
                 id: true,
                 email: true,
                 name: true,
-                role: true
-            }
+                role: true,
+            },
         });
         res.json({
             data: updatedUser,
-            message: `User role updated to ${role}`
+            message: `User role updated to ${role}`,
         });
     }
     catch (e) {
@@ -948,7 +950,7 @@ r.delete('/parkings/:id/delete-and-reset-owner', async (req, res, next) => {
         // מצא את החניה ובעל החניה
         const parking = await prisma_1.prisma.parking.findUnique({
             where: { id: parkingId },
-            include: { owner: true }
+            include: { owner: true },
         });
         if (!parking) {
             return res.status(404).json({ error: 'Parking not found' });
@@ -956,12 +958,12 @@ r.delete('/parkings/:id/delete-and-reset-owner', async (req, res, next) => {
         const ownerId = parking.ownerId;
         // מחק את החניה (זה ימחק אוטומטית הזמנות קשורות)
         await prisma_1.prisma.parking.delete({
-            where: { id: parkingId }
+            where: { id: parkingId },
         });
         console.log(`✅ חניה ${parkingId} נמחקה`);
         // בדוק אם לבעלים יש עוד חניות
         const remainingParkings = await prisma_1.prisma.parking.count({
-            where: { ownerId }
+            where: { ownerId },
         });
         if (remainingParkings === 0) {
             console.log(`👤 בעל החניה ${ownerId} לא נותר לו חניות - מחזיר למצב מחפש חניה`);
@@ -973,7 +975,7 @@ r.delete('/parkings/:id/delete-and-reset-owner', async (req, res, next) => {
             message: 'Parking deleted and owner reset to seeker status',
             parkingId,
             ownerId,
-            remainingParkings
+            remainingParkings,
         });
     }
     catch (e) {
@@ -1079,7 +1081,7 @@ r.post('/coupons', async (req, res, next) => {
         // Validation
         if (!code || !discountType || !discountValue || !applyTo || !validUntil) {
             return res.status(400).json({
-                error: 'שדות חובה חסרים: code, discountType, discountValue, applyTo, validUntil'
+                error: 'שדות חובה חסרים: code, discountType, discountValue, applyTo, validUntil',
             });
         }
         const coupon = await coupon_service_1.couponService.createCoupon({
@@ -1089,7 +1091,7 @@ r.post('/coupons', async (req, res, next) => {
             applyTo,
             validUntil: new Date(validUntil),
             maxUsage: maxUsage ? Number(maxUsage) : undefined,
-            createdById: req.userId // מגיע מה-middleware
+            createdById: req.userId, // מגיע מה-middleware
         });
         res.status(201).json(coupon);
     }

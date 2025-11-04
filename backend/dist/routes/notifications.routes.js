@@ -51,8 +51,8 @@ r.get('/', auth_1.auth, async (req, res, next) => {
         res.json({
             data: notifications.map(n => ({
                 ...n,
-                data: n.data ? JSON.parse(n.data) : null
-            }))
+                data: n.data ? JSON.parse(n.data) : null,
+            })),
         });
     }
     catch (e) {
@@ -129,7 +129,7 @@ r.post('/test', auth_1.auth, async (req, res, next) => {
             type: 'test',
             title: '🧪 התראת בדיקה',
             body: 'זוהי התראת בדיקה מהמערכת',
-            data: { timestamp: new Date().toISOString() }
+            data: { timestamp: new Date().toISOString() },
         });
         res.json({ data: notification });
     }

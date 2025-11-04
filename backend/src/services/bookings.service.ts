@@ -16,7 +16,7 @@ import {
 /**
  * יצירת עמלה להזמנה - עם רצפה של 1₪ לשעה
  */
-async function createCommissionForBooking(booking: any) {
+async function createCommissionForBooking(booking: any, originalPrice?: number) {
   console.log(`💰 Creating commission for booking ${booking.id}`);
 
   // קבלת פרטי החניה כולל בעל החניה
@@ -33,14 +33,21 @@ async function createCommissionForBooking(booking: any) {
   const ms = booking.endTime.getTime() - booking.startTime.getTime();
   const hours = Math.ceil(ms / (1000 * 60 * 60));
 
-  // חישוב עמלה מדורג לפי שעות - 15% בלבד (ללא רצפה)
+  // חישוב עלות החניה הברוטו (לפני דמי תפעול) - זה הבסיס לעמלה
+  // הכלל: העמלה תמיד 15% מהכנסת בעל החניה (מחיר שעתי × שעות)
   const COMMISSION_RATE = 0.15;
-  const totalPriceCents = booking.totalPriceCents;
+  const parkingCostCents = Math.round(parking.priceHr * hours * 100);
+  
+  console.log(`💰 Commission base calculation:`);
+  console.log(`   Hourly rate: ₪${parking.priceHr}`);
+  console.log(`   Hours: ${hours}`);
+  console.log(`   Parking cost (gross): ₪${parkingCostCents / 100}`);
+  console.log(`   Commission rate: ${COMMISSION_RATE * 100}%`);
 
   let commissionCents = 0;
 
   // אם המחיר הכולל הוא 0 (חינם), אין עמלה
-  if (totalPriceCents === 0) {
+  if (booking.totalPriceCents === 0) {
     commissionCents = 0;
     console.log(`💰 Free booking - no commission`);
   } else {
@@ -86,26 +93,26 @@ async function createCommissionForBooking(booking: any) {
 
       console.log(`💰 ✅ Total tiered commission: ₪${commissionCents / 100}`);
     } else {
-      // אין מחירון מדורג - חישוב פשוט 15% בלבד
+      // אין מחירון מדורג - חישוב פשוט 15% בלבד מעלות החניה
       console.log(`💰 ⚠️ No tiered pricing, using simple calculation`);
-      commissionCents = Math.round(totalPriceCents * COMMISSION_RATE);
+      commissionCents = Math.round(parkingCostCents * COMMISSION_RATE);
 
       console.log(`💰 Commission calculation:`, {
-        totalPriceCents,
+        parkingCostCents: `₪${parkingCostCents / 100}`,
         hours,
-        commission: `₪${commissionCents / 100} (15%)`,
-        rate: '15% only - no floor',
+        commission: `₪${commissionCents / 100} (15% מעלות החניה)`,
+        rate: '15% of parking cost only',
       });
     }
   }
 
-  const netOwnerCents = totalPriceCents - commissionCents;
+  const netOwnerCents = parkingCostCents - commissionCents;
 
   // יצירת רשומת עמלה
   const commission = await prisma.commission.create({
     data: {
       bookingId: booking.id,
-      totalPriceCents,
+      totalPriceCents: parkingCostCents, // עלות החניה בלבד (לא המחיר הסופי שהלקוח שילם)
       commissionCents,
       netOwnerCents,
       commissionRate: COMMISSION_RATE,

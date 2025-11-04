@@ -35,7 +35,10 @@ async function login(email, password) {
     if (!ok)
         throw new Error('INVALID_CREDENTIALS');
     const token = jsonwebtoken_1.default.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '7d' });
-    return { user: { id: user.id, email: user.email, role: user.role, createdAt: user.createdAt }, token };
+    return {
+        user: { id: user.id, email: user.email, role: user.role, createdAt: user.createdAt },
+        token,
+    };
 }
 /**
  * OAuth Social Login - יצירת או התחברות משתמש עם נתוני רשת חברתית
@@ -52,8 +55,8 @@ async function socialLogin(provider, socialData) {
         whereConditions.push({ appleId: socialId });
     let user = await prisma_1.prisma.user.findFirst({
         where: {
-            OR: whereConditions
-        }
+            OR: whereConditions,
+        },
     });
     // אם לא נמצא משתמש לפי provider ID, חפש לפי email
     if (!user && email) {
@@ -74,7 +77,7 @@ async function socialLogin(provider, socialData) {
                 updateData.profilePicture = photo;
             user = await prisma_1.prisma.user.update({
                 where: { id: user.id },
-                data: updateData
+                data: updateData,
             });
         }
     }
@@ -88,7 +91,7 @@ async function socialLogin(provider, socialData) {
             name: name || null,
             profilePicture: photo || null,
             // אין סיסמה למשתמשי OAuth
-            password: await bcryptjs_1.default.hash(Math.random().toString(36), 10)
+            password: await bcryptjs_1.default.hash(Math.random().toString(36), 10),
         };
         // הוסף provider ID
         if (provider === 'google')
@@ -98,7 +101,7 @@ async function socialLogin(provider, socialData) {
         if (provider === 'apple')
             createData.appleId = socialId;
         user = await prisma_1.prisma.user.create({
-            data: createData
+            data: createData,
         });
     }
     // יצירת JWT token
@@ -110,9 +113,9 @@ async function socialLogin(provider, socialData) {
             name: user.name,
             role: user.role,
             profilePicture: user.profilePicture,
-            createdAt: user.createdAt
+            createdAt: user.createdAt,
         },
         token,
-        isNewUser: user.createdAt.getTime() > Date.now() - 60000 // אם נוצר בדקה האחרונה
+        isNewUser: user.createdAt.getTime() > Date.now() - 60000, // אם נוצר בדקה האחרונה
     };
 }

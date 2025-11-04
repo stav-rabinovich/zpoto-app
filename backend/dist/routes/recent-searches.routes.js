@@ -15,7 +15,7 @@ r.get('/', auth_1.auth, async (req, res, next) => {
         const recentSearches = await prisma_1.prisma.recentSearch.findMany({
             where: { userId },
             orderBy: { createdAt: 'desc' },
-            take: Math.min(limit, 50) // מקסימום 50
+            take: Math.min(limit, 50), // מקסימום 50
         });
         res.json({ data: recentSearches });
     }
@@ -40,8 +40,8 @@ r.post('/', auth_1.auth, async (req, res, next) => {
         const existingSearch = await prisma_1.prisma.recentSearch.findFirst({
             where: {
                 userId,
-                query: searchQuery
-            }
+                query: searchQuery,
+            },
         });
         if (existingSearch) {
             // עדכון התאריך של החיפוש הקיים
@@ -50,8 +50,8 @@ r.post('/', auth_1.auth, async (req, res, next) => {
                 data: {
                     createdAt: new Date(),
                     ...(lat !== undefined && { lat }),
-                    ...(lng !== undefined && { lng })
-                }
+                    ...(lng !== undefined && { lng }),
+                },
             });
             return res.json({ data: updatedSearch });
         }
@@ -61,25 +61,25 @@ r.post('/', auth_1.auth, async (req, res, next) => {
                 userId,
                 query: searchQuery,
                 lat: lat || null,
-                lng: lng || null
-            }
+                lng: lng || null,
+            },
         });
         // שמירה על מקסימום 20 חיפושים אחרונים
         const searchCount = await prisma_1.prisma.recentSearch.count({
-            where: { userId }
+            where: { userId },
         });
         if (searchCount > 20) {
             // מחיקת החיפושים הישנים ביותר
             const oldSearches = await prisma_1.prisma.recentSearch.findMany({
                 where: { userId },
                 orderBy: { createdAt: 'asc' },
-                take: searchCount - 20
+                take: searchCount - 20,
             });
             if (oldSearches.length > 0) {
                 await prisma_1.prisma.recentSearch.deleteMany({
                     where: {
-                        id: { in: oldSearches.map(s => s.id) }
-                    }
+                        id: { in: oldSearches.map(s => s.id) },
+                    },
                 });
             }
         }
@@ -102,13 +102,13 @@ r.delete('/:id', auth_1.auth, async (req, res, next) => {
         }
         // וידוא שהחיפוש שייך למשתמש
         const existingSearch = await prisma_1.prisma.recentSearch.findFirst({
-            where: { id: searchId, userId }
+            where: { id: searchId, userId },
         });
         if (!existingSearch) {
             return res.status(404).json({ error: 'Recent search not found' });
         }
         await prisma_1.prisma.recentSearch.delete({
-            where: { id: searchId }
+            where: { id: searchId },
         });
         res.json({ message: 'Recent search deleted successfully' });
     }
@@ -124,11 +124,11 @@ r.delete('/', auth_1.auth, async (req, res, next) => {
     try {
         const userId = req.userId;
         const result = await prisma_1.prisma.recentSearch.deleteMany({
-            where: { userId }
+            where: { userId },
         });
         res.json({
             message: 'All recent searches deleted successfully',
-            deletedCount: result.count
+            deletedCount: result.count,
         });
     }
     catch (e) {

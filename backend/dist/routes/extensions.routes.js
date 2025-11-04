@@ -18,7 +18,7 @@ r.get('/check/:bookingId', auth_1.auth, async (req, res, next) => {
         if (isNaN(bookingId)) {
             return res.status(400).json({
                 success: false,
-                error: 'Invalid booking ID'
+                error: 'Invalid booking ID',
             });
         }
         console.log(`🔍 Extension check request: booking #${bookingId} by user #${userId}`);
@@ -41,26 +41,26 @@ r.post('/execute', auth_1.auth, async (req, res, next) => {
         if (!bookingId || !paymentId) {
             return res.status(400).json({
                 success: false,
-                error: 'Missing bookingId or paymentId'
+                error: 'Missing bookingId or paymentId',
             });
         }
         console.log(`💰 Extension execution request:`, {
             bookingId,
             userId,
-            paymentId
+            paymentId,
         });
         const result = await (0, extensions_service_1.executeExtension)(parseInt(bookingId), userId, paymentId);
         if (result.success) {
             res.json({
                 success: true,
                 message: 'Extension completed successfully',
-                booking: result.booking
+                booking: result.booking,
             });
         }
         else {
             res.status(400).json({
                 success: false,
-                error: result.error
+                error: result.error,
             });
         }
     }
@@ -79,13 +79,13 @@ r.get('/history/:bookingId', auth_1.auth, async (req, res, next) => {
         if (isNaN(bookingId)) {
             return res.status(400).json({
                 success: false,
-                error: 'Invalid booking ID'
+                error: 'Invalid booking ID',
             });
         }
         const history = await (0, extensions_service_1.getExtensionHistory)(bookingId);
         res.json({
             success: true,
-            data: history
+            data: history,
         });
     }
     catch (error) {

@@ -106,7 +106,7 @@ r.post('/social', async (req, res) => {
     // ולידציה בסיסית
     if (!provider || !socialData || !socialData.id) {
         return res.status(400).json({
-            error: 'Invalid body: {provider: "google"|"facebook"|"apple", socialData: {id, email?, name?, photo?}}'
+            error: 'Invalid body: {provider: "google"|"facebook"|"apple", socialData: {id, email?, name?, photo?}}',
         });
     }
     if (!['google', 'facebook', 'apple'].includes(provider)) {
@@ -119,14 +119,14 @@ r.post('/social', async (req, res) => {
         res.status(result.isNewUser ? 201 : 200).json({
             user: result.user,
             token: result.token,
-            isNewUser: result.isNewUser
+            isNewUser: result.isNewUser,
         });
     }
     catch (e) {
         console.error(`❌ Social login error (${provider}):`, e);
         if (e.message === 'EMAIL_REQUIRED_FOR_NEW_USER') {
             return res.status(400).json({
-                error: 'Email is required for new user registration'
+                error: 'Email is required for new user registration',
             });
         }
         res.status(500).json({ error: 'Internal Server Error' });
@@ -143,7 +143,7 @@ r.post('/social/verify', async (req, res) => {
         // לעכשיו רק מחזירים success
         res.json({
             valid: true,
-            message: 'Token verification not implemented yet'
+            message: 'Token verification not implemented yet',
         });
     }
     catch (error) {

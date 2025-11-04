@@ -8,7 +8,7 @@ import { shouldUseProportionalPricing } from '../utils/featureFlags';
 
 const r = Router();
 
-/**
+/** 
  * GET /api/bookings/active
  * מחזיר הזמנות פעילות כרגע של המשתמש
  */

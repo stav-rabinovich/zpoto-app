@@ -14,7 +14,7 @@ function calculateProportionalPrice(durationMs, pricingData, legacyPricePerHour 
     console.log('💰 🎯 calculateProportionalPrice called:', {
         durationMs,
         pricingData,
-        legacyPricePerHour
+        legacyPricePerHour,
     });
     // המרה לשעות מדויקות (לא עיגול!)
     const exactHours = durationMs / (1000 * 60 * 60);
@@ -48,7 +48,7 @@ function calculateTieredProportionalPrice(exactHours, pricingData) {
             hour: i,
             price: hourPrice,
             priceCents: hourPriceCents,
-            isFractional: false
+            isFractional: false,
         });
         console.log(`💰 ✅ Hour ${i}: ₪${hourPrice} (${hourPriceCents} cents)`);
     }
@@ -65,7 +65,7 @@ function calculateTieredProportionalPrice(exactHours, pricingData) {
             price: fractionalPrice,
             priceCents: fractionalPriceCents,
             isFractional: true,
-            fractionalPart
+            fractionalPart,
         });
         console.log(`💰 ✅ Hour ${nextHourIndex} (${(fractionalPart * 100).toFixed(0)}%): ₪${fractionalPrice.toFixed(2)} (${fractionalPriceCents} cents)`);
     }
@@ -76,7 +76,7 @@ function calculateTieredProportionalPrice(exactHours, pricingData) {
         wholeHours,
         fractionalHours: fractionalPart,
         breakdown,
-        calculationMethod: 'proportional'
+        calculationMethod: 'proportional',
     };
     console.log('💰 ✅ Proportional calculation result:', result);
     return result;
@@ -96,7 +96,7 @@ function calculateLegacyPrice(exactHours, pricePerHour) {
             hour: i,
             price: pricePerHour,
             priceCents: Math.round(pricePerHour * 100),
-            isFractional: false
+            isFractional: false,
         });
     }
     const result = {
@@ -106,7 +106,7 @@ function calculateLegacyPrice(exactHours, pricePerHour) {
         wholeHours: ceiledHours,
         fractionalHours: 0,
         breakdown,
-        calculationMethod: 'legacy'
+        calculationMethod: 'legacy',
     };
     console.log('💰 ⚠️ Legacy calculation result:', result);
     return result;
@@ -176,5 +176,5 @@ function validatePricingData(pricingData) {
 exports.default = {
     calculateProportionalPrice,
     formatPriceBreakdown,
-    validatePricingData
+    validatePricingData,
 };

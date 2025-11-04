@@ -85,9 +85,7 @@ r.post('/', auth_1.auth, async (req, res, next) => {
             typeof lat !== 'number' ||
             typeof lng !== 'number' ||
             typeof priceHr !== 'number') {
-            return res
-                .status(400)
-                .json({ error: 'Invalid body: {address, lat, lng, priceHr}' });
+            return res.status(400).json({ error: 'Invalid body: {address, lat, lng, priceHr}' });
         }
         const data = await svc.createParking({
             address,

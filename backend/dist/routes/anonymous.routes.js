@@ -44,9 +44,9 @@ r.get('/recent-searches', async (req, res, next) => {
                 query: true,
                 lat: true,
                 lng: true,
-                createdAt: true
+                createdAt: true,
                 // לא מחזירים deviceId מסיבות אבטחה
-            }
+            },
         });
         res.json({ data: recentSearches });
     }
@@ -75,8 +75,8 @@ r.post('/recent-searches', async (req, res, next) => {
         const existingSearch = await prisma_1.prisma.anonymousRecentSearch.findFirst({
             where: {
                 deviceId,
-                query: searchQuery
-            }
+                query: searchQuery,
+            },
         });
         if (existingSearch) {
             // עדכון התאריך של החיפוש הקיים
@@ -85,15 +85,15 @@ r.post('/recent-searches', async (req, res, next) => {
                 data: {
                     createdAt: new Date(),
                     ...(lat !== undefined && { lat }),
-                    ...(lng !== undefined && { lng })
+                    ...(lng !== undefined && { lng }),
                 },
                 select: {
                     id: true,
                     query: true,
                     lat: true,
                     lng: true,
-                    createdAt: true
-                }
+                    createdAt: true,
+                },
             });
             return res.json({ data: updatedSearch });
         }
@@ -103,19 +103,19 @@ r.post('/recent-searches', async (req, res, next) => {
                 deviceId,
                 query: searchQuery,
                 lat: lat || null,
-                lng: lng || null
+                lng: lng || null,
             },
             select: {
                 id: true,
                 query: true,
                 lat: true,
                 lng: true,
-                createdAt: true
-            }
+                createdAt: true,
+            },
         });
         // שמירה על מקסימום 20 חיפושים אחרונים לכל device
         const searchCount = await prisma_1.prisma.anonymousRecentSearch.count({
-            where: { deviceId }
+            where: { deviceId },
         });
         if (searchCount > 20) {
             // מחיקת החיפושים הישנים ביותר
@@ -123,13 +123,13 @@ r.post('/recent-searches', async (req, res, next) => {
                 where: { deviceId },
                 orderBy: { createdAt: 'asc' },
                 take: searchCount - 20,
-                select: { id: true }
+                select: { id: true },
             });
             if (oldSearches.length > 0) {
                 await prisma_1.prisma.anonymousRecentSearch.deleteMany({
                     where: {
-                        id: { in: oldSearches.map(s => s.id) }
-                    }
+                        id: { in: oldSearches.map(s => s.id) },
+                    },
                 });
             }
         }
@@ -157,13 +157,13 @@ r.delete('/recent-searches/:id', async (req, res, next) => {
         }
         // וידוא שהחיפוש שייך ל-Device ID
         const existingSearch = await prisma_1.prisma.anonymousRecentSearch.findFirst({
-            where: { id: searchId, deviceId }
+            where: { id: searchId, deviceId },
         });
         if (!existingSearch) {
             return res.status(404).json({ error: 'Anonymous recent search not found' });
         }
         await prisma_1.prisma.anonymousRecentSearch.delete({
-            where: { id: searchId }
+            where: { id: searchId },
         });
         res.json({ message: 'Anonymous recent search deleted successfully' });
     }
@@ -184,11 +184,11 @@ r.delete('/recent-searches', async (req, res, next) => {
             return res.status(400).json({ error: 'Device ID is required' });
         }
         const result = await prisma_1.prisma.anonymousRecentSearch.deleteMany({
-            where: { deviceId }
+            where: { deviceId },
         });
         res.json({
             message: 'All anonymous recent searches deleted successfully',
-            deletedCount: result.count
+            deletedCount: result.count,
         });
     }
     catch (e) {
@@ -219,9 +219,9 @@ r.get('/saved-places', async (req, res, next) => {
                 lat: true,
                 lng: true,
                 type: true,
-                createdAt: true
+                createdAt: true,
                 // לא מחזירים deviceId מסיבות אבטחה
-            }
+            },
         });
         res.json({ data: savedPlaces });
     }
@@ -260,8 +260,8 @@ r.post('/saved-places', async (req, res, next) => {
             where: {
                 deviceId,
                 name: name.trim(),
-                type
-            }
+                type,
+            },
         });
         if (existingPlace) {
             return res.status(200).json({ data: existingPlace });
@@ -274,7 +274,7 @@ r.post('/saved-places', async (req, res, next) => {
                 address: address.trim(),
                 lat,
                 lng,
-                type
+                type,
             },
             select: {
                 id: true,
@@ -283,12 +283,12 @@ r.post('/saved-places', async (req, res, next) => {
                 lat: true,
                 lng: true,
                 type: true,
-                createdAt: true
-            }
+                createdAt: true,
+            },
         });
         // שמירה על מקסימום 20 מקומות שמורים לכל device
         const placesCount = await prisma_1.prisma.anonymousSavedPlace.count({
-            where: { deviceId }
+            where: { deviceId },
         });
         if (placesCount > 20) {
             // מחיקת המקומות הישנים ביותר
@@ -296,13 +296,13 @@ r.post('/saved-places', async (req, res, next) => {
                 where: { deviceId },
                 orderBy: { createdAt: 'asc' },
                 take: placesCount - 20,
-                select: { id: true }
+                select: { id: true },
             });
             if (oldPlaces.length > 0) {
                 await prisma_1.prisma.anonymousSavedPlace.deleteMany({
                     where: {
-                        id: { in: oldPlaces.map(p => p.id) }
-                    }
+                        id: { in: oldPlaces.map(p => p.id) },
+                    },
                 });
             }
         }
@@ -330,13 +330,13 @@ r.delete('/saved-places/:id', async (req, res, next) => {
         }
         // וידוא שהמקום שייך ל-Device ID
         const existingPlace = await prisma_1.prisma.anonymousSavedPlace.findFirst({
-            where: { id: placeId, deviceId }
+            where: { id: placeId, deviceId },
         });
         if (!existingPlace) {
             return res.status(404).json({ error: 'Anonymous saved place not found' });
         }
         await prisma_1.prisma.anonymousSavedPlace.delete({
-            where: { id: placeId }
+            where: { id: placeId },
         });
         res.json({ message: 'Anonymous saved place deleted successfully' });
     }
@@ -357,11 +357,11 @@ r.delete('/saved-places', async (req, res, next) => {
             return res.status(400).json({ error: 'Device ID is required' });
         }
         const result = await prisma_1.prisma.anonymousSavedPlace.deleteMany({
-            where: { deviceId }
+            where: { deviceId },
         });
         res.json({
             message: 'All anonymous saved places deleted successfully',
-            deletedCount: result.count
+            deletedCount: result.count,
         });
     }
     catch (e) {
@@ -397,13 +397,13 @@ r.get('/favorites', async (req, res, next) => {
                             select: {
                                 id: true,
                                 name: true,
-                                email: true
-                            }
-                        }
-                    }
-                }
+                                email: true,
+                            },
+                        },
+                    },
+                },
             },
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: 'desc' },
         });
         res.json({ data: favorites });
     }
@@ -433,7 +433,7 @@ r.post('/favorites', async (req, res, next) => {
         }
         // בדיקה שהחניה קיימת ופעילה
         const parking = await prisma_1.prisma.parking.findUnique({
-            where: { id: parkingId }
+            where: { id: parkingId },
         });
         if (!parking) {
             return res.status(404).json({ error: 'Parking not found' });
@@ -446,9 +446,9 @@ r.post('/favorites', async (req, res, next) => {
             where: {
                 deviceId_parkingId: {
                     deviceId,
-                    parkingId
-                }
-            }
+                    parkingId,
+                },
+            },
         });
         if (existingFavorite) {
             // החזרת המועדף הקיים במקום שגיאה
@@ -456,8 +456,8 @@ r.post('/favorites', async (req, res, next) => {
                 where: {
                     deviceId_parkingId: {
                         deviceId,
-                        parkingId
-                    }
+                        parkingId,
+                    },
                 },
                 include: {
                     parking: {
@@ -475,12 +475,12 @@ r.post('/favorites', async (req, res, next) => {
                                 select: {
                                     id: true,
                                     name: true,
-                                    email: true
-                                }
-                            }
-                        }
-                    }
-                }
+                                    email: true,
+                                },
+                            },
+                        },
+                    },
+                },
             });
             return res.status(200).json({ data: favoriteWithParking });
         }
@@ -488,7 +488,7 @@ r.post('/favorites', async (req, res, next) => {
         const favorite = await prisma_1.prisma.anonymousFavorite.create({
             data: {
                 deviceId,
-                parkingId
+                parkingId,
             },
             include: {
                 parking: {
@@ -506,12 +506,12 @@ r.post('/favorites', async (req, res, next) => {
                             select: {
                                 id: true,
                                 name: true,
-                                email: true
-                            }
-                        }
-                    }
-                }
-            }
+                                email: true,
+                            },
+                        },
+                    },
+                },
+            },
         });
         res.status(201).json({ data: favorite });
     }
@@ -539,9 +539,9 @@ r.delete('/favorites/:parkingId', async (req, res, next) => {
             where: {
                 deviceId_parkingId: {
                     deviceId,
-                    parkingId
-                }
-            }
+                    parkingId,
+                },
+            },
         });
         if (!existingFavorite) {
             return res.status(404).json({ error: 'Favorite not found' });
@@ -550,9 +550,9 @@ r.delete('/favorites/:parkingId', async (req, res, next) => {
             where: {
                 deviceId_parkingId: {
                     deviceId,
-                    parkingId
-                }
-            }
+                    parkingId,
+                },
+            },
         });
         res.json({ message: 'Parking removed from favorites successfully' });
     }

@@ -25,7 +25,7 @@ r.get('/', auth_1.auth, async (req, res, next) => {
                 role: true,
                 createdAt: true,
                 // לא מחזירים סיסמה
-            }
+            },
         });
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
@@ -65,7 +65,7 @@ r.put('/', auth_1.auth, async (req, res, next) => {
                 phone: true,
                 role: true,
                 createdAt: true,
-            }
+            },
         });
         res.json({ data: updatedUser });
     }
@@ -89,7 +89,7 @@ r.put('/password', auth_1.auth, async (req, res, next) => {
         }
         // שליפת המשתמש עם הסיסמה הנוכחית
         const user = await prisma_1.prisma.user.findUnique({
-            where: { id: userId }
+            where: { id: userId },
         });
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
@@ -107,7 +107,7 @@ r.put('/password', auth_1.auth, async (req, res, next) => {
         // עדכון הסיסמה
         await prisma_1.prisma.user.update({
             where: { id: userId },
-            data: { password: hashedNewPassword }
+            data: { password: hashedNewPassword },
         });
         res.json({ message: 'Password updated successfully' });
     }
@@ -128,7 +128,7 @@ r.delete('/', auth_1.auth, async (req, res, next) => {
         }
         // שליפת המשתמש
         const user = await prisma_1.prisma.user.findUnique({
-            where: { id: userId }
+            where: { id: userId },
         });
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
@@ -143,7 +143,7 @@ r.delete('/', auth_1.auth, async (req, res, next) => {
         }
         // מחיקת המשתמש (Prisma ימחק אוטומטית את הרכבים, הזמנות וכו' בגלל CASCADE)
         await prisma_1.prisma.user.delete({
-            where: { id: userId }
+            where: { id: userId },
         });
         res.json({ message: 'Account deleted successfully' });
     }
@@ -166,12 +166,12 @@ r.get('/migration-status', auth_1.auth, async (req, res, next) => {
                 email: true,
                 googleId: true,
                 facebookId: true,
-                appleId: true
+                appleId: true,
                 // TODO: הוסף לאחר עדכון הסכמה:
                 // migratedFromDeviceId: true,
                 // migrationCompletedAt: true,
                 // registrationSource: true
-            }
+            },
         });
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
@@ -184,8 +184,8 @@ r.get('/migration-status', auth_1.auth, async (req, res, next) => {
                 migrationCompleted: false, // TODO: !!user.migrationCompletedAt,
                 migratedFromDeviceId: null, // TODO: user.migratedFromDeviceId,
                 migrationCompletedAt: null, // TODO: user.migrationCompletedAt,
-                registrationSource: isSocialLogin ? 'social' : 'email' // TODO: user.registrationSource
-            }
+                registrationSource: isSocialLogin ? 'social' : 'email', // TODO: user.registrationSource
+            },
         });
     }
     catch (e) {
@@ -224,11 +224,11 @@ r.put('/complete', auth_1.auth, async (req, res, next) => {
                 role: true,
                 // TODO: registrationSource: true, // הוסף לאחר עדכון הסכמה
                 createdAt: true,
-            }
+            },
         });
         res.json({
             data: updatedUser,
-            message: 'Profile completed successfully'
+            message: 'Profile completed successfully',
         });
     }
     catch (e) {
@@ -244,26 +244,26 @@ r.get('/stats', auth_1.auth, async (req, res, next) => {
         const userId = req.userId;
         // ספירת הזמנות
         const totalBookings = await prisma_1.prisma.booking.count({
-            where: { userId }
+            where: { userId },
         });
         const confirmedBookings = await prisma_1.prisma.booking.count({
-            where: { userId, status: 'CONFIRMED' }
+            where: { userId, status: 'CONFIRMED' },
         });
         const pendingBookings = await prisma_1.prisma.booking.count({
-            where: { userId, status: 'PENDING' }
+            where: { userId, status: 'PENDING' },
         });
         // ספירת רכבים
         const totalVehicles = await prisma_1.prisma.vehicle.count({
-            where: { userId }
+            where: { userId },
         });
         // ספירת חניות (אם המשתמש הוא בעל חניה)
         const totalParkings = await prisma_1.prisma.parking.count({
-            where: { ownerId: userId }
+            where: { ownerId: userId },
         });
         // סך הוצאות על הזמנות
         const bookingsWithPrices = await prisma_1.prisma.booking.findMany({
             where: { userId, status: 'CONFIRMED' },
-            select: { totalPriceCents: true }
+            select: { totalPriceCents: true },
         });
         const totalSpent = bookingsWithPrices.reduce((sum, booking) => {
             return sum + (booking.totalPriceCents || 0);
@@ -283,7 +283,7 @@ r.get('/stats', auth_1.auth, async (req, res, next) => {
             spending: {
                 totalCents: totalSpent,
                 total: totalSpent / 100, // המרה לשקלים
-            }
+            },
         };
         res.json({ data: stats });
     }

@@ -184,44 +184,47 @@ r.post('/process', auth, async (req: AuthedRequest, res, next) => {
 
     console.log('📝 ✅ Booking created successfully:', booking.id);
 
-    // עדכון העמלה אם השתמשו בקופון (המחיר השתנה)
+    // עדכון דמי התפעול אחרי קופון אם נדרש
     if (couponCode && discountAmount > 0) {
-      console.log('💰 Updating commission due to coupon usage');
+      console.log('💳 Updating operational fee after coupon usage');
       
       try {
-        // מציאת העמלה הקיימת
-        const existingCommission = await prisma.commission.findFirst({
-          where: { bookingId: booking.id }
+        const { updateOperationalFeeAfterCoupon } = await import('../services/operationalFees.service');
+        
+        // חישוב המחירים
+        const finalPriceCents = Math.round(totalPrice * 100);
+        const originalTotalPriceCents = finalPriceCents + Math.round(discountAmount * 100);
+        
+        // עלות החניה היא תמיד ללא דמי התפעול - לפי מחיר שעתי × שעות
+        const parking = await prisma.parking.findUnique({
+          where: { id: parseInt(parkingId) },
+          select: { priceHr: true }
         });
-
-        if (existingCommission) {
-          const finalPriceCents = Math.round(totalPrice * 100);
-          const COMMISSION_RATE = 0.15;
-          const newCommissionCents = Math.round(finalPriceCents * COMMISSION_RATE);
-          const newNetOwnerCents = finalPriceCents - newCommissionCents;
-
-          // עדכון העמלה למחיר הסופי
-          await prisma.commission.update({
-            where: { id: existingCommission.id },
-            data: {
-              totalPriceCents: finalPriceCents,
-              commissionCents: newCommissionCents,
-              netOwnerCents: newNetOwnerCents,
-              calculatedAt: new Date(), // עדכון זמן החישוב
-            }
-          });
-
-          console.log('💰 ✅ Commission updated for coupon usage:', {
-            bookingId: booking.id,
-            originalPrice: existingCommission.totalPriceCents / 100,
-            finalPrice: finalPriceCents / 100,
-            originalCommission: existingCommission.commissionCents / 100,
-            newCommission: newCommissionCents / 100,
-            discount: discountAmount
-          });
+        
+        if (!parking) {
+          throw new Error(`Parking ${parkingId} not found for operational fee update`);
         }
+        
+        const ms = booking.endTime.getTime() - booking.startTime.getTime();
+        const hours = Math.ceil(ms / (1000 * 60 * 60));
+        const originalParkingCostCents = Math.round(parking.priceHr * hours * 100);
+        
+        console.log(`💳 Coupon adjustment calculation:`, {
+          parkingCost: `₪${originalParkingCostCents / 100} (${parking.priceHr}/hr × ${hours}h)`,
+          originalTotal: `₪${originalTotalPriceCents / 100}`,
+          finalTotal: `₪${finalPriceCents / 100}`,
+          discount: `₪${discountAmount}`
+        });
+        
+        await updateOperationalFeeAfterCoupon(
+          booking.id,
+          finalPriceCents,
+          originalParkingCostCents
+        );
+        
+        console.log('💳 ✅ Operational fee updated for coupon usage');
       } catch (error) {
-        console.error('❌ Failed to update commission:', error);
+        console.error('❌ Failed to update operational fee:', error);
         // לא נזרוק שגיאה כי התשלום כבר הצליח
       }
     }
