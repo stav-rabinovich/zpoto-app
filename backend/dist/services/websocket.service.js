@@ -14,9 +14,9 @@ let io = null;
 function initializeWebSocket(httpServer) {
     io = new socket_io_1.Server(httpServer, {
         cors: {
-            origin: "*", // בפרודקשן צריך להגביל
-            methods: ["GET", "POST"]
-        }
+            origin: '*', // בפרודקשן צריך להגביל
+            methods: ['GET', 'POST'],
+        },
     });
     io.on('connection', (socket) => {
         console.log(`🔌 Client connected: ${socket.id}`);
@@ -50,7 +50,7 @@ function broadcastAvailabilityUpdate(parkingId, availability) {
         type: 'availability-updated',
         parkingId,
         availability,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
     };
     // שליחה לחדר החניה הספציפית
     io.to(`parking-${parkingId}`).emit('availability-update', updateData);
@@ -70,7 +70,7 @@ function broadcastParkingUpdate(parkingId, updateType) {
         type: 'parking-updated',
         parkingId,
         updateType,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
     };
     io.emit('parking-update', updateData);
     console.log(`📡 Broadcasted parking update: ${updateType} for parking ${parkingId}`);

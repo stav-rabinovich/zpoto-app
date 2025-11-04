@@ -26,7 +26,7 @@ async function createNotification(input) {
             data: input.data ? JSON.stringify(input.data) : null,
             scheduledFor: input.scheduledFor,
             pushToken: input.pushToken,
-        }
+        },
     });
     // אם ההתראה לא מתוזמנת - שלח מיד
     if (!input.scheduledFor) {
@@ -40,7 +40,7 @@ async function createNotification(input) {
 async function sendNotificationNow(notificationId) {
     const notification = await prisma_1.prisma.notification.findUnique({
         where: { id: notificationId },
-        include: { user: true }
+        include: { user: true },
     });
     if (!notification) {
         console.error('❌ Notification not found:', notificationId);
@@ -55,8 +55,8 @@ async function sendNotificationNow(notificationId) {
             data: {
                 isSent: true,
                 sentAt: new Date(),
-                pushSent: true // נעדכן כשנוסיף Firebase
-            }
+                pushSent: true, // נעדכן כשנוסיף Firebase
+            },
         });
         console.log(`✅ Notification ${notificationId} sent successfully`);
     }
@@ -65,8 +65,8 @@ async function sendNotificationNow(notificationId) {
         await prisma_1.prisma.notification.update({
             where: { id: notificationId },
             data: {
-                pushError: error instanceof Error ? error.message : 'Unknown error'
-            }
+                pushError: error instanceof Error ? error.message : 'Unknown error',
+            },
         });
     }
 }
@@ -77,7 +77,7 @@ async function getUserNotifications(userId, limit = 50) {
     return prisma_1.prisma.notification.findMany({
         where: { userId },
         orderBy: { createdAt: 'desc' },
-        take: limit
+        take: limit,
     });
 }
 /**
@@ -87,9 +87,9 @@ async function markNotificationAsRead(notificationId, userId) {
     return prisma_1.prisma.notification.updateMany({
         where: {
             id: notificationId,
-            userId // וידוא שההתראה שייכת למשתמש
+            userId, // וידוא שההתראה שייכת למשתמש
         },
-        data: { isRead: true }
+        data: { isRead: true },
     });
 }
 /**
@@ -99,9 +99,9 @@ async function markAllNotificationsAsRead(userId) {
     return prisma_1.prisma.notification.updateMany({
         where: {
             userId,
-            isRead: false
+            isRead: false,
         },
-        data: { isRead: true }
+        data: { isRead: true },
     });
 }
 /**
@@ -111,8 +111,8 @@ async function deleteNotification(notificationId, userId) {
     return prisma_1.prisma.notification.deleteMany({
         where: {
             id: notificationId,
-            userId // וידוא שההתראה שייכת למשתמש
-        }
+            userId, // וידוא שההתראה שייכת למשתמש
+        },
     });
 }
 /**
@@ -122,8 +122,8 @@ async function getUnreadNotificationsCount(userId) {
     return prisma_1.prisma.notification.count({
         where: {
             userId,
-            isRead: false
-        }
+            isRead: false,
+        },
     });
 }
 /**
@@ -134,8 +134,8 @@ async function createBookingReminderNotification(bookingId) {
         where: { id: bookingId },
         include: {
             parking: true,
-            user: true
-        }
+            user: true,
+        },
     });
     if (!booking) {
         console.error('❌ Booking not found for reminder:', bookingId);
@@ -156,9 +156,9 @@ async function createBookingReminderNotification(bookingId) {
         data: {
             bookingId: booking.id,
             parkingId: booking.parkingId,
-            startTime: booking.startTime.toISOString()
+            startTime: booking.startTime.toISOString(),
         },
-        scheduledFor: reminderTime
+        scheduledFor: reminderTime,
     });
 }
 /**
@@ -169,9 +169,9 @@ async function processScheduledNotifications() {
     const pendingNotifications = await prisma_1.prisma.notification.findMany({
         where: {
             scheduledFor: { lte: now },
-            isSent: false
+            isSent: false,
         },
-        take: 100 // עיבוד עד 100 התראות בכל פעם
+        take: 100, // עיבוד עד 100 התראות בכל פעם
     });
     console.log(`📅 Processing ${pendingNotifications.length} scheduled notifications`);
     for (const notification of pendingNotifications) {

@@ -22,7 +22,7 @@ function getEncryptionConfig(documentType) {
                 iterations: 100000,
                 saltLength: 32,
                 compress: true,
-                watermark: true
+                watermark: true,
             };
         case documentValidation_service_1.SENSITIVITY_LEVELS.CONFIDENTIAL:
             return {
@@ -30,7 +30,7 @@ function getEncryptionConfig(documentType) {
                 keyDerivation: 'pbkdf2',
                 iterations: 50000,
                 saltLength: 16,
-                compress: true
+                compress: true,
             };
         default: // PUBLIC
             return {
@@ -38,7 +38,7 @@ function getEncryptionConfig(documentType) {
                 keyDerivation: 'scrypt',
                 iterations: 0,
                 saltLength: 16,
-                compress: false
+                compress: false,
             };
     }
 }
@@ -90,8 +90,8 @@ async function encryptDocument(filePath, documentType, userId) {
             encryptedAt: new Date().toISOString(),
             originalSize,
             compressed: config.compress,
-            watermarked: config.watermark || false
-        }
+            watermarked: config.watermark || false,
+        },
     };
     // שמירת הקובץ המוצפן
     const encryptedFilePath = filePath + '.enc';
@@ -103,7 +103,7 @@ async function encryptDocument(filePath, documentType, userId) {
         encryptionKey: encryptedKey,
         originalSize,
         encryptedSize: JSON.stringify(encryptedFileData).length,
-        algorithm: config.algorithm
+        algorithm: config.algorithm,
     };
 }
 /**
@@ -142,7 +142,7 @@ async function decryptDocument(encryptedFilePath, encryptionKey, userId, documen
     }
     return {
         decryptedBuffer: decryptedData,
-        originalSize: encryptedFileData.metadata.originalSize
+        originalSize: encryptedFileData.metadata.originalSize,
     };
 }
 /**
@@ -162,10 +162,7 @@ async function generateMasterKey(userId, documentType) {
 function encryptWithGCM(data, key, iv, aad) {
     const cipher = crypto_1.default.createCipher('aes-256-gcm', key);
     cipher.setAAD(Buffer.from(aad));
-    const encrypted = Buffer.concat([
-        cipher.update(data),
-        cipher.final()
-    ]);
+    const encrypted = Buffer.concat([cipher.update(data), cipher.final()]);
     const authTag = cipher.getAuthTag();
     return { encrypted, authTag };
 }
@@ -176,30 +173,21 @@ function decryptWithGCM(encryptedData, key, iv, authTag, aad) {
     const decipher = crypto_1.default.createDecipher('aes-256-gcm', key);
     decipher.setAAD(Buffer.from(aad));
     decipher.setAuthTag(authTag);
-    return Buffer.concat([
-        decipher.update(encryptedData),
-        decipher.final()
-    ]);
+    return Buffer.concat([decipher.update(encryptedData), decipher.final()]);
 }
 /**
  * הצפנה עם CBC
  */
 function encryptWithCBC(data, key, iv, algorithm) {
     const cipher = crypto_1.default.createCipher(algorithm, key);
-    return Buffer.concat([
-        cipher.update(data),
-        cipher.final()
-    ]);
+    return Buffer.concat([cipher.update(data), cipher.final()]);
 }
 /**
  * פענוח עם CBC
  */
 function decryptWithCBC(encryptedData, key, iv, algorithm) {
     const decipher = crypto_1.default.createDecipher(algorithm, key);
-    return Buffer.concat([
-        decipher.update(encryptedData),
-        decipher.final()
-    ]);
+    return Buffer.concat([decipher.update(encryptedData), decipher.final()]);
 }
 /**
  * הצפנת מפתח
@@ -207,14 +195,11 @@ function decryptWithCBC(encryptedData, key, iv, algorithm) {
 function encryptKey(fileKey, masterKey, salt) {
     const iv = crypto_1.default.randomBytes(16);
     const cipher = crypto_1.default.createCipher('aes-256-cbc', masterKey);
-    const encrypted = Buffer.concat([
-        cipher.update(fileKey),
-        cipher.final()
-    ]);
+    const encrypted = Buffer.concat([cipher.update(fileKey), cipher.final()]);
     return JSON.stringify({
         salt: salt.toString('hex'),
         iv: iv.toString('hex'),
-        data: encrypted.toString('hex')
+        data: encrypted.toString('hex'),
     });
 }
 /**
@@ -225,10 +210,7 @@ function decryptKey(encryptedKey, masterKey, salt) {
     const iv = Buffer.from(keyData.iv, 'hex');
     const encrypted = Buffer.from(keyData.data, 'hex');
     const decipher = crypto_1.default.createDecipher('aes-256-cbc', masterKey);
-    return Buffer.concat([
-        decipher.update(encrypted),
-        decipher.final()
-    ]);
+    return Buffer.concat([decipher.update(encrypted), decipher.final()]);
 }
 /**
  * דחיסת נתונים (פשוטה)

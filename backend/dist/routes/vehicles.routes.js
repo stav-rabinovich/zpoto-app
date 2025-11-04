@@ -15,8 +15,8 @@ r.get('/', auth_1.auth, async (req, res, next) => {
             where: { userId },
             orderBy: [
                 { isDefault: 'desc' }, // רכב ברירת מחדל קודם
-                { createdAt: 'desc' }
-            ]
+                { createdAt: 'desc' },
+            ],
         });
         res.json({ data: vehicles });
     }
@@ -39,7 +39,7 @@ r.post('/', auth_1.auth, async (req, res, next) => {
         if (isDefault) {
             await prisma_1.prisma.vehicle.updateMany({
                 where: { userId },
-                data: { isDefault: false }
+                data: { isDefault: false },
             });
         }
         const vehicle = await prisma_1.prisma.vehicle.create({
@@ -51,8 +51,8 @@ r.post('/', auth_1.auth, async (req, res, next) => {
                 color: color?.trim() || null,
                 year: year ? parseInt(year) : null,
                 description: description?.trim() || null,
-                isDefault: Boolean(isDefault)
-            }
+                isDefault: Boolean(isDefault),
+            },
         });
         res.status(201).json({ data: vehicle });
     }
@@ -77,7 +77,7 @@ r.put('/:id', auth_1.auth, async (req, res, next) => {
         }
         // וידוא שהרכב שייך למשתמש
         const existingVehicle = await prisma_1.prisma.vehicle.findFirst({
-            where: { id: vehicleId, userId }
+            where: { id: vehicleId, userId },
         });
         if (!existingVehicle) {
             return res.status(404).json({ error: 'Vehicle not found' });
@@ -89,7 +89,7 @@ r.put('/:id', auth_1.auth, async (req, res, next) => {
         if (isDefault && !existingVehicle.isDefault) {
             await prisma_1.prisma.vehicle.updateMany({
                 where: { userId, id: { not: vehicleId } },
-                data: { isDefault: false }
+                data: { isDefault: false },
             });
         }
         const vehicle = await prisma_1.prisma.vehicle.update({
@@ -101,8 +101,8 @@ r.put('/:id', auth_1.auth, async (req, res, next) => {
                 color: color?.trim() || null,
                 year: year ? parseInt(year) : null,
                 description: description?.trim() || null,
-                isDefault: Boolean(isDefault)
-            }
+                isDefault: Boolean(isDefault),
+            },
         });
         res.json({ data: vehicle });
     }
@@ -126,13 +126,13 @@ r.delete('/:id', auth_1.auth, async (req, res, next) => {
         }
         // וידוא שהרכב שייך למשתמש
         const existingVehicle = await prisma_1.prisma.vehicle.findFirst({
-            where: { id: vehicleId, userId }
+            where: { id: vehicleId, userId },
         });
         if (!existingVehicle) {
             return res.status(404).json({ error: 'Vehicle not found' });
         }
         await prisma_1.prisma.vehicle.delete({
-            where: { id: vehicleId }
+            where: { id: vehicleId },
         });
         res.json({ message: 'Vehicle deleted successfully' });
     }
@@ -153,7 +153,7 @@ r.patch('/:id/default', auth_1.auth, async (req, res, next) => {
         }
         // וידוא שהרכב שייך למשתמש
         const existingVehicle = await prisma_1.prisma.vehicle.findFirst({
-            where: { id: vehicleId, userId }
+            where: { id: vehicleId, userId },
         });
         if (!existingVehicle) {
             return res.status(404).json({ error: 'Vehicle not found' });
@@ -161,12 +161,12 @@ r.patch('/:id/default', auth_1.auth, async (req, res, next) => {
         // ביטול ברירת מחדל מכל הרכבים האחרים
         await prisma_1.prisma.vehicle.updateMany({
             where: { userId, id: { not: vehicleId } },
-            data: { isDefault: false }
+            data: { isDefault: false },
         });
         // הגדרת הרכב הנוכחי כברירת מחדל
         const vehicle = await prisma_1.prisma.vehicle.update({
             where: { id: vehicleId },
-            data: { isDefault: true }
+            data: { isDefault: true },
         });
         res.json({ data: vehicle });
     }

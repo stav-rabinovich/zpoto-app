@@ -13,6 +13,7 @@ exports.createOperationalFee = createOperationalFee;
 exports.getOperationalFeeByBookingId = getOperationalFeeByBookingId;
 exports.updateOperationalFeeForExtension = updateOperationalFeeForExtension;
 exports.getOperationalFeeStats = getOperationalFeeStats;
+exports.updateOperationalFeeAfterCoupon = updateOperationalFeeAfterCoupon;
 const prisma_1 = require("../lib/prisma");
 // קבועים
 const OPERATIONAL_FEE_RATE = 0.1; // 10%
@@ -29,13 +30,13 @@ function calculateOperationalFee(parkingCostCents) {
         parkingCostCents,
         operationalFeeCents,
         totalPaymentCents,
-        operationalFeeRate: OPERATIONAL_FEE_RATE
+        operationalFeeRate: OPERATIONAL_FEE_RATE,
     };
     console.log(`💳 Operational fee calculation:`, {
         parkingCost: `₪${parkingCostCents / 100}`,
         operationalFee: `₪${operationalFeeCents / 100} (10%)`,
         totalPayment: `₪${totalPaymentCents / 100}`,
-        formula: 'Total = Parking Cost + (Parking Cost × 10%)'
+        formula: 'Total = Parking Cost + (Parking Cost × 10%)',
     });
     return result;
 }
@@ -54,15 +55,15 @@ async function createOperationalFee(bookingId, parkingCostCents) {
             parkingCostCents: calculation.parkingCostCents,
             operationalFeeCents: calculation.operationalFeeCents,
             totalPaymentCents: calculation.totalPaymentCents,
-            operationalFeeRate: calculation.operationalFeeRate
-        }
+            operationalFeeRate: calculation.operationalFeeRate,
+        },
     });
     console.log(`💳 ✅ Operational fee created:`, {
         id: operationalFee.id,
         bookingId: operationalFee.bookingId,
         parkingCost: `₪${operationalFee.parkingCostCents / 100}`,
         operationalFee: `₪${operationalFee.operationalFeeCents / 100}`,
-        totalPayment: `₪${operationalFee.totalPaymentCents / 100}`
+        totalPayment: `₪${operationalFee.totalPaymentCents / 100}`,
     });
     return operationalFee;
 }
@@ -73,7 +74,7 @@ async function createOperationalFee(bookingId, parkingCostCents) {
  */
 async function getOperationalFeeByBookingId(bookingId) {
     return await prisma_1.prisma.operationalFee.findUnique({
-        where: { bookingId }
+        where: { bookingId },
     });
 }
 /**
@@ -91,7 +92,7 @@ async function updateOperationalFeeForExtension(bookingId, newParkingCostCents) 
             parkingCostCents: calculation.parkingCostCents,
             operationalFeeCents: calculation.operationalFeeCents,
             totalPaymentCents: calculation.totalPaymentCents,
-        }
+        },
     });
     console.log(`💳 ✅ Operational fee updated for extension`);
     return updatedFee;
@@ -113,7 +114,7 @@ async function getOperationalFeeStats(filters) {
         }
     }
     const [fees, totalStats] = await Promise.all([
-        // רשימת כל דמי התפעול
+        // רשימת כל דמי התפעול עם נתוני קופונים
         prisma_1.prisma.operationalFee.findMany({
             where: whereClause,
             include: {
@@ -124,13 +125,14 @@ async function getOperationalFeeStats(filters) {
                         user: {
                             select: {
                                 email: true,
-                                name: true
-                            }
-                        }
-                    }
-                }
+                                name: true,
+                            },
+                        },
+                        // TODO: להוסיף couponUsages לאחר עדכון Prisma Client
+                    },
+                },
             },
-            orderBy: { calculatedAt: 'desc' }
+            orderBy: { calculatedAt: 'desc' },
         }),
         // סטטיסטיקות כלליות
         prisma_1.prisma.operationalFee.aggregate({
@@ -138,10 +140,10 @@ async function getOperationalFeeStats(filters) {
             _sum: {
                 operationalFeeCents: true,
                 totalPaymentCents: true,
-                parkingCostCents: true
+                parkingCostCents: true,
             },
-            _count: true
-        })
+            _count: true,
+        }),
     ]);
     return {
         fees,
@@ -152,14 +154,46 @@ async function getOperationalFeeStats(filters) {
             totalTransactions: totalStats._count,
             averageOperationalFee: totalStats._count > 0
                 ? Math.round((totalStats._sum.operationalFeeCents || 0) / totalStats._count)
-                : 0
-        }
+                : 0,
+        },
     };
+}
+/**
+ * עדכון דמי תפעול אחרי שימוש בקופון
+ * @param bookingId - מזהה ההזמנה
+ * @param finalTotalPriceCents - המחיר הסופי שהמשתמש שילם (אחרי הנחה)
+ * @param originalParkingCostCents - עלות החניה המקורית
+ */
+async function updateOperationalFeeAfterCoupon(bookingId, finalTotalPriceCents, originalParkingCostCents) {
+    console.log(`💳 Updating operational fee after coupon for booking #${bookingId}`);
+    // חישוב דמי התפעול בפועל אחרי הקופון
+    const actualOperationalFeeCents = finalTotalPriceCents - originalParkingCostCents;
+    console.log(`💳 Coupon adjustment:`, {
+        originalParking: `₪${originalParkingCostCents / 100}`,
+        finalTotal: `₪${finalTotalPriceCents / 100}`,
+        actualOperationalFee: `₪${actualOperationalFeeCents / 100}`
+    });
+    const updatedFee = await prisma_1.prisma.operationalFee.update({
+        where: { bookingId },
+        data: {
+            operationalFeeCents: actualOperationalFeeCents,
+            totalPaymentCents: finalTotalPriceCents,
+        },
+    });
+    console.log(`💳 ✅ Operational fee updated after coupon:`, {
+        id: updatedFee.id,
+        bookingId: updatedFee.bookingId,
+        parkingCost: `₪${updatedFee.parkingCostCents / 100}`,
+        operationalFee: `₪${updatedFee.operationalFeeCents / 100}`,
+        totalPayment: `₪${updatedFee.totalPaymentCents / 100}`,
+    });
+    return updatedFee;
 }
 exports.default = {
     calculateOperationalFee,
     createOperationalFee,
     getOperationalFeeByBookingId,
     updateOperationalFeeForExtension,
-    getOperationalFeeStats
+    updateOperationalFeeAfterCoupon,
+    getOperationalFeeStats,
 };

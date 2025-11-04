@@ -188,10 +188,52 @@ export async function getOperationalFeeStats(filters?: { startDate?: Date; endDa
   };
 }
 
+/**
+ * עדכון דמי תפעול אחרי שימוש בקופון
+ * @param bookingId - מזהה ההזמנה
+ * @param finalTotalPriceCents - המחיר הסופי שהמשתמש שילם (אחרי הנחה)
+ * @param originalParkingCostCents - עלות החניה המקורית
+ */
+export async function updateOperationalFeeAfterCoupon(
+  bookingId: number,
+  finalTotalPriceCents: number,
+  originalParkingCostCents: number
+) {
+  console.log(`💳 Updating operational fee after coupon for booking #${bookingId}`);
+  
+  // חישוב דמי התפעול בפועל אחרי הקופון
+  const actualOperationalFeeCents = finalTotalPriceCents - originalParkingCostCents;
+  
+  console.log(`💳 Coupon adjustment:`, {
+    originalParking: `₪${originalParkingCostCents / 100}`,
+    finalTotal: `₪${finalTotalPriceCents / 100}`,
+    actualOperationalFee: `₪${actualOperationalFeeCents / 100}`
+  });
+
+  const updatedFee = await prisma.operationalFee.update({
+    where: { bookingId },
+    data: {
+      operationalFeeCents: actualOperationalFeeCents,
+      totalPaymentCents: finalTotalPriceCents,
+    },
+  });
+
+  console.log(`💳 ✅ Operational fee updated after coupon:`, {
+    id: updatedFee.id,
+    bookingId: updatedFee.bookingId,
+    parkingCost: `₪${updatedFee.parkingCostCents / 100}`,
+    operationalFee: `₪${updatedFee.operationalFeeCents / 100}`,
+    totalPayment: `₪${updatedFee.totalPaymentCents / 100}`,
+  });
+
+  return updatedFee;
+}
+
 export default {
   calculateOperationalFee,
   createOperationalFee,
   getOperationalFeeByBookingId,
   updateOperationalFeeForExtension,
+  updateOperationalFeeAfterCoupon,
   getOperationalFeeStats,
 };

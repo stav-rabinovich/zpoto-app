@@ -46,7 +46,7 @@ async function getListingRequest(id) {
 async function approveListingRequest(id) {
     const request = await prisma_1.prisma.listingRequest.findUnique({
         where: { id },
-        include: { user: true }
+        include: { user: true },
     });
     if (!request)
         throw new Error('REQUEST_NOT_FOUND');
@@ -81,7 +81,7 @@ async function approveListingRequest(id) {
         data: {
             role: 'OWNER',
             password: hashedPassword,
-            isBlocked: true // משתמש חדש נוצר חסום עד השלמת מסמכים
+            isBlocked: true, // משתמש חדש נוצר חסום עד השלמת מסמכים
         },
     });
     console.log(`🔑 Generated temporary password for owner ${request.userId}: ${tempPassword}`);
@@ -89,8 +89,8 @@ async function approveListingRequest(id) {
     try {
         const userDocuments = await prisma_1.prisma.document.findMany({
             where: {
-                userId: request.userId
-            }
+                userId: request.userId,
+            },
         });
         if (userDocuments.length > 0) {
             console.log(`📄 Found ${userDocuments.length} documents for approved user ${request.userId}`);
@@ -103,7 +103,7 @@ async function approveListingRequest(id) {
         request: updatedRequest,
         parking,
         tempPassword: tempPassword,
-        userEmail: request.user.email
+        userEmail: request.user.email,
     };
 }
 /**
@@ -118,7 +118,7 @@ async function rejectRequest(id, reason) {
         throw new Error('REQUEST_ALREADY_PROCESSED');
     // מחיקת כל החניות של המשתמש (אם קיימות)
     await prisma_1.prisma.parking.deleteMany({
-        where: { ownerId: request.userId }
+        where: { ownerId: request.userId },
     });
     // עדכון הבקשה כנדחית והחזרת המשתמש למצב מחפש חניה
     const [updatedRequest] = await Promise.all([
@@ -134,9 +134,9 @@ async function rejectRequest(id, reason) {
             where: { id: request.userId },
             data: {
                 role: 'USER', // החזרה למחפש חניה
-                ownershipBlocked: true // חסימה מהגשת בקשות עתידיות
-            }
-        })
+                ownershipBlocked: true, // חסימה מהגשת בקשות עתידיות
+            },
+        }),
     ]);
     console.log(`✅ Request ${id} rejected and user ${request.userId} blocked from ownership`);
     return updatedRequest;
@@ -151,7 +151,7 @@ async function unblockOwnership(userId) {
         throw new Error('USER_NOT_FOUND');
     return prisma_1.prisma.user.update({
         where: { id: userId },
-        data: { ownershipBlocked: false }
+        data: { ownershipBlocked: false },
     });
 }
 /**
@@ -170,21 +170,49 @@ async function getStats() {
     const confirmedBookings = await prisma_1.prisma.booking.count({
         where: { status: 'CONFIRMED' },
     });
-    // חישוב הכנסות (סכום totalPriceCents)
+    // חישוב הכנסות מפורט - לפי כללי הברזל
     const bookingsWithPrice = await prisma_1.prisma.booking.findMany({
         where: {
             status: 'CONFIRMED',
             totalPriceCents: { not: null },
         },
-        select: { totalPriceCents: true },
+        select: {
+            id: true,
+            totalPriceCents: true,
+        },
     });
+    // חישוב הנחות מקופונים - זמנית ללא נתונים עד שPrisma יתעדכן
+    const discountsByBooking = {};
+    // TODO: לאחר עדכון Prisma Client, להחזיר:
+    // const couponUsages = await prisma.couponUsage.findMany({
+    //   select: { discountAmountCents: true, bookingId: true }
+    // });
     console.log(`💰 Admin stats calculation:`);
     console.log(`💰 Found ${bookingsWithPrice.length} confirmed bookings with price`);
+    let totalRevenueCents = 0;
+    let totalOperationalFeeCents = 0; // דמי תפעול כוללים
+    let totalOperationalFeeAfterDiscountsCents = 0; // דמי תפעול לאחר הנחות
+    let totalDiscountsCents = 0;
     bookingsWithPrice.forEach((booking, index) => {
-        console.log(`💰 Booking ${index + 1}: ₪${(booking.totalPriceCents || 0) / 100}`);
+        const bookingRevenue = booking.totalPriceCents || 0;
+        const bookingDiscount = discountsByBooking[booking.id] || 0;
+        // חישוב דמי תפעול נכון:
+        // אם יש הנחה, המחיר המקורי היה bookingRevenue + bookingDiscount
+        // אם אין הנחה, המחיר המקורי הוא bookingRevenue
+        const originalPriceCents = bookingRevenue + bookingDiscount;
+        const originalOperationalFeeCents = Math.round(originalPriceCents * 0.1);
+        // דמי התפעול הסופיים (אחרי הנחה) = דמי תפעול מקוריים - הנחה
+        const finalOperationalFeeCents = Math.max(0, originalOperationalFeeCents - bookingDiscount);
+        totalRevenueCents += bookingRevenue;
+        totalOperationalFeeCents += originalOperationalFeeCents; // דמי תפעול לפני הנחה
+        totalDiscountsCents += bookingDiscount;
+        totalOperationalFeeAfterDiscountsCents += finalOperationalFeeCents; // דמי תפעול אחרי הנחה
+        console.log(`💰 Booking ${index + 1}: מחיר מקורי: ₪${originalPriceCents / 100}, מחיר סופי: ₪${bookingRevenue / 100}, דמי תפעול מקוריים: ₪${originalOperationalFeeCents / 100}, דמי תפעול סופיים: ₪${finalOperationalFeeCents / 100}, הנחה: ₪${bookingDiscount / 100}`);
     });
-    const totalRevenueCents = bookingsWithPrice.reduce((sum, b) => sum + (b.totalPriceCents || 0), 0);
-    console.log(`💰 Total revenue for admin: ₪${totalRevenueCents / 100} (${totalRevenueCents} cents)`);
+    console.log(`💰 Total revenue: ₪${totalRevenueCents / 100}`);
+    console.log(`💰 Total operational fees (before discounts): ₪${totalOperationalFeeCents / 100}`);
+    console.log(`💰 Total discounts: ₪${totalDiscountsCents / 100}`);
+    console.log(`💰 Total operational fees (after discounts): ₪${totalOperationalFeeAfterDiscountsCents / 100}`);
     return {
         totalUsers,
         totalParkings,
@@ -194,6 +222,15 @@ async function getStats() {
         confirmedBookings,
         totalRevenueCents,
         totalRevenueILS: (totalRevenueCents / 100).toFixed(2),
+        // הכנסות מדמי תפעול לפי כללי הברזל
+        operationalFees: {
+            totalCents: totalOperationalFeeCents,
+            totalILS: (totalOperationalFeeCents / 100).toFixed(2),
+            afterDiscountsCents: totalOperationalFeeAfterDiscountsCents,
+            afterDiscountsILS: (totalOperationalFeeAfterDiscountsCents / 100).toFixed(2),
+            totalDiscountsCents,
+            totalDiscountsILS: (totalDiscountsCents / 100).toFixed(2),
+        },
     };
 }
 /**
@@ -231,9 +268,9 @@ async function listUsers() {
                             startTime: true,
                             endTime: true,
                             totalPriceCents: true,
-                        }
-                    }
-                }
+                        },
+                    },
+                },
             },
             _count: {
                 select: {
@@ -259,12 +296,8 @@ async function listUsers() {
             return total + (booking.totalPriceCents || 0);
         }, 0);
         // חישוב ממוצעים
-        const averageParkingDuration = confirmedBookings.length > 0
-            ? totalParkingHours / confirmedBookings.length
-            : 0;
-        const averageCostPerBooking = confirmedBookings.length > 0
-            ? (totalSpentCents / 100) / confirmedBookings.length
-            : 0;
+        const averageParkingDuration = confirmedBookings.length > 0 ? totalParkingHours / confirmedBookings.length : 0;
+        const averageCostPerBooking = confirmedBookings.length > 0 ? totalSpentCents / 100 / confirmedBookings.length : 0;
         // ספירת בקשות שהגיש המשתמש
         const totalRequestsSubmitted = user._count.listingRequests || 0;
         // חישוב פעילות אחרונה
@@ -291,7 +324,7 @@ async function listUsers() {
                 confirmedOwnerBookings: confirmedOwnerBookings.length,
                 totalOwnerParkingHours: Math.round(totalOwnerParkingHours * 10) / 10,
                 totalOwnerRevenueCents,
-                totalOwnerRevenueILS: (totalOwnerRevenueCents / 100).toFixed(2)
+                totalOwnerRevenueILS: (totalOwnerRevenueCents / 100).toFixed(2),
             };
         }
         console.log(`👤 User ${user.id} (${user.email}): ${confirmedBookings.length} bookings, ${totalParkingHours.toFixed(1)}h, ₪${(totalSpentCents / 100).toFixed(2)} spent${ownerStats ? `, Owner: ${ownerStats.totalParkings} parkings, ₪${ownerStats.totalOwnerRevenueILS} earned` : ''}`);
@@ -313,8 +346,8 @@ async function listUsers() {
                 totalRequestsSubmitted,
                 recentBookingsMonth: recentBookings,
                 // סטטיסטיקות כבעל חניה
-                ...ownerStats
-            }
+                ...ownerStats,
+            },
         };
     });
     console.log(`👥 Admin users loaded: ${usersWithStats.length} users with full synchronized stats`);

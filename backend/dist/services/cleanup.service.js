@@ -14,27 +14,27 @@ async function fixOrphanedOwners() {
         // מציאת כל המשתמשים עם role OWNER
         const owners = await prisma_1.prisma.user.findMany({
             where: { role: 'OWNER' },
-            select: { id: true, email: true, name: true }
+            select: { id: true, email: true, name: true },
         });
         console.log(`🔍 Found ${owners.length} users with OWNER role`);
         const fixedUsers = [];
         for (const owner of owners) {
             // בדיקה אם יש לו חניות
             const parkingCount = await prisma_1.prisma.parking.count({
-                where: { ownerId: owner.id }
+                where: { ownerId: owner.id },
             });
             if (parkingCount === 0) {
                 // אין לו חניות - צריך להחזיר אותו ל-USER
                 console.log(`🔧 Fixing user ${owner.id} (${owner.email}) - no parkings found`);
                 await prisma_1.prisma.user.update({
                     where: { id: owner.id },
-                    data: { role: 'USER' }
+                    data: { role: 'USER' },
                 });
                 fixedUsers.push({
                     id: owner.id,
                     email: owner.email,
                     name: owner.name,
-                    issue: 'OWNER without parkings'
+                    issue: 'OWNER without parkings',
                 });
             }
         }
@@ -42,14 +42,14 @@ async function fixOrphanedOwners() {
         return {
             success: true,
             message: `Fixed ${fixedUsers.length} orphaned owners`,
-            fixedUsers
+            fixedUsers,
         };
     }
     catch (error) {
         console.error('❌ Error in orphaned owners cleanup:', error);
         return {
             success: false,
-            error: error?.message || 'Unknown error'
+            error: error?.message || 'Unknown error',
         };
     }
 }
@@ -64,33 +64,33 @@ async function systemHealthCheck() {
         const ownersWithoutParkings = await prisma_1.prisma.user.count({
             where: {
                 role: 'OWNER',
-                ownedParkings: { none: {} }
-            }
+                ownedParkings: { none: {} },
+            },
         });
         if (ownersWithoutParkings > 0) {
             issues.push({
                 type: 'ORPHANED_OWNERS',
                 count: ownersWithoutParkings,
-                description: 'משתמשים עם role OWNER אבל בלי חניות'
+                description: 'משתמשים עם role OWNER אבל בלי חניות',
             });
         }
-        // בדיקה 2: חניות ללא בעלים  
+        // בדיקה 2: חניות ללא בעלים
         const parkingsWithoutOwners = await prisma_1.prisma.parking.count({
             where: {
                 NOT: {
                     owner: {
                         id: {
-                            gt: 0
-                        }
-                    }
-                }
-            }
+                            gt: 0,
+                        },
+                    },
+                },
+            },
         });
         if (parkingsWithoutOwners > 0) {
             issues.push({
                 type: 'ORPHANED_PARKINGS',
                 count: parkingsWithoutOwners,
-                description: 'חניות ללא בעלים'
+                description: 'חניות ללא בעלים',
             });
         }
         // בדיקה 3: בקשות שאושרו אבל המשתמש לא OWNER
@@ -98,15 +98,15 @@ async function systemHealthCheck() {
             where: {
                 status: 'APPROVED',
                 user: {
-                    role: { not: 'OWNER' }
-                }
-            }
+                    role: { not: 'OWNER' },
+                },
+            },
         });
         if (approvedRequestsWithoutOwnerRole > 0) {
             issues.push({
                 type: 'APPROVED_WITHOUT_ROLE',
                 count: approvedRequestsWithoutOwnerRole,
-                description: 'בקשות מאושרות אבל המשתמש לא OWNER'
+                description: 'בקשות מאושרות אבל המשתמש לא OWNER',
             });
         }
         console.log(`🏥 Health check completed - found ${issues.length} issues`);
@@ -114,14 +114,14 @@ async function systemHealthCheck() {
             success: true,
             healthy: issues.length === 0,
             issues,
-            summary: issues.length === 0 ? 'System is healthy' : `Found ${issues.length} issues`
+            summary: issues.length === 0 ? 'System is healthy' : `Found ${issues.length} issues`,
         };
     }
     catch (error) {
         console.error('❌ Error in system health check:', error);
         return {
             success: false,
-            error: error?.message || 'Unknown error'
+            error: error?.message || 'Unknown error',
         };
     }
 }
@@ -136,21 +136,21 @@ async function autoFixSystemIssues() {
         const orphanedOwnersResult = await fixOrphanedOwners();
         results.push({
             type: 'ORPHANED_OWNERS',
-            result: orphanedOwnersResult
+            result: orphanedOwnersResult,
         });
         // כאן אפשר להוסיף תיקונים נוספים בעתיד
         const successCount = results.filter(r => r.result.success).length;
         return {
             success: successCount === results.length,
             message: `Completed ${successCount}/${results.length} fixes`,
-            results
+            results,
         };
     }
     catch (error) {
         console.error('❌ Error in auto fix:', error);
         return {
             success: false,
-            error: error?.message || 'Unknown error'
+            error: error?.message || 'Unknown error',
         };
     }
 }

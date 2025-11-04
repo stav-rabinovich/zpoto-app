@@ -15,7 +15,6 @@ const owner_routes_1 = __importDefault(require("./routes/owner.routes"));
 const documents_routes_1 = __importDefault(require("./routes/documents.routes"));
 const commission_routes_1 = __importDefault(require("./routes/commission.routes"));
 const jobs_routes_1 = __importDefault(require("./routes/jobs.routes"));
-const quick_fix_routes_1 = __importDefault(require("./routes/quick-fix.routes"));
 const coupons_routes_1 = __importDefault(require("./routes/coupons.routes"));
 dotenv_1.default.config();
 const app = (0, express_1.default)();
@@ -67,8 +66,6 @@ const operationalFees_routes_1 = __importDefault(require("./routes/operationalFe
 app.use('/api/operational-fees', operationalFees_routes_1.default);
 // Jobs (עבודות רקע)
 app.use('/api/jobs', jobs_routes_1.default);
-// Quick Fix (תיקונים מיידיים)
-app.use('/api/quick-fix', quick_fix_routes_1.default);
 // Coupons (קופונים)
 app.use('/api/coupons', coupons_routes_1.default);
 // Vehicles
@@ -77,9 +74,6 @@ app.use('/api/vehicles', vehicles_routes_1.default);
 // Profile
 const profile_routes_1 = __importDefault(require("./routes/profile.routes"));
 app.use('/api/profile', profile_routes_1.default);
-// Chat
-const chat_routes_1 = __importDefault(require("./routes/chat.routes"));
-app.use('/api/chat', chat_routes_1.default);
 // Public (ללא אימות)
 const public_routes_1 = __importDefault(require("./routes/public.routes"));
 app.use('/api/public', public_routes_1.default);

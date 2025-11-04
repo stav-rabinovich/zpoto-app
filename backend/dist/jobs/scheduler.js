@@ -56,7 +56,7 @@ function startJobScheduler() {
             console.error('❌ Error in scheduled monthly payouts:', error);
         }
     }, {
-        timezone: 'Asia/Jerusalem'
+        timezone: 'Asia/Jerusalem',
     });
     // בדיקת בריאות מערכת - כל יום בשעה 08:00
     node_cron_1.default.schedule('0 8 * * *', async () => {
@@ -68,7 +68,7 @@ function startJobScheduler() {
             console.error('❌ Error in health check:', error);
         }
     }, {
-        timezone: 'Asia/Jerusalem'
+        timezone: 'Asia/Jerusalem',
     });
     console.log('✅ Job scheduler started successfully');
     console.log('📅 Monthly payouts: 1st of every month at 09:00 IST');
@@ -84,14 +84,14 @@ async function performHealthCheck() {
         await prisma.$queryRaw `SELECT 1`;
         // בדיקת עמלות שלא עובדו (אזהרה אם יש יותר מ-100)
         const unpaidCommissions = await prisma.commission.count({
-            where: { payoutProcessed: false }
+            where: { payoutProcessed: false },
         });
         if (unpaidCommissions > 100) {
             console.warn(`⚠️ High number of unpaid commissions: ${unpaidCommissions}`);
         }
         // בדיקת תשלומים שנכשלו
         const failedPayouts = await prisma.ownerPayout.count({
-            where: { status: 'FAILED' }
+            where: { status: 'FAILED' },
         });
         if (failedPayouts > 0) {
             console.warn(`⚠️ Failed payouts detected: ${failedPayouts}`);
@@ -99,7 +99,7 @@ async function performHealthCheck() {
         console.log('✅ Health check passed', {
             unpaidCommissions,
             failedPayouts,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
         });
     }
     catch (error) {

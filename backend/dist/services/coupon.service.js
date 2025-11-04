@@ -10,7 +10,7 @@ class CouponService {
     async createCoupon(data) {
         // בדיקה שהקוד לא קיים כבר
         const existingCoupon = await prisma.coupon.findUnique({
-            where: { code: data.code }
+            where: { code: data.code },
         });
         if (existingCoupon) {
             throw new Error(`קופון עם הקוד "${data.code}" כבר קיים`);
@@ -37,9 +37,9 @@ class CouponService {
             },
             include: {
                 createdBy: {
-                    select: { id: true, name: true, email: true }
-                }
-            }
+                    select: { id: true, name: true, email: true },
+                },
+            },
         });
     }
     /**
@@ -49,13 +49,13 @@ class CouponService {
         return await prisma.coupon.findMany({
             include: {
                 createdBy: {
-                    select: { id: true, name: true, email: true }
+                    select: { id: true, name: true, email: true },
                 },
                 usages: {
-                    select: { id: true, usedAt: true, discountAmountCents: true }
-                }
+                    select: { id: true, usedAt: true, discountAmountCents: true },
+                },
             },
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: 'desc' },
         });
     }
     /**
@@ -66,20 +66,20 @@ class CouponService {
             where: { id },
             include: {
                 createdBy: {
-                    select: { id: true, name: true, email: true }
+                    select: { id: true, name: true, email: true },
                 },
                 usages: {
                     include: {
                         user: {
-                            select: { id: true, name: true, email: true }
+                            select: { id: true, name: true, email: true },
                         },
                         booking: {
-                            select: { id: true, startTime: true, endTime: true }
-                        }
+                            select: { id: true, startTime: true, endTime: true },
+                        },
                     },
-                    orderBy: { usedAt: 'desc' }
-                }
-            }
+                    orderBy: { usedAt: 'desc' },
+                },
+            },
         });
     }
     /**
@@ -93,7 +93,7 @@ class CouponService {
         // אם מעדכנים קוד, בדוק שהוא לא קיים
         if (data.code && data.code !== existingCoupon.code) {
             const codeExists = await prisma.coupon.findUnique({
-                where: { code: data.code }
+                where: { code: data.code },
             });
             if (codeExists) {
                 throw new Error(`קופון עם הקוד "${data.code}" כבר קיים`);
@@ -107,9 +107,9 @@ class CouponService {
             },
             include: {
                 createdBy: {
-                    select: { id: true, name: true, email: true }
-                }
-            }
+                    select: { id: true, name: true, email: true },
+                },
+            },
         });
     }
     /**
@@ -122,7 +122,7 @@ class CouponService {
         }
         // בדוק אם יש שימושים בקופון
         const usageCount = await prisma.couponUsage.count({
-            where: { couponId: id }
+            where: { couponId: id },
         });
         if (usageCount > 0) {
             throw new Error('לא ניתן למחוק קופון שכבר נוצל');
@@ -136,40 +136,40 @@ class CouponService {
         const coupon = await prisma.coupon.findUnique({
             where: { code: code.toUpperCase() },
             include: {
-                usages: true
-            }
+                usages: true,
+            },
         });
         if (!coupon) {
             return {
                 isValid: false,
                 error: 'קופון לא נמצא',
-                errorCode: 'NOT_FOUND'
+                errorCode: 'NOT_FOUND',
             };
         }
         if (!coupon.isActive) {
             return {
                 isValid: false,
                 error: 'קופון לא פעיל',
-                errorCode: 'INACTIVE'
+                errorCode: 'INACTIVE',
             };
         }
         if (coupon.validUntil < new Date()) {
             return {
                 isValid: false,
                 error: 'קופון פג תוקף',
-                errorCode: 'EXPIRED'
+                errorCode: 'EXPIRED',
             };
         }
         if (coupon.maxUsage && coupon.usageCount >= coupon.maxUsage) {
             return {
                 isValid: false,
                 error: 'קופון הגיע למגבלת השימושים',
-                errorCode: 'MAX_USAGE_REACHED'
+                errorCode: 'MAX_USAGE_REACHED',
             };
         }
         return {
             isValid: true,
-            coupon
+            coupon,
         };
     }
     /**
@@ -204,7 +204,7 @@ class CouponService {
             discountAmountCents,
             originalAmountCents: totalAmountCents,
             finalAmountCents,
-            discountPercentage: Math.round(discountPercentage * 100) / 100 // עיגול ל-2 ספרות
+            discountPercentage: Math.round(discountPercentage * 100) / 100, // עיגול ל-2 ספרות
         };
     }
     /**
@@ -215,7 +215,7 @@ class CouponService {
             // עדכון מונה השימושים בקופון
             await tx.coupon.update({
                 where: { id: couponId },
-                data: { usageCount: { increment: 1 } }
+                data: { usageCount: { increment: 1 } },
             });
             // רישום השימוש
             return await tx.couponUsage.create({
@@ -226,7 +226,7 @@ class CouponService {
                     discountAmountCents: discountCalculation.discountAmountCents,
                     originalAmountCents: discountCalculation.originalAmountCents,
                     finalAmountCents: discountCalculation.finalAmountCents,
-                }
+                },
             });
         });
     }
@@ -236,11 +236,11 @@ class CouponService {
     async getCouponStats() {
         const totalCoupons = await prisma.coupon.count();
         const activeCoupons = await prisma.coupon.count({
-            where: { isActive: true, validUntil: { gt: new Date() } }
+            where: { isActive: true, validUntil: { gt: new Date() } },
         });
         const totalUsages = await prisma.couponUsage.count();
         const totalDiscountCents = await prisma.couponUsage.aggregate({
-            _sum: { discountAmountCents: true }
+            _sum: { discountAmountCents: true },
         });
         const topCoupons = await prisma.coupon.findMany({
             where: { usageCount: { gt: 0 } },
@@ -251,15 +251,15 @@ class CouponService {
                 code: true,
                 usageCount: true,
                 discountType: true,
-                discountValue: true
-            }
+                discountValue: true,
+            },
         });
         return {
             totalCoupons,
             activeCoupons,
             totalUsages,
             totalDiscountAmount: (totalDiscountCents._sum.discountAmountCents || 0) / 100,
-            topCoupons
+            topCoupons,
         };
     }
 }

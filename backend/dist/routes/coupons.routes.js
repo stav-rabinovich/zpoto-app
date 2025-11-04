@@ -29,7 +29,7 @@ r.post('/calculate-discount', async (req, res, next) => {
         const { code, parkingCostCents, operationalFeeCents } = req.body;
         if (!code || parkingCostCents === undefined || operationalFeeCents === undefined) {
             return res.status(400).json({
-                error: 'נדרשים: code, parkingCostCents, operationalFeeCents'
+                error: 'נדרשים: code, parkingCostCents, operationalFeeCents',
             });
         }
         // בדיקת תקינות הקופון
@@ -37,7 +37,7 @@ r.post('/calculate-discount', async (req, res, next) => {
         if (!validation.isValid) {
             return res.status(400).json({
                 error: validation.error,
-                errorCode: validation.errorCode
+                errorCode: validation.errorCode,
             });
         }
         // חישוב ההנחה
@@ -49,9 +49,9 @@ r.post('/calculate-discount', async (req, res, next) => {
                 code: validation.coupon.code,
                 discountType: validation.coupon.discountType,
                 discountValue: validation.coupon.discountValue,
-                applyTo: validation.coupon.applyTo
+                applyTo: validation.coupon.applyTo,
             },
-            discount
+            discount,
         });
     }
     catch (error) {

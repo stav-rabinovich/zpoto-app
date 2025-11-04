@@ -53,7 +53,7 @@ const STORAGE_CONFIG = {
     encryptedDir: 'documents/encrypted',
     publicDir: 'documents/public',
     tempDir: 'documents/temp',
-    backupDir: 'documents/backups'
+    backupDir: 'documents/backups',
 };
 /**
  * יצירת נתיב אחסון לפי סוג מסמך ומשתמש
@@ -124,7 +124,7 @@ async function storeDocument(file, documentType, userId) {
             isEncrypted: needsEncryption,
             encryptionKey,
             originalSize: file.size,
-            storedSize
+            storedSize,
         };
     }
     catch (error) {
@@ -145,7 +145,7 @@ async function storeDocument(file, documentType, userId) {
  * קריאת קובץ מהאחסון
  */
 async function retrieveDocument(filePath, isEncrypted, encryptionKey, userId, documentType) {
-    if (!await fileExists(filePath)) {
+    if (!(await fileExists(filePath))) {
         throw new Error(`File not found: ${filePath}`);
     }
     if (isEncrypted) {
@@ -173,7 +173,7 @@ async function deleteDocument(filePath) {
  * העברת מסמך לארכיון
  */
 async function archiveDocument(filePath, userId, documentType, reason) {
-    if (!await fileExists(filePath)) {
+    if (!(await fileExists(filePath))) {
         throw new Error(`File not found for archiving: ${filePath}`);
     }
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
@@ -190,7 +190,7 @@ async function archiveDocument(filePath, userId, documentType, reason) {
         userId,
         documentType,
         reason,
-        fileSize: fileContent.length
+        fileSize: fileContent.length,
     };
     await promises_1.default.writeFile(metadataPath, JSON.stringify(metadata, null, 2));
     console.log(`Document archived: ${archivePath}`);
@@ -221,7 +221,7 @@ async function performDailyBackup() {
  */
 async function cleanupTempFiles() {
     const tempDir = path_1.default.join(STORAGE_CONFIG.baseDir, STORAGE_CONFIG.tempDir);
-    if (!await fileExists(tempDir)) {
+    if (!(await fileExists(tempDir))) {
         return;
     }
     const files = await promises_1.default.readdir(tempDir);
@@ -245,7 +245,7 @@ async function getStorageStats() {
         totalSize: 0,
         encryptedFiles: 0,
         publicFiles: 0,
-        storageByType: {}
+        storageByType: {},
     };
     // סריקת תיקיות
     const encryptedDir = path_1.default.join(STORAGE_CONFIG.baseDir, STORAGE_CONFIG.encryptedDir);

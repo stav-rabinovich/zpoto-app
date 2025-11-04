@@ -17,7 +17,7 @@ async function updateParkingImages(userId, documentTypeName, imageUrl) {
     try {
         // מצא את החניה של המשתמש
         const parking = await prisma_1.prisma.parking.findFirst({
-            where: { ownerId: userId }
+            where: { ownerId: userId },
         });
         if (!parking) {
             console.log(`⚠️ No parking found for user ${userId}`);
@@ -44,7 +44,7 @@ async function updateParkingImages(userId, documentTypeName, imageUrl) {
         }
         await prisma_1.prisma.parking.update({
             where: { id: parking.id },
-            data: updateData
+            data: updateData,
         });
         console.log(`📸 Updated parking ${parking.id} with ${documentTypeName}: ${imageUrl}`);
     }
@@ -57,23 +57,18 @@ const upload = (0, multer_1.default)({
     storage: multer_1.default.memoryStorage(),
     limits: {
         fileSize: 10 * 1024 * 1024, // 10MB מקסימום
-        files: 1 // קובץ אחד בכל פעם
+        files: 1, // קובץ אחד בכל פעם
     },
     fileFilter: (req, file, cb) => {
         // בדיקות בסיסיות
-        const allowedMimeTypes = [
-            'application/pdf',
-            'image/jpeg',
-            'image/png',
-            'image/webp'
-        ];
+        const allowedMimeTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
         if (allowedMimeTypes.includes(file.mimetype)) {
             cb(null, true);
         }
         else {
             cb(new Error(`File type ${file.mimetype} not allowed`));
         }
-    }
+    },
 });
 /**
  * POST /api/documents/upload
@@ -84,11 +79,13 @@ r.post('/upload', auth_1.requireAdmin, upload.single('document'), async (req, re
         console.log('📄 Document upload request received');
         console.log('👤 Admin user ID:', req.userId);
         console.log('📝 Request body:', req.body);
-        console.log('📎 File info:', req.file ? {
-            originalname: req.file.originalname,
-            mimetype: req.file.mimetype,
-            size: req.file.size
-        } : 'No file');
+        console.log('📎 File info:', req.file
+            ? {
+                originalname: req.file.originalname,
+                mimetype: req.file.mimetype,
+                size: req.file.size,
+            }
+            : 'No file');
         const { userId, documentType } = req.body;
         const file = req.file;
         if (!file) {
@@ -99,14 +96,14 @@ r.post('/upload', auth_1.requireAdmin, upload.single('document'), async (req, re
         }
         // בדיקה שהמשתמש קיים
         const user = await prisma_1.prisma.user.findUnique({
-            where: { id: parseInt(userId) }
+            where: { id: parseInt(userId) },
         });
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
         // בדיקה שסוג המסמך קיים
         const docType = await prisma_1.prisma.documentType.findUnique({
-            where: { name: documentType }
+            where: { name: documentType },
         });
         if (!docType) {
             return res.status(400).json({ error: 'Invalid document type' });
@@ -116,13 +113,13 @@ r.post('/upload', auth_1.requireAdmin, upload.single('document'), async (req, re
             originalName: file.originalname,
             mimeType: file.mimetype,
             size: file.size,
-            buffer: file.buffer
+            buffer: file.buffer,
         };
         console.log('🔍 Validating document:', {
             originalName: fileInfo.originalName,
             mimeType: fileInfo.mimeType,
             size: fileInfo.size,
-            documentType
+            documentType,
         });
         // אימות הקובץ
         const validation = (0, documentValidation_service_1.validateDocument)(fileInfo, documentType);
@@ -131,7 +128,7 @@ r.post('/upload', auth_1.requireAdmin, upload.single('document'), async (req, re
             console.log('❌ Validation failed:', validation.errors);
             return res.status(400).json({
                 error: 'File validation failed',
-                details: validation.errors
+                details: validation.errors,
             });
         }
         // שמירת הקובץ
@@ -150,12 +147,12 @@ r.post('/upload', auth_1.requireAdmin, upload.single('document'), async (req, re
                 isEncrypted: storageResult.isEncrypted,
                 encryptionKey: storageResult.encryptionKey,
                 uploadedByUserId: req.userId,
-                requiresSignature: docType.requiresSignature
+                requiresSignature: docType.requiresSignature,
             },
             include: {
                 documentType: true,
-                user: { select: { name: true, email: true } }
-            }
+                user: { select: { name: true, email: true } },
+            },
         });
         // רישום באוטיט
         await prisma_1.prisma.documentAuditLog.create({
@@ -167,12 +164,12 @@ r.post('/upload', auth_1.requireAdmin, upload.single('document'), async (req, re
                     originalFileName: file.originalname,
                     fileSize: file.size,
                     documentType: documentType,
-                    targetUserId: parseInt(userId)
+                    targetUserId: parseInt(userId),
                 },
                 ipAddress: req.ip,
                 userAgent: req.get('User-Agent'),
-                success: true
-            }
+                success: true,
+            },
         });
         console.log(`📄 Document uploaded: ${document.id} for user ${userId} by admin ${req.userId}`);
         res.json({
@@ -183,28 +180,30 @@ r.post('/upload', auth_1.requireAdmin, upload.single('document'), async (req, re
                 documentType: document.documentType.nameHe,
                 status: document.status,
                 createdAt: document.createdAt,
-                user: document.user
+                user: document.user,
             },
-            warnings: validation.warnings
+            warnings: validation.warnings,
         });
     }
     catch (error) {
         console.error('Document upload error:', error);
         // רישום שגיאה באוטיט
         if (req.body.userId) {
-            await prisma_1.prisma.documentAuditLog.create({
+            await prisma_1.prisma.documentAuditLog
+                .create({
                 data: {
                     userId: req.userId,
                     action: 'UPLOAD',
                     details: {
                         error: error instanceof Error ? error.message : 'Unknown error',
                         targetUserId: parseInt(req.body.userId),
-                        documentType: req.body.documentType
+                        documentType: req.body.documentType,
                     },
                     success: false,
-                    errorMessage: error instanceof Error ? error.message : 'Unknown error'
-                }
-            }).catch(console.error);
+                    errorMessage: error instanceof Error ? error.message : 'Unknown error',
+                },
+            })
+                .catch(console.error);
         }
         next(error);
     }
@@ -220,9 +219,9 @@ r.get('/user/:userId', auth_1.requireAdmin, async (req, res, next) => {
             where: { userId },
             include: {
                 documentType: true,
-                uploadedBy: { select: { name: true } }
+                uploadedBy: { select: { name: true } },
             },
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: 'desc' },
         });
         // רישום באוטיט
         await prisma_1.prisma.documentAuditLog.create({
@@ -231,10 +230,10 @@ r.get('/user/:userId', auth_1.requireAdmin, async (req, res, next) => {
                 action: 'VIEW',
                 details: {
                     targetUserId: userId,
-                    documentsCount: documents.length
+                    documentsCount: documents.length,
                 },
-                success: true
-            }
+                success: true,
+            },
         });
         res.json({
             success: true,
@@ -249,8 +248,8 @@ r.get('/user/:userId', auth_1.requireAdmin, async (req, res, next) => {
                 rejectionReason: doc.rejectionReason,
                 createdAt: doc.createdAt,
                 approvedAt: doc.approvedAt,
-                uploadedBy: doc.uploadedBy?.name
-            }))
+                uploadedBy: doc.uploadedBy?.name,
+            })),
         });
     }
     catch (error) {
@@ -273,13 +272,19 @@ r.get('/parking-image/:documentId', async (req, res, next) => {
         // וודא שזו תמונת חניה (public)
         const document = await prisma_1.prisma.document.findUnique({
             where: { id: documentId },
-            include: { documentType: true }
+            include: { documentType: true },
         });
         if (!document) {
             return res.status(404).json({ error: 'Document not found' });
         }
         // וודא שזו תמונת חניה
-        const parkingImageTypes = ['parking_entrance', 'parking_empty', 'parking_with_car', 'parking_additional', 'parking_photo'];
+        const parkingImageTypes = [
+            'parking_entrance',
+            'parking_empty',
+            'parking_with_car',
+            'parking_additional',
+            'parking_photo',
+        ];
         if (!parkingImageTypes.includes(document.documentType.name)) {
             return res.status(403).json({ error: 'Not a parking image' });
         }
@@ -293,7 +298,7 @@ r.get('/parking-image/:documentId', async (req, res, next) => {
             'Content-Type': document.mimeType,
             'Content-Length': fileBuffer.length.toString(),
             'Cache-Control': 'public, max-age=3600', // Cache for 1 hour
-            'Content-Disposition': 'inline'
+            'Content-Disposition': 'inline',
         });
         res.send(fileBuffer);
     }
@@ -313,8 +318,8 @@ r.get('/secure/:documentId', auth_1.requireAuth, async (req, res, next) => {
             where: { id: documentId },
             include: {
                 user: true,
-                documentType: true
-            }
+                documentType: true,
+            },
         });
         if (!document) {
             return res.status(404).json({ error: 'Document not found' });
@@ -330,8 +335,8 @@ r.get('/secure/:documentId', auth_1.requireAuth, async (req, res, next) => {
                     userId: req.userId,
                     action: 'VIEW',
                     success: false,
-                    errorMessage: 'Access denied'
-                }
+                    errorMessage: 'Access denied',
+                },
             });
             return res.status(403).json({ error: 'Access denied' });
         }
@@ -345,12 +350,12 @@ r.get('/secure/:documentId', auth_1.requireAuth, async (req, res, next) => {
                 action: 'VIEW',
                 details: {
                     fileSize: fileBuffer.length,
-                    mimeType: document.mimeType
+                    mimeType: document.mimeType,
                 },
                 ipAddress: req.ip,
                 userAgent: req.get('User-Agent'),
-                success: true
-            }
+                success: true,
+            },
         });
         // החזרת הקובץ
         res.set({
@@ -358,8 +363,8 @@ r.get('/secure/:documentId', auth_1.requireAuth, async (req, res, next) => {
             'Content-Length': fileBuffer.length.toString(),
             'Content-Disposition': `inline; filename="${document.originalFileName}"`,
             'Cache-Control': 'private, no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0'
+            Pragma: 'no-cache',
+            Expires: '0',
         });
         res.send(fileBuffer);
     }
@@ -378,7 +383,7 @@ r.post('/:documentId/approve', auth_1.requireAdmin, async (req, res, next) => {
         const { notes } = req.body;
         const document = await prisma_1.prisma.document.findUnique({
             where: { id: documentId },
-            include: { user: true, documentType: true }
+            include: { user: true, documentType: true },
         });
         if (!document) {
             return res.status(404).json({ error: 'Document not found' });
@@ -392,8 +397,8 @@ r.post('/:documentId/approve', auth_1.requireAdmin, async (req, res, next) => {
             data: {
                 status: 'APPROVED',
                 approvedAt: new Date(),
-                notes: notes || null
-            }
+                notes: notes || null,
+            },
         });
         // רישום באוטיט
         await prisma_1.prisma.documentAuditLog.create({
@@ -403,10 +408,10 @@ r.post('/:documentId/approve', auth_1.requireAdmin, async (req, res, next) => {
                 action: 'APPROVE',
                 details: {
                     notes: notes,
-                    previousStatus: document.status
+                    previousStatus: document.status,
                 },
-                success: true
-            }
+                success: true,
+            },
         });
         // אם זו תמונת חניה, עדכן את החניה
         await updateParkingImages(document.userId, document.documentType.name, `/api/documents/parking-image/${documentId}`);
@@ -419,8 +424,8 @@ r.post('/:documentId/approve', auth_1.requireAdmin, async (req, res, next) => {
                 id: updatedDocument.id,
                 status: updatedDocument.status,
                 approvedAt: updatedDocument.approvedAt,
-                notes: updatedDocument.notes
-            }
+                notes: updatedDocument.notes,
+            },
         });
     }
     catch (error) {
@@ -441,7 +446,7 @@ r.post('/:documentId/reject', auth_1.requireAdmin, async (req, res, next) => {
         }
         const document = await prisma_1.prisma.document.findUnique({
             where: { id: documentId },
-            include: { user: true }
+            include: { user: true },
         });
         if (!document) {
             return res.status(404).json({ error: 'Document not found' });
@@ -452,8 +457,8 @@ r.post('/:documentId/reject', auth_1.requireAdmin, async (req, res, next) => {
             data: {
                 status: 'REJECTED',
                 rejectionReason: reason,
-                notes: notes || null
-            }
+                notes: notes || null,
+            },
         });
         // רישום באוטיט
         await prisma_1.prisma.documentAuditLog.create({
@@ -464,10 +469,10 @@ r.post('/:documentId/reject', auth_1.requireAdmin, async (req, res, next) => {
                 details: {
                     reason: reason,
                     notes: notes,
-                    previousStatus: document.status
+                    previousStatus: document.status,
                 },
-                success: true
-            }
+                success: true,
+            },
         });
         console.log(`❌ Document rejected: ${documentId} by admin ${req.userId}`);
         res.json({
@@ -476,8 +481,8 @@ r.post('/:documentId/reject', auth_1.requireAdmin, async (req, res, next) => {
                 id: updatedDocument.id,
                 status: updatedDocument.status,
                 rejectionReason: updatedDocument.rejectionReason,
-                notes: updatedDocument.notes
-            }
+                notes: updatedDocument.notes,
+            },
         });
     }
     catch (error) {
@@ -493,7 +498,7 @@ r.get('/types', auth_1.requireAdmin, async (req, res, next) => {
     try {
         const documentTypes = await prisma_1.prisma.documentType.findMany({
             where: { isActive: true },
-            orderBy: { displayOrder: 'asc' }
+            orderBy: { displayOrder: 'asc' },
         });
         res.json({
             success: true,
@@ -506,8 +511,8 @@ r.get('/types', auth_1.requireAdmin, async (req, res, next) => {
                 isRequired: type.isRequired,
                 allowedMimeTypes: type.allowedMimeTypes,
                 maxFileSizeKB: type.maxFileSizeKB,
-                requiresSignature: type.requiresSignature
-            }))
+                requiresSignature: type.requiresSignature,
+            })),
         });
     }
     catch (error) {
@@ -524,8 +529,8 @@ async function checkAndUpdateListingRequestStatus(userId) {
         const listingRequest = await prisma_1.prisma.listingRequest.findFirst({
             where: {
                 userId,
-                status: 'PENDING'
-            }
+                status: 'PENDING',
+            },
         });
         if (!listingRequest) {
             return; // אין בקשה פעילה
@@ -534,15 +539,15 @@ async function checkAndUpdateListingRequestStatus(userId) {
         const requiredDocTypes = await prisma_1.prisma.documentType.findMany({
             where: {
                 isRequired: true,
-                isActive: true
-            }
+                isActive: true,
+            },
         });
         const approvedDocs = await prisma_1.prisma.document.findMany({
             where: {
                 userId,
-                status: 'APPROVED'
+                status: 'APPROVED',
             },
-            include: { documentType: true }
+            include: { documentType: true },
         });
         const approvedTypeIds = approvedDocs.map(doc => doc.documentTypeId);
         const allRequiredApproved = requiredDocTypes.every(type => approvedTypeIds.includes(type.id));
@@ -556,8 +561,8 @@ async function checkAndUpdateListingRequestStatus(userId) {
             const pendingDocs = await prisma_1.prisma.document.count({
                 where: {
                     userId,
-                    status: 'UPLOADED'
-                }
+                    status: 'UPLOADED',
+                },
             });
             if (pendingDocs > 0) {
                 newDocumentsStatus = 'PENDING';
@@ -565,7 +570,7 @@ async function checkAndUpdateListingRequestStatus(userId) {
         }
         await prisma_1.prisma.listingRequest.update({
             where: { id: listingRequest.id },
-            data: { documentsStatus: newDocumentsStatus }
+            data: { documentsStatus: newDocumentsStatus },
         });
         console.log(`Updated listing request ${listingRequest.id} documents status to: ${newDocumentsStatus}`);
     }
