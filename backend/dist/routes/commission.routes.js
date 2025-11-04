@@ -17,7 +17,7 @@ router.post('/calculate', async (req, res, next) => {
         if (!bookingId || !totalPriceCents) {
             return res.status(400).json({
                 success: false,
-                error: 'Missing required fields: bookingId, totalPriceCents'
+                error: 'Missing required fields: bookingId, totalPriceCents',
             });
         }
         console.log(`💰 API: Calculating commission for booking ${bookingId}`);
@@ -35,8 +35,8 @@ router.post('/calculate', async (req, res, next) => {
                 commissionRate: calculation.commissionRate,
                 commissionILS: (calculation.commissionCents / 100).toFixed(2),
                 netOwnerILS: (calculation.netOwnerCents / 100).toFixed(2),
-                hourlyBreakdown: calculation.hourlyBreakdown
-            }
+                hourlyBreakdown: calculation.hourlyBreakdown,
+            },
         });
     }
     catch (error) {
@@ -55,7 +55,7 @@ router.get('/owner/:ownerId/commissions', async (req, res, next) => {
         if (!ownerId) {
             return res.status(400).json({
                 success: false,
-                error: 'Missing ownerId parameter'
+                error: 'Missing ownerId parameter',
             });
         }
         // ברירת מחדל - החודש הנוכחי
@@ -80,15 +80,15 @@ router.get('/owner/:ownerId/commissions', async (req, res, next) => {
                     calculatedAt: c.calculatedAt,
                     parking: {
                         title: c.booking.parking.title,
-                        address: c.booking.parking.address
+                        address: c.booking.parking.address,
                     },
                     booking: {
                         startTime: c.booking.startTime,
                         endTime: c.booking.endTime,
-                        paidAt: c.booking.paidAt
-                    }
-                }))
-            }
+                        paidAt: c.booking.paidAt,
+                    },
+                })),
+            },
         });
     }
     catch (error) {
@@ -107,27 +107,27 @@ router.get('/owner/:ownerId/payouts', async (req, res, next) => {
         if (!ownerId) {
             return res.status(400).json({
                 success: false,
-                error: 'Missing ownerId parameter'
+                error: 'Missing ownerId parameter',
             });
         }
         console.log(`💰 API: Getting payouts for owner ${ownerId}`);
         const payouts = await prisma_1.prisma.ownerPayout.findMany({
             where: {
-                ownerId: parseInt(ownerId)
+                ownerId: parseInt(ownerId),
             },
             include: {
                 commissions: {
                     select: {
                         id: true,
                         commissionCents: true,
-                        netOwnerCents: true
-                    }
-                }
+                        netOwnerCents: true,
+                    },
+                },
             },
             orderBy: {
-                periodStart: 'desc'
+                periodStart: 'desc',
             },
-            take: parseInt(limit)
+            take: parseInt(limit),
         });
         res.json({
             success: true,
@@ -146,9 +146,9 @@ router.get('/owner/:ownerId/payouts', async (req, res, next) => {
                     notes: p.notes,
                     commissionsCount: p.commissions.length,
                     totalCommissionILS: (p.totalCommissionCents / 100).toFixed(2),
-                    netPayoutILS: (p.netPayoutCents / 100).toFixed(2)
-                }))
-            }
+                    netPayoutILS: (p.netPayoutCents / 100).toFixed(2),
+                })),
+            },
         });
     }
     catch (error) {
@@ -181,9 +181,9 @@ router.get('/admin/commissions', async (req, res, next) => {
                     totalNetOwnerCents: summary.totalNetOwnerCents,
                     totalCommissionILS: (summary.totalCommissionCents / 100).toFixed(2),
                     totalNetOwnerILS: (summary.totalNetOwnerCents / 100).toFixed(2),
-                    commissionsCount: summary.count
-                }))
-            }
+                    commissionsCount: summary.count,
+                })),
+            },
         });
     }
     catch (error) {
@@ -201,7 +201,7 @@ router.post('/admin/process-payout', async (req, res, next) => {
         if (!ownerId || !year || !month) {
             return res.status(400).json({
                 success: false,
-                error: 'Missing required fields: ownerId, year, month'
+                error: 'Missing required fields: ownerId, year, month',
             });
         }
         console.log(`💰 API: Processing payout for owner ${ownerId} for ${month}/${year}`);
@@ -210,7 +210,7 @@ router.post('/admin/process-payout', async (req, res, next) => {
         if (commissions.commissions.length === 0) {
             return res.status(400).json({
                 success: false,
-                error: 'No commissions found for this period'
+                error: 'No commissions found for this period',
             });
         }
         // יצירת תקופה
@@ -228,20 +228,20 @@ router.post('/admin/process-payout', async (req, res, next) => {
                 processedAt: new Date(),
                 paymentMethod,
                 paymentReference,
-                notes
-            }
+                notes,
+            },
         });
         // עדכון העמלות שהן שויכו לתשלום
         await prisma_1.prisma.commission.updateMany({
             where: {
                 id: {
-                    in: commissions.commissions.map(c => c.id)
-                }
+                    in: commissions.commissions.map(c => c.id),
+                },
             },
             data: {
                 payoutProcessed: true,
-                payoutId: payout.id
-            }
+                payoutId: payout.id,
+            },
         });
         res.json({
             success: true,
@@ -255,8 +255,8 @@ router.post('/admin/process-payout', async (req, res, next) => {
                 netPayoutILS: (payout.netPayoutCents / 100).toFixed(2),
                 commissionsProcessed: commissions.commissions.length,
                 status: payout.status,
-                processedAt: payout.processedAt
-            }
+                processedAt: payout.processedAt,
+            },
         });
     }
     catch (error) {

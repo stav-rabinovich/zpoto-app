@@ -50,15 +50,15 @@ const prisma = new client_1.PrismaClient();
 async function checkOwnerAvailability(parkingId, startTime, endTime) {
     console.log(`🔍 Extension: Checking owner availability for parking ${parkingId}:`, {
         startTime: startTime.toISOString(),
-        endTime: endTime.toISOString()
+        endTime: endTime.toISOString(),
     });
     // קבלת הגדרות זמינות החניה
     const parking = await prisma.parking.findUnique({
         where: { id: parkingId },
         select: {
             availability: true,
-            ownerId: true
-        }
+            ownerId: true,
+        },
     });
     if (!parking) {
         console.log(`❌ Extension: Parking ${parkingId} not found`);
@@ -82,11 +82,11 @@ async function checkOwnerAvailability(parkingId, startTime, endTime) {
         const startTimeIsrael = fromUTC(startTime);
         const unavailableFrom = startTimeIsrael.toLocaleTimeString('he-IL', {
             hour: '2-digit',
-            minute: '2-digit'
+            minute: '2-digit',
         });
         return {
             isAvailable: false,
-            unavailableFrom
+            unavailableFrom,
         };
     }
 }
@@ -104,24 +104,26 @@ async function checkExtensionEligibility(bookingId, userId) {
                     id: true,
                     title: true,
                     priceHr: true,
-                    ownerId: true
-                }
-            }
-        }
+                    ownerId: true,
+                },
+            },
+        },
     });
-    console.log(`📋 Booking found:`, booking ? {
-        id: booking.id,
-        userId: booking.userId,
-        status: booking.status,
-        startTime: booking.startTime,
-        endTime: booking.endTime,
-        parkingTitle: booking.parking?.title
-    } : 'No booking found');
+    console.log(`📋 Booking found:`, booking
+        ? {
+            id: booking.id,
+            userId: booking.userId,
+            status: booking.status,
+            startTime: booking.startTime,
+            endTime: booking.endTime,
+            parkingTitle: booking.parking?.title,
+        }
+        : 'No booking found');
     if (!booking) {
         return {
             success: false,
             canExtend: false,
-            reason: 'BOOKING_NOT_FOUND'
+            reason: 'BOOKING_NOT_FOUND',
         };
     }
     // 2. וודא שההזמנה שייכת למשתמש
@@ -130,14 +132,12 @@ async function checkExtensionEligibility(bookingId, userId) {
         return {
             success: false,
             canExtend: false,
-            reason: 'UNAUTHORIZED'
+            reason: 'UNAUTHORIZED',
         };
     }
     // 3. וודא שההזמנה פעילה כרגע או עתידית
     const now = new Date();
-    const isActive = booking.status === 'CONFIRMED' &&
-        booking.startTime <= now &&
-        booking.endTime > now;
+    const isActive = booking.status === 'CONFIRMED' && booking.startTime <= now && booking.endTime > now;
     const isUpcoming = booking.status === 'CONFIRMED' && booking.startTime > now;
     console.log(`⏰ Activity check:`, {
         status: booking.status,
@@ -147,14 +147,14 @@ async function checkExtensionEligibility(bookingId, userId) {
         isStarted: booking.startTime <= now,
         isNotEnded: booking.endTime > now,
         isActive,
-        isUpcoming
+        isUpcoming,
     });
     if (!isActive && !isUpcoming) {
         console.log(`❌ Booking not active or upcoming - status: ${booking.status}, period: ${booking.startTime} to ${booking.endTime}`);
         return {
             success: false,
             canExtend: false,
-            reason: 'BOOKING_NOT_ACTIVE'
+            reason: 'BOOKING_NOT_ACTIVE',
         };
     }
     // לחניות פעילות - בדיקה שנשארו לפחות 10 דקות
@@ -166,7 +166,7 @@ async function checkExtensionEligibility(bookingId, userId) {
             return {
                 success: false,
                 canExtend: false,
-                reason: 'TOO_CLOSE_TO_END'
+                reason: 'TOO_CLOSE_TO_END',
             };
         }
     }
@@ -183,30 +183,30 @@ async function checkExtensionEligibility(bookingId, userId) {
             parkingId: booking.parkingId,
             status: 'CONFIRMED',
             startTime: {
-                lt: newEndTime // מתחיל לפני שההארכה מסתיימת
+                lt: newEndTime, // מתחיל לפני שההארכה מסתיימת
             },
             endTime: {
-                gt: booking.endTime // מסתיים אחרי שההזמנה הנוכחית מסתיימת
+                gt: booking.endTime, // מסתיים אחרי שההזמנה הנוכחית מסתיימת
             },
             id: {
-                not: bookingId // לא ההזמנה הנוכחית
-            }
+                not: bookingId, // לא ההזמנה הנוכחית
+            },
         },
         include: {
             user: {
                 select: {
                     name: true,
-                    email: true
-                }
-            }
-        }
+                    email: true,
+                },
+            },
+        },
     });
     if (conflictingBooking) {
         console.log(`❌ Extension blocked by conflicting booking:`, {
             conflictId: conflictingBooking.id,
             conflictStart: conflictingBooking.startTime,
             conflictEnd: conflictingBooking.endTime,
-            conflictUser: conflictingBooking.user?.email
+            conflictUser: conflictingBooking.user?.email,
         });
         return {
             success: true,
@@ -216,8 +216,8 @@ async function checkExtensionEligibility(bookingId, userId) {
                 id: conflictingBooking.id,
                 startTime: conflictingBooking.startTime,
                 endTime: conflictingBooking.endTime,
-                userEmail: conflictingBooking.user?.email
-            }
+                userEmail: conflictingBooking.user?.email,
+            },
         };
     }
     // 7. בדיקת זמינות החניה מהבעלים - חסימת הארכה אם הוגדרה הגבלה
@@ -231,7 +231,7 @@ async function checkExtensionEligibility(bookingId, userId) {
             success: false,
             canExtend: false,
             reason: 'OWNER_UNAVAILABLE',
-            message: `החניה לא זמינה להארכה.\n\nבעל החניה הגדיר שהחניה פעילה רק עד ${availabilityCheck.unavailableFrom}.\n\nההארכה המבוקשת (30 דקות נוספות) תחרוג מהשעות הפעילות שהגדיר בעל החניה.`
+            message: `החניה לא זמינה להארכה.\n\nבעל החניה הגדיר שהחניה פעילה רק עד ${availabilityCheck.unavailableFrom}.\n\nההארכה המבוקשת (30 דקות נוספות) תחרוג מהשעות הפעילות שהגדיר בעל החניה.`,
         };
     }
     // 8. חישוב מחיר ההארכה - תמיד חצי מהמחיר של השעה הראשונה מהמחירון (עיגול כלפי מעלה)
@@ -239,7 +239,7 @@ async function checkExtensionEligibility(bookingId, userId) {
     // נסה לקרוא את המחירון החדש
     const parkingWithPricing = await prisma.parking.findUnique({
         where: { id: booking.parkingId },
-        select: { pricing: true, priceHr: true }
+        select: { pricing: true, priceHr: true },
     });
     if (parkingWithPricing?.pricing) {
         try {
@@ -247,9 +247,7 @@ async function checkExtensionEligibility(bookingId, userId) {
                 ? JSON.parse(parkingWithPricing.pricing)
                 : parkingWithPricing.pricing;
             if (pricingData?.hour1) {
-                const hour1Price = typeof pricingData.hour1 === 'string'
-                    ? parseFloat(pricingData.hour1)
-                    : pricingData.hour1;
+                const hour1Price = typeof pricingData.hour1 === 'string' ? parseFloat(pricingData.hour1) : pricingData.hour1;
                 if (!isNaN(hour1Price) && hour1Price > 0) {
                     firstHourPrice = hour1Price;
                     console.log(`💰 Using tiered pricing: hour1 = ₪${firstHourPrice}`);
@@ -262,7 +260,9 @@ async function checkExtensionEligibility(bookingId, userId) {
     }
     const extensionPrice = firstHourPrice / 2; // חצי מהמחיר
     const roundedExtensionPrice = Math.ceil(extensionPrice); // עיגול כלפי מעלה
-    const extensionPriceCents = roundedExtensionPrice * 100;
+    // הוספת דמי תפעול (10%) לפי כללי הברזל
+    const extensionPriceWithOperationalFee = roundedExtensionPrice * 1.1;
+    const extensionPriceCents = Math.round(extensionPriceWithOperationalFee * 100);
     console.log(`✅ Extension available:`, {
         extensionMinutes,
         legacyPriceHr: booking.parking.priceHr,
@@ -270,13 +270,13 @@ async function checkExtensionEligibility(bookingId, userId) {
         extensionPrice,
         roundedExtensionPrice,
         extensionPriceCents,
-        formula: 'Extension price = Math.ceil(First hour price / 2)'
+        formula: 'Extension price = Math.ceil(First hour price / 2) × 1.1 (with operational fee)',
     });
     return {
         success: true,
         canExtend: true,
         newEndTime,
-        extensionPrice: extensionPriceCents
+        extensionPrice: extensionPriceCents,
     };
 }
 /**
@@ -290,7 +290,7 @@ async function executeExtension(bookingId, userId, paymentId) {
         if (!eligibility.canExtend) {
             return {
                 success: false,
-                error: eligibility.reason || 'EXTENSION_NOT_AVAILABLE'
+                error: eligibility.reason || 'EXTENSION_NOT_AVAILABLE',
             };
         }
         // שליפת ההזמנה הנוכחית לקבלת המחיר הקודם
@@ -303,15 +303,15 @@ async function executeExtension(bookingId, userId, paymentId) {
                     select: {
                         title: true,
                         address: true,
-                        priceHr: true
-                    }
-                }
-            }
+                        priceHr: true,
+                    },
+                },
+            },
         });
         if (!currentBooking) {
             return {
                 success: false,
-                error: 'BOOKING_NOT_FOUND'
+                error: 'BOOKING_NOT_FOUND',
             };
         }
         // חישוב העלות החדשה הכוללת
@@ -332,10 +332,10 @@ async function executeExtension(bookingId, userId, paymentId) {
                     select: {
                         title: true,
                         address: true,
-                        priceHr: true
-                    }
-                }
-            }
+                        priceHr: true,
+                    },
+                },
+            },
         });
         // 💰 חישוב עמלה על הארכה - 15% מעלות ההארכה
         try {
@@ -344,7 +344,7 @@ async function executeExtension(bookingId, userId, paymentId) {
             const extensionNetOwnerCents = extensionCost - extensionCommissionCents;
             // עדכון העמלה הקיימת או יצירת חדשה
             const existingCommission = await prisma.commission.findUnique({
-                where: { bookingId }
+                where: { bookingId },
             });
             if (existingCommission) {
                 // עדכון עמלה קיימת
@@ -354,8 +354,8 @@ async function executeExtension(bookingId, userId, paymentId) {
                         totalPriceCents: newTotalPriceCents,
                         commissionCents: existingCommission.commissionCents + extensionCommissionCents,
                         netOwnerCents: existingCommission.netOwnerCents + extensionNetOwnerCents,
-                        calculatedAt: new Date()
-                    }
+                        calculatedAt: new Date(),
+                    },
                 });
                 console.log(`💰 Updated existing commission: +₪${extensionCommissionCents / 100} commission on extension`);
             }
@@ -367,8 +367,8 @@ async function executeExtension(bookingId, userId, paymentId) {
                         totalPriceCents: newTotalPriceCents,
                         commissionCents: extensionCommissionCents,
                         netOwnerCents: extensionNetOwnerCents,
-                        commissionRate: COMMISSION_RATE
-                    }
+                        commissionRate: COMMISSION_RATE,
+                    },
                 });
                 console.log(`💰 Created new commission for extension: ₪${extensionCommissionCents / 100}`);
             }
@@ -394,18 +394,18 @@ async function executeExtension(bookingId, userId, paymentId) {
             originalPrice: currentBooking.totalPriceCents,
             extensionCost,
             newTotalPrice: newTotalPriceCents,
-            parkingTitle: updatedBooking.parking.title
+            parkingTitle: updatedBooking.parking.title,
         });
         return {
             success: true,
-            booking: updatedBooking
+            booking: updatedBooking,
         };
     }
     catch (error) {
         console.error(`❌ Extension execution failed:`, error);
         return {
             success: false,
-            error: 'EXECUTION_FAILED'
+            error: 'EXECUTION_FAILED',
         };
     }
 }
@@ -419,6 +419,6 @@ async function getExtensionHistory(bookingId) {
         bookingId,
         extensions: [],
         totalExtensions: 0,
-        totalExtensionTime: 0
+        totalExtensionTime: 0,
     };
 }

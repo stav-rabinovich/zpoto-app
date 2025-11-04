@@ -17,16 +17,16 @@ async function getAllChats() {
                     id: true,
                     email: true,
                     name: true,
-                }
+                },
             },
             parking: {
                 select: {
                     id: true,
                     title: true,
                     address: true,
-                }
-            }
-        }
+                },
+            },
+        },
     });
 }
 /**
@@ -42,9 +42,9 @@ async function getChatsByUser(userId) {
                     id: true,
                     title: true,
                     address: true,
-                }
-            }
-        }
+                },
+            },
+        },
     });
 }
 /**
@@ -64,16 +64,16 @@ async function sendMessage(input) {
                     id: true,
                     email: true,
                     name: true,
-                }
+                },
             },
             parking: {
                 select: {
                     id: true,
                     title: true,
                     address: true,
-                }
-            }
-        }
+                },
+            },
+        },
     });
 }
 /**
@@ -81,6 +81,6 @@ async function sendMessage(input) {
  */
 async function deleteMessage(id) {
     return prisma_1.prisma.chat.delete({
-        where: { id }
+        where: { id },
     });
 }

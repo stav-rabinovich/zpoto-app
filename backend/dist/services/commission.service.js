@@ -35,7 +35,7 @@ async function calculateCommission(bookingId, totalPriceCents, hourlyPricing) {
             commissionCents,
             netOwnerCents,
             commissionRate: COMMISSION_RATE,
-            hourlyBreakdown: []
+            hourlyBreakdown: [],
         };
     }
     // חישוב מפורט לפי שעות
@@ -46,7 +46,7 @@ async function calculateCommission(bookingId, totalPriceCents, hourlyPricing) {
             // שעה חינם - אין עמלה
             processedHours.push({
                 ...hour,
-                priceCents: 0
+                priceCents: 0,
             });
             console.log(`💰 Hour ${hour.hour}: FREE - No commission`);
         }
@@ -56,7 +56,7 @@ async function calculateCommission(bookingId, totalPriceCents, hourlyPricing) {
             totalCommissionCents += commission;
             processedHours.push({
                 ...hour,
-                priceCents: commission
+                priceCents: commission,
             });
             console.log(`💰 Hour ${hour.hour}: ₪${hour.priceCents / 100} → Commission ₪${commission / 100} (15%)`);
         }
@@ -69,7 +69,7 @@ async function calculateCommission(bookingId, totalPriceCents, hourlyPricing) {
         commissionCents: totalCommissionCents,
         netOwnerCents,
         commissionRate: COMMISSION_RATE,
-        hourlyBreakdown: processedHours
+        hourlyBreakdown: processedHours,
     };
 }
 /**
@@ -79,7 +79,7 @@ async function saveCommission(bookingId, calculation) {
     try {
         // בדוק אם כבר קיימת עמלה להזמנה זו
         const existingCommission = await prisma_1.prisma.commission.findUnique({
-            where: { bookingId }
+            where: { bookingId },
         });
         if (existingCommission) {
             console.log(`💰 Updating existing commission for booking ${bookingId}`);
@@ -91,8 +91,8 @@ async function saveCommission(bookingId, calculation) {
                     netOwnerCents: calculation.netOwnerCents,
                     commissionRate: calculation.commissionRate,
                     hourlyBreakdown: JSON.stringify(calculation.hourlyBreakdown),
-                    calculatedAt: new Date()
-                }
+                    calculatedAt: new Date(),
+                },
             });
         }
         else {
@@ -104,8 +104,8 @@ async function saveCommission(bookingId, calculation) {
                     commissionCents: calculation.commissionCents,
                     netOwnerCents: calculation.netOwnerCents,
                     commissionRate: calculation.commissionRate,
-                    hourlyBreakdown: JSON.stringify(calculation.hourlyBreakdown)
-                }
+                    hourlyBreakdown: JSON.stringify(calculation.hourlyBreakdown),
+                },
             });
         }
         // עדכן גם את ההזמנה עצמה
@@ -114,8 +114,8 @@ async function saveCommission(bookingId, calculation) {
             data: {
                 commissionCents: calculation.commissionCents,
                 netOwnerCents: calculation.netOwnerCents,
-                commissionRate: calculation.commissionRate
-            }
+                commissionRate: calculation.commissionRate,
+            },
         });
         console.log(`💰 Commission saved successfully for booking ${bookingId}`);
     }
@@ -135,14 +135,14 @@ async function getOwnerCommissions(ownerId, year, month) {
         where: {
             booking: {
                 parking: {
-                    ownerId
+                    ownerId,
                 },
                 paidAt: {
                     gte: startDate,
-                    lte: endDate
+                    lte: endDate,
                 },
-                status: 'CONFIRMED'
-            }
+                status: 'CONFIRMED',
+            },
         },
         include: {
             booking: {
@@ -150,15 +150,15 @@ async function getOwnerCommissions(ownerId, year, month) {
                     parking: {
                         select: {
                             title: true,
-                            address: true
-                        }
-                    }
-                }
-            }
+                            address: true,
+                        },
+                    },
+                },
+            },
         },
         orderBy: {
-            calculatedAt: 'desc'
-        }
+            calculatedAt: 'desc',
+        },
     });
     const totalCommissionCents = commissions.reduce((sum, c) => sum + c.commissionCents, 0);
     const totalNetOwnerCents = commissions.reduce((sum, c) => sum + c.netOwnerCents, 0);
@@ -170,8 +170,8 @@ async function getOwnerCommissions(ownerId, year, month) {
             totalNetOwnerCents,
             totalCommissionILS: (totalCommissionCents / 100).toFixed(2),
             totalNetOwnerILS: (totalNetOwnerCents / 100).toFixed(2),
-            count: commissions.length
-        }
+            count: commissions.length,
+        },
     };
 }
 /**
@@ -186,10 +186,10 @@ async function getAllCommissionsForMonth(year, month) {
             booking: {
                 paidAt: {
                     gte: startDate,
-                    lte: endDate
+                    lte: endDate,
                 },
-                status: 'CONFIRMED'
-            }
+                status: 'CONFIRMED',
+            },
         },
         include: {
             booking: {
@@ -200,17 +200,17 @@ async function getAllCommissionsForMonth(year, month) {
                                 select: {
                                     id: true,
                                     name: true,
-                                    email: true
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+                                    email: true,
+                                },
+                            },
+                        },
+                    },
+                },
+            },
         },
         orderBy: {
-            calculatedAt: 'desc'
-        }
+            calculatedAt: 'desc',
+        },
     });
     // קיבוץ לפי בעל חניה
     const ownerSummaries = commissions.reduce((acc, commission) => {
@@ -221,7 +221,7 @@ async function getAllCommissionsForMonth(year, month) {
                 totalCommissionCents: 0,
                 totalNetOwnerCents: 0,
                 count: 0,
-                commissions: []
+                commissions: [],
             };
         }
         acc[ownerId].totalCommissionCents += commission.commissionCents;
@@ -236,6 +236,6 @@ async function getAllCommissionsForMonth(year, month) {
         ownerSummaries: Object.values(ownerSummaries),
         totalZpotoRevenueCents,
         totalZpotoRevenueILS: (totalZpotoRevenueCents / 100).toFixed(2),
-        period: { year, month, startDate, endDate }
+        period: { year, month, startDate, endDate },
     };
 }

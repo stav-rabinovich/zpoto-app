@@ -86,7 +86,7 @@ async function createBookingReminders() {
         where: {
             startTime: {
                 gte: twoHoursFromNow,
-                lte: threeHoursFromNow
+                lte: threeHoursFromNow,
             },
             status: 'CONFIRMED',
             // בדוק שעדיין לא נשלחה תזכורת
@@ -95,16 +95,16 @@ async function createBookingReminders() {
                     none: {
                         type: 'booking_reminder',
                         data: {
-                            contains: `"bookingId":${JSON.stringify('${booking.id}')}`
-                        }
-                    }
-                }
-            }
+                            contains: `"bookingId":${JSON.stringify('${booking.id}')}`,
+                        },
+                    },
+                },
+            },
         },
         include: {
             parking: true,
-            user: true
-        }
+            user: true,
+        },
     });
     console.log(`⏰ Found ${upcomingBookings.length} bookings needing reminders`);
     for (const booking of upcomingBookings) {

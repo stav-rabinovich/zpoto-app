@@ -28,13 +28,13 @@ r.get('/', auth_1.auth, async (req, res, next) => {
                             select: {
                                 id: true,
                                 name: true,
-                                email: true
-                            }
-                        }
-                    }
-                }
+                                email: true,
+                            },
+                        },
+                    },
+                },
             },
-            orderBy: { createdAt: 'desc' }
+            orderBy: { createdAt: 'desc' },
         });
         res.json({ data: favorites });
     }
@@ -56,7 +56,7 @@ r.post('/', auth_1.auth, async (req, res, next) => {
         }
         // בדיקה שהחניה קיימת ופעילה
         const parking = await prisma_1.prisma.parking.findUnique({
-            where: { id: parkingId }
+            where: { id: parkingId },
         });
         if (!parking) {
             return res.status(404).json({ error: 'Parking not found' });
@@ -69,9 +69,9 @@ r.post('/', auth_1.auth, async (req, res, next) => {
             where: {
                 userId_parkingId: {
                     userId,
-                    parkingId
-                }
-            }
+                    parkingId,
+                },
+            },
         });
         if (existingFavorite) {
             return res.status(400).json({ error: 'Parking is already in favorites' });
@@ -80,7 +80,7 @@ r.post('/', auth_1.auth, async (req, res, next) => {
         const favorite = await prisma_1.prisma.favorite.create({
             data: {
                 userId,
-                parkingId
+                parkingId,
             },
             include: {
                 parking: {
@@ -97,12 +97,12 @@ r.post('/', auth_1.auth, async (req, res, next) => {
                             select: {
                                 id: true,
                                 name: true,
-                                email: true
-                            }
-                        }
-                    }
-                }
-            }
+                                email: true,
+                            },
+                        },
+                    },
+                },
+            },
         });
         res.status(201).json({ data: favorite });
     }
@@ -126,9 +126,9 @@ r.delete('/:parkingId', auth_1.auth, async (req, res, next) => {
             where: {
                 userId_parkingId: {
                     userId,
-                    parkingId
-                }
-            }
+                    parkingId,
+                },
+            },
         });
         if (!existingFavorite) {
             return res.status(404).json({ error: 'Favorite not found' });
@@ -137,9 +137,9 @@ r.delete('/:parkingId', auth_1.auth, async (req, res, next) => {
             where: {
                 userId_parkingId: {
                     userId,
-                    parkingId
-                }
-            }
+                    parkingId,
+                },
+            },
         });
         res.json({ message: 'Parking removed from favorites successfully' });
     }
@@ -162,15 +162,15 @@ r.get('/check/:parkingId', auth_1.auth, async (req, res, next) => {
             where: {
                 userId_parkingId: {
                     userId,
-                    parkingId
-                }
-            }
+                    parkingId,
+                },
+            },
         });
         res.json({
             data: {
                 isFavorite: !!favorite,
-                favoriteId: favorite?.id || null
-            }
+                favoriteId: favorite?.id || null,
+            },
         });
     }
     catch (e) {
@@ -185,11 +185,11 @@ r.delete('/', auth_1.auth, async (req, res, next) => {
     try {
         const userId = req.userId;
         const result = await prisma_1.prisma.favorite.deleteMany({
-            where: { userId }
+            where: { userId },
         });
         res.json({
             message: 'All favorites deleted successfully',
-            deletedCount: result.count
+            deletedCount: result.count,
         });
     }
     catch (e) {

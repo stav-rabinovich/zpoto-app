@@ -19,14 +19,14 @@ r.post('/monthly-payouts', async (req, res, next) => {
                 message: result.message,
                 data: {
                     payoutsCreated: result.payoutsCreated,
-                    period: result.period
-                }
+                    period: result.period,
+                },
             });
         }
         else {
             res.status(500).json({
                 success: false,
-                error: result.error
+                error: result.error,
             });
         }
     }
@@ -46,7 +46,7 @@ r.post('/test-monthly-payouts', async (req, res, next) => {
         res.json({
             success: true,
             message: 'Test completed',
-            data: result
+            data: result,
         });
     }
     catch (error) {
@@ -67,24 +67,24 @@ r.get('/status', async (req, res) => {
         const thisMonthPayouts = await prisma_1.prisma.ownerPayout.count({
             where: {
                 periodStart: {
-                    gte: thisMonth
-                }
-            }
+                    gte: thisMonth,
+                },
+            },
         });
         // בדיקת תשלומים החודש שעבר
         const lastMonthPayouts = await prisma_1.prisma.ownerPayout.count({
             where: {
                 periodStart: {
                     gte: lastMonth,
-                    lt: thisMonth
-                }
-            }
+                    lt: thisMonth,
+                },
+            },
         });
         // בדיקת עמלות שלא עובדו
         const unpaidCommissions = await prisma_1.prisma.commission.count({
             where: {
-                payoutProcessed: false
-            }
+                payoutProcessed: false,
+            },
         });
         res.json({
             success: true,
@@ -93,15 +93,15 @@ r.get('/status', async (req, res) => {
                 thisMonthPayouts,
                 lastMonthPayouts,
                 unpaidCommissions,
-                nextPayoutDate: new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString()
-            }
+                nextPayoutDate: new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString(),
+            },
         });
     }
     catch (error) {
         console.error('❌ Error getting jobs status:', error);
         res.status(500).json({
             success: false,
-            error: error?.message || 'Unknown error'
+            error: error?.message || 'Unknown error',
         });
     }
 });
@@ -115,14 +115,14 @@ r.post('/test-commission-system', async (req, res, next) => {
         res.json({
             success: true,
             message: 'Commission integration tests temporarily disabled during development',
-            data: { note: 'Tests will be re-enabled after pricing system deployment' }
+            data: { note: 'Tests will be re-enabled after pricing system deployment' },
         });
     }
     catch (error) {
         console.error('❌ Error running commission tests:', error);
         res.status(500).json({
             success: false,
-            error: error?.message || 'Unknown error'
+            error: error?.message || 'Unknown error',
         });
     }
 });
@@ -136,18 +136,18 @@ r.post('/test-specific/:testName', async (req, res, next) => {
         console.log(`🧪 Specific test temporarily disabled: ${testName}`);
         const result = {
             success: true,
-            message: `Test '${testName}' temporarily disabled during pricing system development`
+            message: `Test '${testName}' temporarily disabled during pricing system development`,
         };
         res.json({
             success: result.success,
-            message: result.message
+            message: result.message,
         });
     }
     catch (error) {
         console.error('❌ Error running specific test:', error);
         res.status(500).json({
             success: false,
-            error: error?.message || 'Unknown error'
+            error: error?.message || 'Unknown error',
         });
     }
 });

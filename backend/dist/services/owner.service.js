@@ -170,13 +170,13 @@ async function checkBookingConflicts(parkingId, dayKey, timeSlotsToRemove) {
     console.log(`🔍 Checking booking conflicts for parking ${parkingId}, day ${dayKey}, slots:`, timeSlotsToRemove);
     // מיפוי ימים לmספרי יום בשבוע (0=ראשון, 1=שני, וכו')
     const dayMapping = {
-        'sunday': 0,
-        'monday': 1,
-        'tuesday': 2,
-        'wednesday': 3,
-        'thursday': 4,
-        'friday': 5,
-        'saturday': 6
+        sunday: 0,
+        monday: 1,
+        tuesday: 2,
+        wednesday: 3,
+        thursday: 4,
+        friday: 5,
+        saturday: 6,
     };
     const dayOfWeek = dayMapping[dayKey];
     if (dayOfWeek === undefined) {
@@ -185,7 +185,7 @@ async function checkBookingConflicts(parkingId, dayKey, timeSlotsToRemove) {
     // חישוב טווח שעות מבלוקי הזמן
     const timeRanges = timeSlotsToRemove.map(slot => ({
         start: slot,
-        end: slot + 4 // כל בלוק הוא 4 שעות
+        end: slot + 4, // כל בלוק הוא 4 שעות
     }));
     // חיפוש הזמנות שמתנגשות עם הבלוקים שרוצים להסיר
     const conflicts = await prisma_1.prisma.booking.findMany({
@@ -198,27 +198,27 @@ async function checkBookingConflicts(parkingId, dayKey, timeSlotsToRemove) {
                     {
                         startTime: {
                             gte: new Date(), // רק הזמנות עתידיות
-                        }
+                        },
                     },
                     // בדיקה שהיום בשבוע תואם
                     {
                         startTime: {
                         // נבדוק שהיום בשבוע של ההזמנה תואם ליום שרוצים לשנות
                         // זה מורכב יותר - נצטרך לבדוק כל הזמנה בנפרד
-                        }
-                    }
-                ]
-            }))
+                        },
+                    },
+                ],
+            })),
         },
         include: {
             user: {
                 select: {
                     id: true,
                     name: true,
-                    email: true
-                }
-            }
-        }
+                    email: true,
+                },
+            },
+        },
     });
     // סינון נוסף לפי יום בשבוע ושעות
     const filteredConflicts = conflicts.filter(booking => {

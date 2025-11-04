@@ -17,10 +17,7 @@ async function hasActiveBookings(parkingId, startTime, endTime) {
     const conflict = await prisma.booking.findFirst({
         where: {
             parkingId,
-            NOT: [
-                { endTime: { lte: startTime } },
-                { startTime: { gte: endTime } },
-            ],
+            NOT: [{ endTime: { lte: startTime } }, { startTime: { gte: endTime } }],
             status: { in: ['CONFIRMED', 'PENDING'] }, // כולל גם הזמנות ממתינות
         },
         select: { id: true },
@@ -37,7 +34,7 @@ function isParkingAvailableByOwnerSettings(availability, startTime, endTime) {
         endTime: endTime.toISOString(),
         availability: availability,
         startTimeLocal: new Date(startTime).toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' }),
-        endTimeLocal: new Date(endTime).toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' })
+        endTimeLocal: new Date(endTime).toLocaleString('he-IL', { timeZone: 'Asia/Jerusalem' }),
     });
     if (!availability) {
         console.log('🔍 No availability settings - parking available');
@@ -66,7 +63,7 @@ function isParkingAvailableByOwnerSettings(availability, startTime, endTime) {
         startUTC: startTime.toISOString(),
         startIsrael: startTimeIsrael.toISOString(),
         endUTC: endTime.toISOString(),
-        endIsrael: endTimeIsrael.toISOString()
+        endIsrael: endTimeIsrael.toISOString(),
     });
     // בדיקה לכל יום בטווח הזמן המבוקש (בזמן ישראל)
     const currentDate = new Date(startTimeIsrael);
@@ -99,7 +96,7 @@ function isParkingAvailableByOwnerSettings(availability, startTime, endTime) {
             return false;
         }
         // עבור לשעה הבאה - 🔧 תוקן: משתמש בפונקציות העזר החדשות
-        checkTime = new Date(checkTime.getTime() + (60 * 60 * 1000)); // זה בסדר כי אנחנו רוצים להוסיף שעה ב-UTC
+        checkTime = new Date(checkTime.getTime() + 60 * 60 * 1000); // זה בסדר כי אנחנו רוצים להוסיף שעה ב-UTC
     }
     console.log('✅ Parking available according to owner settings for entire requested period');
     return true;
@@ -121,7 +118,7 @@ async function listParkings() {
                         select: {
                             ownedParkings: true,
                             listingRequests: true,
-                        }
+                        },
                     },
                     listingRequests: {
                         select: {
@@ -132,10 +129,10 @@ async function listParkings() {
                         // לא מסננים לפי status - רוצים את כל הבקשות
                         orderBy: { createdAt: 'desc' },
                         take: 1,
-                    }
-                }
-            }
-        }
+                    },
+                },
+            },
+        },
     });
 }
 /** יצירת חניה חדשה עם ownerId (לא Nested Write) */
@@ -194,12 +191,12 @@ async function searchParkings(params) {
             lng: { gte: minLng, lte: maxLng },
             // מסנן חניות של בעלים חסומים
             owner: {
-                isBlocked: false
+                isBlocked: false,
             },
             // מסנן חניות ללא מחירון מלא (חייב להיות pricing עם hour1-hour12)
             pricing: {
-                not: null
-            }
+                not: null,
+            },
         },
         select: {
             id: true,
@@ -219,9 +216,9 @@ async function searchParkings(params) {
             withCarImageUrl: true,
             additionalImageUrl: true,
             owner: {
-                select: { isBlocked: true }
-            }
-        }
+                select: { isBlocked: true },
+            },
+        },
     });
     // סינון נוסף - רק חניות עם מחירון מלא (12 שעות)
     const filteredParkings = parkings.filter(parking => {
@@ -233,18 +230,30 @@ async function searchParkings(params) {
             const pricingData = typeof parking.pricing === 'string' ? JSON.parse(parking.pricing) : parking.pricing;
             // בדיקה שיש מחירים מוגדרים לכל 12 השעות (יכול להיות 0)
             const hasFullPricing = pricingData &&
-                pricingData.hour1 !== undefined && pricingData.hour1 !== null &&
-                pricingData.hour2 !== undefined && pricingData.hour2 !== null &&
-                pricingData.hour3 !== undefined && pricingData.hour3 !== null &&
-                pricingData.hour4 !== undefined && pricingData.hour4 !== null &&
-                pricingData.hour5 !== undefined && pricingData.hour5 !== null &&
-                pricingData.hour6 !== undefined && pricingData.hour6 !== null &&
-                pricingData.hour7 !== undefined && pricingData.hour7 !== null &&
-                pricingData.hour8 !== undefined && pricingData.hour8 !== null &&
-                pricingData.hour9 !== undefined && pricingData.hour9 !== null &&
-                pricingData.hour10 !== undefined && pricingData.hour10 !== null &&
-                pricingData.hour11 !== undefined && pricingData.hour11 !== null &&
-                pricingData.hour12 !== undefined && pricingData.hour12 !== null;
+                pricingData.hour1 !== undefined &&
+                pricingData.hour1 !== null &&
+                pricingData.hour2 !== undefined &&
+                pricingData.hour2 !== null &&
+                pricingData.hour3 !== undefined &&
+                pricingData.hour3 !== null &&
+                pricingData.hour4 !== undefined &&
+                pricingData.hour4 !== null &&
+                pricingData.hour5 !== undefined &&
+                pricingData.hour5 !== null &&
+                pricingData.hour6 !== undefined &&
+                pricingData.hour6 !== null &&
+                pricingData.hour7 !== undefined &&
+                pricingData.hour7 !== null &&
+                pricingData.hour8 !== undefined &&
+                pricingData.hour8 !== null &&
+                pricingData.hour9 !== undefined &&
+                pricingData.hour9 !== null &&
+                pricingData.hour10 !== undefined &&
+                pricingData.hour10 !== null &&
+                pricingData.hour11 !== undefined &&
+                pricingData.hour11 !== null &&
+                pricingData.hour12 !== undefined &&
+                pricingData.hour12 !== null;
             if (!hasFullPricing) {
                 console.log(`❌ Parking ${parking.id} filtered out: incomplete pricing (missing hours)`);
                 return false;
@@ -281,7 +290,9 @@ async function searchParkings(params) {
                     const pricingData = typeof parking.pricing === 'string' ? JSON.parse(parking.pricing) : parking.pricing;
                     // בדיקה אם hour1 קיים (יכול להיות string או number)
                     if (pricingData && pricingData.hour1 !== undefined && pricingData.hour1 !== null) {
-                        const hour1Value = typeof pricingData.hour1 === 'string' ? parseFloat(pricingData.hour1) : pricingData.hour1;
+                        const hour1Value = typeof pricingData.hour1 === 'string'
+                            ? parseFloat(pricingData.hour1)
+                            : pricingData.hour1;
                         if (!isNaN(hour1Value) && hour1Value > 0) {
                             firstHourPrice = hour1Value;
                             console.log(`💰 ✅ Using new pricing for parking ${parking.id} (with dates), hour1: ${hour1Value} (converted from ${typeof pricingData.hour1})`);
@@ -306,13 +317,13 @@ async function searchParkings(params) {
                 ...parking,
                 available: true, // אם הגענו עד כאן, החניה זמינה
                 firstHourPrice, // הוספת מחיר שעה ראשונה
-                pricing: parking.pricing // וידוא שהמחירון המלא מועבר
+                pricing: parking.pricing, // וידוא שהמחירון המלא מועבר
             };
             console.log(`🎯 Returning parking ${parking.id} (with dates) with firstHourPrice: ${result.firstHourPrice}, priceHr: ${result.priceHr}`);
             return result;
         }));
         // החזרת רק חניות זמינות (סינון null values)
-        return parkingsWithAvailability.filter((p) => p !== null && p.available);
+        return parkingsWithAvailability.filter(p => p !== null && p.available);
     }
     // אם אין תאריכים - בדיקת זמינות לזמן הנוכחי + החזרת חניות מסוננות בטווח
     const now = new Date();
@@ -334,7 +345,7 @@ async function searchParkings(params) {
     }));
     const finalAvailableParkings = availableParkings.filter(p => p !== null);
     console.log(`📋 Parkings after availability filter: ${finalAvailableParkings.length}/${filteredParkings.length}`);
-    const result = finalAvailableParkings.map((p) => {
+    const result = finalAvailableParkings.map(p => {
         // חישוב מחיר שעה ראשונה מהמחירון
         let firstHourPrice = p.priceHr; // ברירת מחדל לשדה הישן
         console.log(`💰 Calculating price for parking ${p.id}, legacy priceHr: ${p.priceHr}, has pricing: ${!!p.pricing}`);
@@ -344,7 +355,9 @@ async function searchParkings(params) {
                 console.log(`💰 Parsed pricing data for parking ${p.id}:`, pricingData);
                 // בדיקה אם hour1 קיים (יכול להיות string או number)
                 if (pricingData && pricingData.hour1 !== undefined && pricingData.hour1 !== null) {
-                    const hour1Value = typeof pricingData.hour1 === 'string' ? parseFloat(pricingData.hour1) : pricingData.hour1;
+                    const hour1Value = typeof pricingData.hour1 === 'string'
+                        ? parseFloat(pricingData.hour1)
+                        : pricingData.hour1;
                     if (!isNaN(hour1Value) && hour1Value > 0) {
                         firstHourPrice = hour1Value;
                         console.log(`💰 ✅ Using new pricing for parking ${p.id}, hour1: ${hour1Value} (converted from ${typeof pricingData.hour1})`);
@@ -371,7 +384,7 @@ async function searchParkings(params) {
             entranceImageUrl: p.entranceImageUrl,
             emptyImageUrl: p.emptyImageUrl,
             withCarImageUrl: p.withCarImageUrl,
-            additionalImageUrl: p.additionalImageUrl
+            additionalImageUrl: p.additionalImageUrl,
         });
         if (p.entranceImageUrl)
             images.push({ uri: p.entranceImageUrl, type: 'entrance' });
@@ -387,7 +400,7 @@ async function searchParkings(params) {
             available: true,
             firstHourPrice, // הוספת מחיר שעה ראשונה
             pricing: p.pricing, // וידוא שהמחירון המלא מועבר
-            images // הוספת תמונות החניה
+            images, // הוספת תמונות החניה
         };
         console.log(`🎯 Returning parking ${p.id} with firstHourPrice: ${result.firstHourPrice}, priceHr: ${result.priceHr}`);
         return result;

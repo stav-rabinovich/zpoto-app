@@ -19,25 +19,25 @@ async function expireOverdueApprovals() {
             where: {
                 status: 'PENDING_APPROVAL',
                 approvalExpiresAt: {
-                    lt: now // פחות מהזמן הנוכחי = פג
-                }
+                    lt: now, // פחות מהזמן הנוכחי = פג
+                },
             },
             include: {
                 user: {
                     select: {
                         id: true,
                         name: true,
-                        email: true
-                    }
+                        email: true,
+                    },
                 },
                 parking: {
                     select: {
                         id: true,
                         title: true,
-                        address: true
-                    }
-                }
-            }
+                        address: true,
+                    },
+                },
+            },
         });
         if (expiredBookings.length === 0) {
             console.log('⏰ No expired approval requests found');
@@ -48,12 +48,12 @@ async function expireOverdueApprovals() {
         const result = await prisma_1.prisma.booking.updateMany({
             where: {
                 id: {
-                    in: expiredBookings.map(b => b.id)
-                }
+                    in: expiredBookings.map(b => b.id),
+                },
             },
             data: {
-                status: 'EXPIRED'
-            }
+                status: 'EXPIRED',
+            },
         });
         console.log(`✅ Updated ${result.count} bookings to EXPIRED status`);
         // TODO: שליחת התראות למשתמשים על פקיעת הבקשות
@@ -66,8 +66,8 @@ async function expireOverdueApprovals() {
             bookings: expiredBookings.map(b => ({
                 id: b.id,
                 userEmail: b.user.email,
-                parkingTitle: b.parking.title
-            }))
+                parkingTitle: b.parking.title,
+            })),
         };
     }
     catch (error) {
@@ -83,8 +83,8 @@ async function checkBookingExpired(bookingId) {
         where: { id: bookingId },
         select: {
             status: true,
-            approvalExpiresAt: true
-        }
+            approvalExpiresAt: true,
+        },
     });
     if (!booking || booking.status !== 'PENDING_APPROVAL') {
         return false;
@@ -102,8 +102,8 @@ async function getTimeLeftForApproval(bookingId) {
         where: { id: bookingId },
         select: {
             status: true,
-            approvalExpiresAt: true
-        }
+            approvalExpiresAt: true,
+        },
     });
     if (!booking || booking.status !== 'PENDING_APPROVAL' || !booking.approvalExpiresAt) {
         return null;

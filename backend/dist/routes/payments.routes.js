@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
 const auth_1 = require("../middlewares/auth");
@@ -14,7 +47,9 @@ r.post('/process', auth_1.auth, async (req, res, next) => {
         const userId = req.userId;
         const { parkingId, vehicleId, startTime, endTime, totalPrice, paymentMethod, licensePlate, vehicleDescription, 
         // פרטי תשלום (לעתיד - אינטגרציה עם ספק תשלומים)
-        cardNumber, expiryDate, cvv, cardholderName } = req.body;
+        cardNumber, expiryDate, cvv, cardholderName, 
+        // פרטי קופון
+        couponCode, discountAmount, originalPrice, } = req.body;
         console.log('💳 Processing payment for user:', userId);
         console.log('💳 Payment details:', {
             parkingId,
@@ -23,18 +58,18 @@ r.post('/process', auth_1.auth, async (req, res, next) => {
             endTime,
             totalPrice,
             paymentMethod,
-            licensePlate
+            licensePlate,
         });
         // ולידציה בסיסית
         if (!parkingId || !startTime || !endTime || !totalPrice || !paymentMethod) {
             return res.status(400).json({
-                error: 'Missing required fields: parkingId, startTime, endTime, totalPrice, paymentMethod'
+                error: 'Missing required fields: parkingId, startTime, endTime, totalPrice, paymentMethod',
             });
         }
         // בדיקה שהחניה קיימת וזמינה
         const parking = await prisma_1.prisma.parking.findUnique({
             where: { id: parseInt(parkingId) },
-            include: { owner: true }
+            include: { owner: true },
         });
         if (!parking || !parking.isActive) {
             return res.status(404).json({ error: 'Parking not found or inactive' });
@@ -46,16 +81,13 @@ r.post('/process', auth_1.auth, async (req, res, next) => {
             where: {
                 parkingId: parseInt(parkingId),
                 status: { not: 'CANCELED' },
-                NOT: [
-                    { endTime: { lte: startDateTime } },
-                    { startTime: { gte: endDateTime } }
-                ]
-            }
+                NOT: [{ endTime: { lte: startDateTime } }, { startTime: { gte: endDateTime } }],
+            },
         });
         if (conflictingBooking) {
             return res.status(409).json({
                 error: 'Time slot is already booked',
-                conflictingBooking: conflictingBooking.id
+                conflictingBooking: conflictingBooking.id,
             });
         }
         // סימולציית עיבוד תשלום
@@ -69,20 +101,54 @@ r.post('/process', auth_1.auth, async (req, res, next) => {
             console.log('💳 ❌ Payment failed (simulated)');
             return res.status(402).json({
                 error: 'Payment failed',
-                message: 'התשלום נכשל. אנא נסה שוב או השתמש באמצעי תשלום אחר.'
+                message: 'התשלום נכשל. אנא נסה שוב או השתמש באמצעי תשלום אחר.',
             });
         }
         // יצירת מזהה תשלום מדומה
         const paymentId = `pay_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         console.log('💳 ✅ Payment successful, creating booking...');
-        // יצירת ההזמנה דרך השירות (כך שמוד האישור יתקבל בחשבון)
+        // יצירת ההזמנה דרך השירות עם המחיר הנכון
+        // אם יש קופון, נחשב את המחיר המקורי (לפני הקופון)
+        const originalTotalPrice = couponCode && discountAmount > 0 ? totalPrice + discountAmount : totalPrice;
         const bookingBase = await (0, bookings_service_1.createBooking)({
             userId,
             parkingId: parseInt(parkingId),
             startTime: startDateTime,
-            endTime: endDateTime
+            endTime: endDateTime,
+            originalPrice: originalTotalPrice, // המחיר המקורי לחישוב עמלה נכון
         });
         console.log('📋 Booking created with status:', bookingBase.status);
+        // טיפול בקופון אם קיים
+        if (couponCode && discountAmount > 0) {
+            console.log('🎫 Processing coupon usage:', couponCode);
+            // מציאת הקופון
+            const coupon = await prisma_1.prisma.coupon.findUnique({
+                where: { code: couponCode },
+            });
+            if (coupon) {
+                // עדכון מונה השימושים של הקופון
+                await prisma_1.prisma.coupon.update({
+                    where: { code: couponCode },
+                    data: {
+                        usageCount: { increment: 1 },
+                    },
+                });
+                // יצירת רשומת שימוש בקופון
+                await prisma_1.prisma.couponUsage.create({
+                    data: {
+                        couponId: coupon.id,
+                        userId,
+                        bookingId: bookingBase.id,
+                        discountAmountCents: Math.round(discountAmount * 100),
+                        originalAmountCents: originalPrice
+                            ? Math.round(originalPrice * 100)
+                            : Math.round(totalPrice * 100),
+                        finalAmountCents: Math.round(totalPrice * 100),
+                    },
+                });
+                console.log('🎫 ✅ Coupon usage recorded');
+            }
+        }
         // עדכון ההזמנה עם פרטי התשלום
         const booking = await prisma_1.prisma.booking.update({
             where: { id: bookingBase.id },
@@ -93,7 +159,9 @@ r.post('/process', auth_1.auth, async (req, res, next) => {
                 paymentId,
                 paidAt: new Date(),
                 licensePlate,
-                vehicleDescription
+                vehicleDescription,
+                // עדכון המחיר הסופי שהמשתמש שילם (כולל הנחות)
+                totalPriceCents: Math.round(totalPrice * 100),
             },
             include: {
                 parking: {
@@ -102,19 +170,77 @@ r.post('/process', auth_1.auth, async (req, res, next) => {
                         title: true,
                         address: true,
                         lat: true,
-                        lng: true
-                    }
+                        lng: true,
+                    },
                 },
                 user: {
                     select: {
                         id: true,
                         email: true,
-                        name: true
-                    }
-                }
-            }
+                        name: true,
+                    },
+                },
+            },
         });
         console.log('📝 ✅ Booking created successfully:', booking.id);
+        // עדכון העמלה אם השתמשו בקופון (המחיר השתנה)
+        if (couponCode && discountAmount > 0) {
+            console.log('💰 Updating commission due to coupon usage');
+            try {
+                // מציאת העמלה הקיימת
+                const existingCommission = await prisma_1.prisma.commission.findFirst({
+                    where: { bookingId: booking.id }
+                });
+                if (existingCommission) {
+                    const finalPriceCents = Math.round(totalPrice * 100);
+                    const originalPriceCents = originalPrice ? Math.round(originalPrice * 100) : finalPriceCents;
+                    const COMMISSION_RATE = 0.15;
+                    // עלות החניה המקורית (ללא דמי תפעול) - לא משתנה בקופון על דמי תפעול
+                    const operationalFeeRate = 0.1;
+                    const originalParkingCostCents = Math.round(originalPriceCents / (1 + operationalFeeRate));
+                    const newCommissionCents = Math.round(originalParkingCostCents * COMMISSION_RATE);
+                    const newNetOwnerCents = originalParkingCostCents - newCommissionCents;
+                    // עדכון העמלה למחיר הסופי
+                    await prisma_1.prisma.commission.update({
+                        where: { id: existingCommission.id },
+                        data: {
+                            totalPriceCents: originalParkingCostCents, // עלות החניה המקורית
+                            commissionCents: newCommissionCents,
+                            netOwnerCents: newNetOwnerCents,
+                            calculatedAt: new Date(), // עדכון זמן החישוב
+                        }
+                    });
+                    console.log('💰 ✅ Commission updated for coupon usage:', {
+                        bookingId: booking.id,
+                        originalParkingCost: existingCommission.totalPriceCents / 100,
+                        parkingCostUsed: originalParkingCostCents / 100,
+                        finalTotalPaid: finalPriceCents / 100,
+                        originalCommission: existingCommission.commissionCents / 100,
+                        newCommission: newCommissionCents / 100,
+                        discount: discountAmount
+                    });
+                }
+            }
+            catch (error) {
+                console.error('❌ Failed to update commission:', error);
+                // לא נזרוק שגיאה כי התשלום כבר הצליח
+            }
+            // עדכון דמי התפעול אחרי הקופון
+            try {
+                const { updateOperationalFeeAfterCoupon } = await Promise.resolve().then(() => __importStar(require('../services/operationalFees.service')));
+                // חישוב עלות החניה המקורית (ללא דמי תפעול)
+                const finalPriceCents = Math.round(totalPrice * 100);
+                const originalPriceCents = originalPrice ? Math.round(originalPrice * 100) : finalPriceCents;
+                const originalOperationalFeeCents = Math.round(originalPriceCents * 0.1); // 10%
+                const originalParkingCostCents = originalPriceCents - originalOperationalFeeCents;
+                await updateOperationalFeeAfterCoupon(booking.id, finalPriceCents, originalParkingCostCents);
+                console.log('💳 ✅ Operational fee updated for coupon usage');
+            }
+            catch (error) {
+                console.error('❌ Failed to update operational fee:', error);
+                // לא נזרוק שגיאה כי התשלום כבר הצליח
+            }
+        }
         // החזרת תגובה מוצלחת
         res.status(201).json({
             success: true,
@@ -128,9 +254,9 @@ r.post('/process', auth_1.auth, async (req, res, next) => {
                 paymentId: booking.paymentId,
                 parking: booking.parking,
                 licensePlate: booking.licensePlate,
-                vehicleDescription: booking.vehicleDescription
+                vehicleDescription: booking.vehicleDescription,
             },
-            message: 'התשלום בוצע בהצלחה וההזמנה נוצרה!'
+            message: 'התשלום בוצע בהצלחה וההזמנה נוצרה!',
         });
     }
     catch (error) {
@@ -149,7 +275,7 @@ r.get('/status/:bookingId', auth_1.auth, async (req, res, next) => {
         const booking = await prisma_1.prisma.booking.findFirst({
             where: {
                 id: bookingId,
-                userId // וידוא שההזמנה שייכת למשתמש
+                userId, // וידוא שההזמנה שייכת למשתמש
             },
             select: {
                 id: true,
@@ -158,8 +284,8 @@ r.get('/status/:bookingId', auth_1.auth, async (req, res, next) => {
                 paymentMethod: true,
                 paymentId: true,
                 paidAt: true,
-                totalPriceCents: true
-            }
+                totalPriceCents: true,
+            },
         });
         if (!booking) {
             return res.status(404).json({ error: 'Booking not found' });
@@ -171,7 +297,7 @@ r.get('/status/:bookingId', auth_1.auth, async (req, res, next) => {
             paymentMethod: booking.paymentMethod,
             paymentId: booking.paymentId,
             paidAt: booking.paidAt,
-            totalPrice: booking.totalPriceCents ? booking.totalPriceCents / 100 : 0
+            totalPrice: booking.totalPriceCents ? booking.totalPriceCents / 100 : 0,
         });
     }
     catch (error) {

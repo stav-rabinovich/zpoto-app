@@ -24,14 +24,14 @@ router.get('/stats', async (req, res) => {
         const stats = await (0, operationalFees_service_1.getOperationalFeeStats)(filters);
         res.json({
             success: true,
-            data: stats
+            data: stats,
         });
     }
     catch (error) {
         console.error('❌ Failed to get operational fee stats:', error);
         res.status(500).json({
             success: false,
-            error: 'Failed to get operational fee statistics'
+            error: 'Failed to get operational fee statistics',
         });
     }
 });
@@ -47,7 +47,7 @@ router.get('/summary', async (req, res) => {
         const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
         const monthlyStats = await (0, operationalFees_service_1.getOperationalFeeStats)({
             startDate: startOfMonth,
-            endDate: endOfMonth
+            endDate: endOfMonth,
         });
         // דמי תפעול מכל הזמנים
         const allTimeStats = await (0, operationalFees_service_1.getOperationalFeeStats)();
@@ -57,21 +57,21 @@ router.get('/summary', async (req, res) => {
                 monthly: {
                     totalOperationalFees: monthlyStats.stats.totalOperationalFeesCollected,
                     totalTransactions: monthlyStats.stats.totalTransactions,
-                    averageFee: monthlyStats.stats.averageOperationalFee
+                    averageFee: monthlyStats.stats.averageOperationalFee,
                 },
                 allTime: {
                     totalOperationalFees: allTimeStats.stats.totalOperationalFeesCollected,
                     totalTransactions: allTimeStats.stats.totalTransactions,
-                    averageFee: allTimeStats.stats.averageOperationalFee
-                }
-            }
+                    averageFee: allTimeStats.stats.averageOperationalFee,
+                },
+            },
         });
     }
     catch (error) {
         console.error('❌ Failed to get operational fee summary:', error);
         res.status(500).json({
             success: false,
-            error: 'Failed to get operational fee summary'
+            error: 'Failed to get operational fee summary',
         });
     }
 });

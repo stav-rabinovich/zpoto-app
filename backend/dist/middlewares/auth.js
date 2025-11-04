@@ -103,14 +103,14 @@ async function requireOwner(req, res, next) {
             console.log('🚫 Ownership-blocked user tried to access owner endpoint - ID:', user.id);
             return res.status(403).json({
                 error: 'בקשתך להיות בעל חניה נדחתה על ידי המנהל',
-                hint: 'אתה יכול להמשיך להשתמש באפליקציה כמחפש חניה'
+                hint: 'אתה יכול להמשיך להשתמש באפליקציה כמחפש חניה',
             });
         }
         if (user.role !== 'OWNER' && user.role !== 'ADMIN') {
             console.log('🚫 Non-owner tried to access owner endpoint - ID:', user.id, 'Role:', user.role);
             return res.status(403).json({
                 error: 'גישה מוגבלת לבעלי חניה בלבד',
-                hint: 'יש להגיש בקשה להיות בעל חניה דרך האפליקציה'
+                hint: 'יש להגיש בקשה להיות בעל חניה דרך האפליקציה',
             });
         }
         console.log('✅ Owner authenticated successfully - ID:', user.id, 'Role:', user.role);

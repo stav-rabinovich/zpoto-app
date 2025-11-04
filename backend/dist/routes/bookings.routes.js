@@ -52,7 +52,7 @@ r.get('/active', auth_1.auth, async (req, res, next) => {
                 userId,
                 status: 'CONFIRMED',
                 startTime: { lte: now },
-                endTime: { gte: now }
+                endTime: { gte: now },
             },
             include: {
                 parking: {
@@ -61,11 +61,11 @@ r.get('/active', auth_1.auth, async (req, res, next) => {
                         title: true,
                         address: true,
                         lat: true,
-                        lng: true
-                    }
-                }
+                        lng: true,
+                    },
+                },
             },
-            orderBy: { startTime: 'asc' }
+            orderBy: { startTime: 'asc' },
         });
         res.json({ data: activeBookings });
     }
@@ -85,7 +85,7 @@ r.get('/', auth_1.auth, async (req, res, next) => {
         // מחזיר את ההזמנות ישירות כdata
         res.json({
             data: result.bookings,
-            userStats: result.userStats
+            userStats: result.userStats,
         });
     }
     catch (e) {
@@ -101,14 +101,26 @@ r.post('/', auth_1.auth, async (req, res, next) => {
     try {
         console.log('🔥 BOOKING REQUEST:', req.body, 'User ID:', req.userId);
         const { parkingId, startTime, endTime, status } = req.body ?? {};
-        if (typeof parkingId !== 'number' || typeof startTime !== 'string' || typeof endTime !== 'string') {
-            console.log('❌ Invalid body types:', { parkingId: typeof parkingId, startTime: typeof startTime, endTime: typeof endTime });
-            return res.status(400).json({ error: 'Invalid body: {parkingId:number, startTime:ISO string, endTime:ISO string, status?}' });
+        if (typeof parkingId !== 'number' ||
+            typeof startTime !== 'string' ||
+            typeof endTime !== 'string') {
+            console.log('❌ Invalid body types:', {
+                parkingId: typeof parkingId,
+                startTime: typeof startTime,
+                endTime: typeof endTime,
+            });
+            return res
+                .status(400)
+                .json({
+                error: 'Invalid body: {parkingId:number, startTime:ISO string, endTime:ISO string, status?}',
+            });
         }
         const start = new Date(startTime);
         const end = new Date(endTime);
         if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-            return res.status(400).json({ error: 'Invalid dates: startTime/endTime must be valid ISO strings' });
+            return res
+                .status(400)
+                .json({ error: 'Invalid dates: startTime/endTime must be valid ISO strings' });
         }
         console.log('🚀 Creating booking with:', {
             userId: Number(req.userId),
@@ -154,6 +166,19 @@ r.get('/:id', auth_1.auth, async (req, res, next) => {
         const data = await svc.getBooking(id);
         if (!data)
             return res.status(404).json({ error: 'Not found' });
+        // הוספת נתוני קופון אם קיימים
+        try {
+            const couponUsages = await prisma_1.prisma.couponUsage.findMany({
+                where: { bookingId: id },
+                include: { coupon: true }
+            });
+            data.couponUsages = couponUsages;
+            console.log(`✅ Found ${couponUsages.length} coupon usages for booking ${id}`);
+        }
+        catch (error) {
+            console.log('Could not fetch coupon data:', error?.message || error);
+            data.couponUsages = [];
+        }
         res.json(data);
     }
     catch (e) {
@@ -170,7 +195,11 @@ r.patch('/:id/status', auth_1.auth, async (req, res, next) => {
         const id = Number(req.params.id);
         const { status } = req.body ?? {};
         if (!['PENDING', 'PENDING_APPROVAL', 'CONFIRMED', 'CANCELED', 'REJECTED', 'EXPIRED'].includes(status)) {
-            return res.status(400).json({ error: 'Invalid status. Use PENDING|PENDING_APPROVAL|CONFIRMED|CANCELED|REJECTED|EXPIRED' });
+            return res
+                .status(400)
+                .json({
+                error: 'Invalid status. Use PENDING|PENDING_APPROVAL|CONFIRMED|CANCELED|REJECTED|EXPIRED',
+            });
         }
         const current = await svc.getBooking(id);
         if (!current)
@@ -179,7 +208,9 @@ r.patch('/:id/status', auth_1.auth, async (req, res, next) => {
         const isBookingCreator = current.userId === Number(req.userId);
         const isParkingOwner = current.parking?.ownerId === Number(req.userId);
         if (!isBookingCreator && !isParkingOwner) {
-            return res.status(403).json({ error: 'Forbidden: only the booking creator or parking owner can change status' });
+            return res
+                .status(403)
+                .json({ error: 'Forbidden: only the booking creator or parking owner can change status' });
         }
         const data = await svc.updateBookingStatus(id, status);
         res.json({ data });
@@ -220,12 +251,12 @@ r.get('/pending-approval', auth_1.auth, async (req, res, next) => {
             where: {
                 status: 'PENDING_APPROVAL',
                 parking: {
-                    ownerId: ownerId
+                    ownerId: ownerId,
                 },
                 // רק בקשות שעדיין לא פגו
                 approvalExpiresAt: {
-                    gte: new Date()
-                }
+                    gte: new Date(),
+                },
             },
             include: {
                 user: {
@@ -233,18 +264,18 @@ r.get('/pending-approval', auth_1.auth, async (req, res, next) => {
                         id: true,
                         name: true,
                         email: true,
-                        phone: true
-                    }
+                        phone: true,
+                    },
                 },
                 parking: {
                     select: {
                         id: true,
                         title: true,
-                        address: true
-                    }
-                }
+                        address: true,
+                    },
+                },
             },
-            orderBy: { createdAt: 'asc' }
+            orderBy: { createdAt: 'asc' },
         });
         console.log(`📋 Found ${pendingBookings.length} pending approval bookings`);
         res.json({ data: pendingBookings });
@@ -267,13 +298,13 @@ r.post('/:id/approve', auth_1.auth, async (req, res, next) => {
                 id: bookingId,
                 status: 'PENDING_APPROVAL',
                 parking: {
-                    ownerId: ownerId
-                }
+                    ownerId: ownerId,
+                },
             },
             include: {
                 parking: true,
-                user: true
-            }
+                user: true,
+            },
         });
         if (!booking) {
             return res.status(404).json({ error: 'Booking not found or not pending approval' });
@@ -286,12 +317,12 @@ r.post('/:id/approve', auth_1.auth, async (req, res, next) => {
             where: { id: bookingId },
             data: {
                 status: 'CONFIRMED',
-                approvedAt: new Date()
+                approvedAt: new Date(),
             },
             include: {
                 user: true,
-                parking: true
-            }
+                parking: true,
+            },
         });
         // TODO: שליחת התראה למשתמש על אישור הבקשה
         res.json({ data: updatedBooking });
@@ -314,13 +345,13 @@ r.post('/:id/reject', auth_1.auth, async (req, res, next) => {
                 id: bookingId,
                 status: 'PENDING_APPROVAL',
                 parking: {
-                    ownerId: ownerId
-                }
+                    ownerId: ownerId,
+                },
             },
             include: {
                 parking: true,
-                user: true
-            }
+                user: true,
+            },
         });
         if (!booking) {
             return res.status(404).json({ error: 'Booking not found or not pending approval' });
@@ -330,12 +361,12 @@ r.post('/:id/reject', auth_1.auth, async (req, res, next) => {
             data: {
                 status: 'REJECTED',
                 rejectedAt: new Date(),
-                rejectionReason: reason || 'לא צוין'
+                rejectionReason: reason || 'לא צוין',
             },
             include: {
                 user: true,
-                parking: true
-            }
+                parking: true,
+            },
         });
         // TODO: שליחת התראה למשתמש על דחיית הבקשה
         res.json({ data: updatedBooking });
@@ -361,7 +392,7 @@ r.get('/:id/time-left', auth_1.auth, async (req, res, next) => {
         res.json({
             timeLeftMs: timeLeft,
             timeLeftSeconds: Math.ceil(timeLeft / 1000),
-            expired: timeLeft <= 0
+            expired: timeLeft <= 0,
         });
     }
     catch (e) {
@@ -381,7 +412,7 @@ r.get('/availability/:parkingId', async (req, res, next) => {
             parkingId,
             startTime,
             requestUrl: req.originalUrl,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
         });
         if (isNaN(parkingId)) {
             return res.status(400).json({ error: 'Invalid parking ID' });
@@ -396,7 +427,7 @@ r.get('/availability/:parkingId', async (req, res, next) => {
         console.log('🔍 SERVER DEBUG: Parsed start time:', {
             startTime: start.toISOString(),
             dayOfWeek: start.getUTCDay(),
-            hour: start.getUTCHours()
+            hour: start.getUTCHours(),
         });
         const availability = await svc.calculateParkingAvailability(parkingId, start);
         console.log('🔍 SERVER DEBUG: Calculated availability result:', availability);
@@ -415,16 +446,18 @@ r.post('/validate', async (req, res, next) => {
     try {
         const { parkingId, startTime, endTime } = req.body ?? {};
         console.log('🔍 Booking validation request:', { parkingId, startTime, endTime });
-        if (typeof parkingId !== 'number' || typeof startTime !== 'string' || typeof endTime !== 'string') {
+        if (typeof parkingId !== 'number' ||
+            typeof startTime !== 'string' ||
+            typeof endTime !== 'string') {
             return res.status(400).json({
-                error: 'Invalid body: {parkingId:number, startTime:ISO string, endTime:ISO string}'
+                error: 'Invalid body: {parkingId:number, startTime:ISO string, endTime:ISO string}',
             });
         }
         const start = new Date(startTime);
         const end = new Date(endTime);
         if (isNaN(start.getTime()) || isNaN(end.getTime())) {
             return res.status(400).json({
-                error: 'Invalid date format for startTime/endTime'
+                error: 'Invalid date format for startTime/endTime',
             });
         }
         const validation = await svc.validateBookingTimeSlot(parkingId, start, end);
@@ -432,7 +465,7 @@ r.post('/validate', async (req, res, next) => {
         if (validation.isValid) {
             res.json({
                 valid: true,
-                message: validation.message
+                message: validation.message,
             });
         }
         else {
@@ -441,7 +474,7 @@ r.post('/validate', async (req, res, next) => {
                 valid: false,
                 error: validation.error,
                 availableUntil: validation.availableUntil,
-                suggestedEndTime: validation.suggestedEndTime
+                suggestedEndTime: validation.suggestedEndTime,
             });
         }
     }
@@ -465,9 +498,9 @@ r.get('/find-problematic/:parkingId', async (req, res, next) => {
                 parkingId,
                 startTime: {
                     gte: new Date('2025-10-21T00:00:00.000Z'),
-                    lt: new Date('2025-10-22T00:00:00.000Z')
+                    lt: new Date('2025-10-22T00:00:00.000Z'),
                 },
-                status: { in: ['CONFIRMED', 'PENDING', 'PENDING_APPROVAL'] }
+                status: { in: ['CONFIRMED', 'PENDING', 'PENDING_APPROVAL'] },
             },
             select: {
                 id: true,
@@ -478,16 +511,16 @@ r.get('/find-problematic/:parkingId', async (req, res, next) => {
                 user: {
                     select: {
                         id: true,
-                        email: true
-                    }
-                }
-            }
+                        email: true,
+                    },
+                },
+            },
         });
         console.log(`🔍 Found ${problematicBookings.length} bookings from 21/10 for parking ${parkingId}:`, problematicBookings);
         res.json({
             parkingId,
             problematicBookings,
-            count: problematicBookings.length
+            count: problematicBookings.length,
         });
     }
     catch (e) {
@@ -516,10 +549,10 @@ r.delete('/delete-specific/:bookingId', async (req, res, next) => {
                 user: {
                     select: {
                         id: true,
-                        email: true
-                    }
-                }
-            }
+                        email: true,
+                    },
+                },
+            },
         });
         if (!booking) {
             return res.status(404).json({ error: 'Booking not found' });
@@ -527,12 +560,12 @@ r.delete('/delete-specific/:bookingId', async (req, res, next) => {
         console.log(`🗑️ Deleting booking ${bookingId}:`, booking);
         // מחק את ההזמנה
         await prisma_1.prisma.booking.delete({
-            where: { id: bookingId }
+            where: { id: bookingId },
         });
         console.log(`✅ Successfully deleted booking ${bookingId}`);
         res.json({
             message: `Successfully deleted booking ${bookingId}`,
-            deletedBooking: booking
+            deletedBooking: booking,
         });
     }
     catch (e) {
@@ -551,10 +584,10 @@ r.delete('/fix-parking-10', async (req, res, next) => {
                 parkingId: 10,
                 startTime: {
                     gte: new Date('2025-10-21T00:00:00.000Z'),
-                    lt: new Date('2025-10-22T00:00:00.000Z')
+                    lt: new Date('2025-10-22T00:00:00.000Z'),
                 },
-                status: { in: ['CONFIRMED', 'PENDING', 'PENDING_APPROVAL'] }
-            }
+                status: { in: ['CONFIRMED', 'PENDING', 'PENDING_APPROVAL'] },
+            },
         });
         if (!problematicBooking) {
             return res.json({ message: 'No problematic booking found' });
@@ -562,12 +595,12 @@ r.delete('/fix-parking-10', async (req, res, next) => {
         console.log(`🗑️ Found and deleting problematic booking:`, problematicBooking);
         // מחק את ההזמנה
         await prisma_1.prisma.booking.delete({
-            where: { id: problematicBooking.id }
+            where: { id: problematicBooking.id },
         });
         console.log(`✅ Successfully deleted problematic booking ${problematicBooking.id}`);
         res.json({
             message: 'Successfully deleted problematic booking',
-            deletedBooking: problematicBooking
+            deletedBooking: problematicBooking,
         });
     }
     catch (e) {
@@ -594,10 +627,10 @@ r.get('/debug/:parkingId', async (req, res, next) => {
                 owner: {
                     select: {
                         id: true,
-                        isBlocked: true
-                    }
-                }
-            }
+                        isBlocked: true,
+                    },
+                },
+            },
         });
         if (!parking) {
             return res.status(404).json({ error: 'Parking not found' });
@@ -619,17 +652,17 @@ r.get('/debug/:parkingId', async (req, res, next) => {
                 startTime: true,
                 endTime: true,
                 status: true,
-                createdAt: true
+                createdAt: true,
             },
             orderBy: { startTime: 'desc' },
-            take: 10
+            take: 10,
         });
         res.json({
             parking: {
                 ...parking,
-                parsedAvailability
+                parsedAvailability,
             },
-            recentBookings: bookings
+            recentBookings: bookings,
         });
     }
     catch (e) {
