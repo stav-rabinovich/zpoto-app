@@ -260,9 +260,10 @@ async function checkExtensionEligibility(bookingId, userId) {
     }
     const extensionPrice = firstHourPrice / 2; // חצי מהמחיר
     const roundedExtensionPrice = Math.ceil(extensionPrice); // עיגול כלפי מעלה
-    // הוספת דמי תפעול (10%) לפי כללי הברזל
-    const extensionPriceWithOperationalFee = roundedExtensionPrice * 1.1;
-    const extensionPriceCents = Math.round(extensionPriceWithOperationalFee * 100);
+    // 🔧 FIX: הפרדה בין עלות החניה לדמי התפעול
+    const extensionParkingCostCents = Math.round(roundedExtensionPrice * 100); // עלות החניה בלבד
+    const extensionOperationalFeeCents = Math.round(extensionParkingCostCents * 0.1); // דמי תפעול 10%
+    const extensionPriceCents = extensionParkingCostCents + extensionOperationalFeeCents; // סה"כ
     console.log(`✅ Extension available:`, {
         extensionMinutes,
         legacyPriceHr: booking.parking.priceHr,
@@ -315,14 +316,16 @@ async function executeExtension(bookingId, userId, paymentId) {
             };
         }
         // חישוב העלות החדשה הכוללת
-        const extensionCost = eligibility.extensionPrice; // באגורות
-        const newTotalPriceCents = (currentBooking.totalPriceCents || 0) + extensionCost;
+        const extensionCost = eligibility.extensionPrice; // באגורות (כולל דמי תפעול)
+        // 🔧 FIX: עדכון נכון של totalPriceCents - רק עלות החניה ללא דמי תפעול
+        const extensionParkingOnlyCents = Math.round(extensionCost / 1.1); // עלות החניה בלבד
+        const newTotalPriceCents = (currentBooking.totalPriceCents || 0) + extensionParkingOnlyCents;
         // ביצוע ההארכה עם עדכון המחיר הכולל
         const updatedBooking = await prisma.booking.update({
             where: { id: bookingId },
             data: {
                 endTime: eligibility.newEndTime,
-                totalPriceCents: newTotalPriceCents,
+                totalPriceCents: newTotalPriceCents, // רק עלות החניה, לא דמי תפעול
                 // TODO: ניתן להוסיף שדות נוספים כמו:
                 // extensionCount: { increment: 1 },
                 // extensionHistory: JSON של כל ההארכות
@@ -337,11 +340,14 @@ async function executeExtension(bookingId, userId, paymentId) {
                 },
             },
         });
-        // 💰 חישוב עמלה על הארכה - 15% מעלות ההארכה
+        // 💰 חישוב עמלה על הארכה - 15% מעלות החניה בלבד (לא כולל דמי תפעול)
         try {
             const COMMISSION_RATE = 0.15;
-            const extensionCommissionCents = Math.round(extensionCost * COMMISSION_RATE);
-            const extensionNetOwnerCents = extensionCost - extensionCommissionCents;
+            // 🔧 FIX: עמלה רק על עלות החניה, לא על דמי התפעול
+            // חישוב עלות החניה מתוך הסכום הכולל
+            const extensionParkingOnlyCents = Math.round(extensionCost / 1.1); // הסרת דמי התפעול
+            const extensionCommissionCents = Math.round(extensionParkingOnlyCents * COMMISSION_RATE);
+            const extensionNetOwnerCents = extensionParkingOnlyCents - extensionCommissionCents;
             // עדכון העמלה הקיימת או יצירת חדשה
             const existingCommission = await prisma.commission.findUnique({
                 where: { bookingId },
@@ -380,7 +386,9 @@ async function executeExtension(bookingId, userId, paymentId) {
         // 💳 עדכון דמי תפעול למחפש החניה
         try {
             const { updateOperationalFeeForExtension } = await Promise.resolve().then(() => __importStar(require('./operationalFees.service')));
-            await updateOperationalFeeForExtension(bookingId, newTotalPriceCents);
+            // 🔧 FIX: העברת הסכום הכולל (כולל דמי תפעול) לפונקציה
+            const totalWithOperationalFee = newTotalPriceCents * 1.1; // הוספת דמי תפעול
+            await updateOperationalFeeForExtension(bookingId, Math.round(totalWithOperationalFee));
             console.log(`💳 Operational fee updated for extension: booking #${bookingId}`);
         }
         catch (operationalFeeError) {

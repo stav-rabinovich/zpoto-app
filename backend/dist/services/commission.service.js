@@ -3,9 +3,10 @@
  * Commission Service - מערכת חישוב עמלות זפוטו
  *
  * מודל העמלות:
- * - 15% מסך ההכנסה של כל שעת חניה בתשלום
+ * - 15% מעלות החניה בלבד (לא כולל דמי תפעול)
  * - 0% עמלה על שעות חניה חינם
  * - ללא גבול תחתון - תמיד 15% בלבד
+ * - דמי התפעול (10%) נשארים לזפוטו ולא לבעל החניה
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.calculateCommission = calculateCommission;
@@ -18,20 +19,20 @@ const COMMISSION_RATE = 0.15; // 15%
 /**
  * חישוב עמלה להזמנה
  * @param bookingId - מזהה ההזמנה
- * @param totalPriceCents - סכום כולל בעגורות
+ * @param parkingCostCents - עלות החניה בלבד (ללא דמי תפעול) בעגורות
  * @param hourlyPricing - מחירים לפי שעות (אופציונלי)
  * @returns תוצאת חישוב העמלה
  */
-async function calculateCommission(bookingId, totalPriceCents, hourlyPricing) {
+async function calculateCommission(bookingId, parkingCostCents, hourlyPricing) {
     console.log(`💰 Calculating commission for booking ${bookingId}:`);
-    console.log(`💰 Total price: ₪${totalPriceCents / 100}`);
-    // אם אין פירוט שעות, חשב עמלה פשוטה
+    console.log(`💰 Parking cost (excluding operational fees): ₪${parkingCostCents / 100}`);
+    // אם אין פירוט שעות, חשב עמלה פשוטה על עלות החניה בלבד
     if (!hourlyPricing || hourlyPricing.length === 0) {
-        const commissionCents = Math.round(totalPriceCents * COMMISSION_RATE);
-        const netOwnerCents = totalPriceCents - commissionCents;
+        const commissionCents = Math.round(parkingCostCents * COMMISSION_RATE);
+        const netOwnerCents = parkingCostCents - commissionCents;
         console.log(`💰 Simple calculation: Commission ₪${commissionCents / 100}, Net ₪${netOwnerCents / 100}`);
         return {
-            totalPriceCents,
+            totalPriceCents: parkingCostCents,
             commissionCents,
             netOwnerCents,
             commissionRate: COMMISSION_RATE,
@@ -61,11 +62,11 @@ async function calculateCommission(bookingId, totalPriceCents, hourlyPricing) {
             console.log(`💰 Hour ${hour.hour}: ₪${hour.priceCents / 100} → Commission ₪${commission / 100} (15%)`);
         }
     }
-    const netOwnerCents = totalPriceCents - totalCommissionCents;
+    const netOwnerCents = parkingCostCents - totalCommissionCents;
     console.log(`💰 Total commission: ₪${totalCommissionCents / 100}`);
     console.log(`💰 Net to owner: ₪${netOwnerCents / 100}`);
     return {
-        totalPriceCents,
+        totalPriceCents: parkingCostCents,
         commissionCents: totalCommissionCents,
         netOwnerCents,
         commissionRate: COMMISSION_RATE,

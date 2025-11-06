@@ -159,8 +159,10 @@ r.post('/process', auth, async (req: AuthedRequest, res, next) => {
         paidAt: new Date(),
         licensePlate,
         vehicleDescription,
-        // עדכון המחיר הסופי שהמשתמש שילם (כולל הנחות)
-        totalPriceCents: Math.round(totalPrice * 100),
+        // 🔧 FIX: לא לשנות את totalPriceCents כשיש קופון
+        // totalPriceCents צריך להישאר המחיר המקורי למערכת העמלות
+        // המחיר שהלקוח שילם בפועל נשמר בשדות אחרים
+        ...(couponCode ? {} : { totalPriceCents: Math.round(totalPrice * 100) }),
       },
       include: {
         parking: {
@@ -193,9 +195,9 @@ r.post('/process', auth, async (req: AuthedRequest, res, next) => {
         
         // חישוב המחירים
         const finalPriceCents = Math.round(totalPrice * 100);
-        const originalTotalPriceCents = finalPriceCents + Math.round(discountAmount * 100);
         
-        // עלות החניה היא תמיד ללא דמי התפעול - לפי מחיר שעתי × שעות
+        // 🔧 FIX: חישוב נכון של המחיר המקורי לפני קופון
+        // המחיר המקורי = עלות חניה + דמי תפעול מקוריים (לא אחרי הנחה)
         const parking = await prisma.parking.findUnique({
           where: { id: parseInt(parkingId) },
           select: { priceHr: true }
@@ -208,12 +210,15 @@ r.post('/process', auth, async (req: AuthedRequest, res, next) => {
         const ms = booking.endTime.getTime() - booking.startTime.getTime();
         const hours = Math.ceil(ms / (1000 * 60 * 60));
         const originalParkingCostCents = Math.round(parking.priceHr * hours * 100);
+        const originalOperationalFeeCents = Math.round(originalParkingCostCents * 0.1); // 10%
+        const originalTotalPriceCents = originalParkingCostCents + originalOperationalFeeCents;
         
         console.log(`💳 Coupon adjustment calculation:`, {
           parkingCost: `₪${originalParkingCostCents / 100} (${parking.priceHr}/hr × ${hours}h)`,
           originalTotal: `₪${originalTotalPriceCents / 100}`,
           finalTotal: `₪${finalPriceCents / 100}`,
-          discount: `₪${discountAmount}`
+          discount: `₪${discountAmount}`,
+          originalOperationalFee: `₪${originalOperationalFeeCents / 100}`
         });
         
         await updateOperationalFeeAfterCoupon(

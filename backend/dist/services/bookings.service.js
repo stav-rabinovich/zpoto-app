@@ -64,7 +64,12 @@ async function createCommissionForBooking(booking, originalPrice) {
     // חישוב עלות החניה הברוטו (לפני דמי תפעול) - זה הבסיס לעמלה
     // הכלל: העמלה תמיד 15% מהכנסת בעל החניה (מחיר שעתי × שעות)
     const COMMISSION_RATE = 0.15;
-    const parkingCostCents = Math.round(parking.priceHr * hours * 100);
+    // 🔧 FIX: השתמש במחיר החניה בפועל מההזמנה (תומך במחירון חדש)
+    // במקום parking.priceHr הישן
+    const parkingCostCents = booking.totalPriceCents || Math.round(parking.priceHr * hours * 100);
+    // 🔧 FIX: העמלה צריכה להיות רק על עלות החניה, לא על דמי התפעול
+    // בעל החניה מקבל: עלות החניה - עמלה (15% מעלות החניה)
+    console.log(`💰 FIXED: Commission calculation based on parking cost only (excluding operational fees)`);
     console.log(`💰 Commission base calculation:`);
     console.log(`   Hourly rate: ₪${parking.priceHr}`);
     console.log(`   Hours: ${hours}`);

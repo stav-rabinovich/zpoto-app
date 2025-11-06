@@ -80,12 +80,20 @@ async function getOperationalFeeByBookingId(bookingId) {
 /**
  * עדכון דמי תפעול (למקרה של הארכות)
  * @param bookingId - מזהה ההזמנה
- * @param newParkingCostCents - עלות חניה מעודכנת אחרי הארכה
+ * @param newTotalPriceCents - סכום כולל חדש אחרי הארכה (כולל דמי תפעול)
  * @returns רשומת דמי התפעול מעודכנת
  */
-async function updateOperationalFeeForExtension(bookingId, newParkingCostCents) {
+async function updateOperationalFeeForExtension(bookingId, newTotalPriceCents) {
     console.log(`💳 Updating operational fee for booking #${bookingId} extension`);
-    const calculation = calculateOperationalFee(newParkingCostCents);
+    // 🔧 FIX: חישוב נכון של עלות החניה מתוך הסכום הכולל
+    // הסכום הכולל כולל דמי תפעול, אז צריך לחלץ את עלות החניה הבסיסית
+    const parkingCostCents = Math.round(newTotalPriceCents / 1.1); // הסרת דמי התפעול
+    console.log(`💳 Extension calculation:`, {
+        newTotalPriceCents: `₪${newTotalPriceCents / 100}`,
+        calculatedParkingCost: `₪${parkingCostCents / 100}`,
+        formula: 'parkingCost = totalPrice / 1.1'
+    });
+    const calculation = calculateOperationalFee(parkingCostCents);
     const updatedFee = await prisma_1.prisma.operationalFee.update({
         where: { bookingId },
         data: {

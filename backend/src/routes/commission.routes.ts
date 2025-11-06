@@ -19,19 +19,19 @@ const router = Router();
  */
 router.post('/calculate', async (req, res, next) => {
   try {
-    const { bookingId, totalPriceCents, hourlyPricing } = req.body;
+    const { bookingId, parkingCostCents, hourlyPricing } = req.body;
 
-    if (!bookingId || !totalPriceCents) {
+    if (!bookingId || !parkingCostCents) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: bookingId, totalPriceCents',
+        error: 'Missing required fields: bookingId, parkingCostCents',
       });
     }
 
     console.log(`💰 API: Calculating commission for booking ${bookingId}`);
 
     // חישוב העמלה
-    const calculation = await calculateCommission(bookingId, totalPriceCents, hourlyPricing);
+    const calculation = await calculateCommission(bookingId, parkingCostCents, hourlyPricing);
 
     // שמירה במסד הנתונים
     await saveCommission(bookingId, calculation);
