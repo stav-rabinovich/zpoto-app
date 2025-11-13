@@ -209,7 +209,11 @@ export default function BookingsScreen() {
       <FlatList
         data={bookings}
         keyExtractor={(item) => String(item.id)}
-        ListEmptyComponent={<Text style={styles.empty}>אין עדיין הזמנות.</Text>}
+        ListEmptyComponent={
+          <View style={styles.emptyStateContainer}>
+            <Text style={styles.empty}>אין עדיין הזמנות.</Text>
+          </View>
+        }
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -243,6 +247,15 @@ function makeStyles(theme) {
     header: { fontSize: 20, fontWeight: '800', margin: spacing.lg, color: colors.text, textAlign: 'center' },
 
     empty: { marginHorizontal: spacing.lg, color: colors.subtext, textAlign: 'center' },
+    
+    emptyStateContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingVertical: spacing.xl * 2,
+      minHeight: 300,
+      marginTop: '30%',
+    },
 
     cardTap: { marginBottom: spacing.md },
     card: {

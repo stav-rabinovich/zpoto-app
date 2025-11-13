@@ -13,7 +13,7 @@ import { osmAutocomplete } from '../utils/osm';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigationContext } from '../contexts/NavigationContext';
 import { getUserProfile, updateUserProfile, getUserStats, validatePhoneNumber, validateName, getDefaultAvatar } from '../services/api/profile';
-import { getUserVehicles, createVehicle, updateVehicle, deleteVehicle, setDefaultVehicle, formatLicensePlate, validateLicensePlate } from '../services/api/vehicles';
+import { getUserVehicles, createVehicle, updateVehicle, deleteVehicle, setDefaultVehicle, formatLicensePlate, validateLicensePlate, getVehicleSizes, getVehicleSizeInfo, validateVehicleSize } from '../services/api/vehicles';
 
 // הוסרו AsyncStorage keys - עובדים רק מהשרת
 
@@ -61,6 +61,7 @@ export default function ProfileScreen() {
   // רכבים
   const [vehicles, setVehicles] = useState([]);
   const [newPlate, setNewPlate] = useState('');
+  const [newVehicleSize, setNewVehicleSize] = useState('FAMILY'); // ברירת מחדל
   const [newDesc, setNewDesc] = useState('');
 
   // מקומות שמורים
@@ -202,6 +203,7 @@ export default function ProfileScreen() {
     try {
       const result = await createVehicle({
         licensePlate: formattedPlate,
+        vehicleSize: newVehicleSize,
         description: desc || null,
         isDefault: vehicles.length === 0
       });
@@ -209,6 +211,7 @@ export default function ProfileScreen() {
       if (result.success) {
         setVehicles(prev => [result.data, ...prev]);
         setNewPlate(''); 
+        setNewVehicleSize('FAMILY');
         setNewDesc('');
         Alert.alert('נוסף', 'הרכב נוסף בהצלחה.');
       } else {
@@ -220,7 +223,7 @@ export default function ProfileScreen() {
     } finally {
       setSaving(false);
     }
-  }, [newPlate, newDesc, vehicles, isAuthenticated]);
+  }, [newPlate, newVehicleSize, newDesc, vehicles, isAuthenticated]);
 
   const removeVehicle = useCallback(async (vehicleId) => {
     if (!isAuthenticated) {
@@ -429,14 +432,15 @@ export default function ProfileScreen() {
 
         <Text style={styles.label}>שם מלא</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { backgroundColor: theme.colors.border, color: theme.colors.subtext }]}
           placeholder="לדוגמה: ישראל ישראלי"
           placeholderTextColor={theme.colors.subtext}
           value={name}
           onChangeText={setName}
+          editable={false}
         />
 
-        <Text style={styles.label}>אימייל (לחשבוניות)</Text>
+        <Text style={styles.label}>אימייל</Text>
         <TextInput
           style={[styles.input, { backgroundColor: theme.colors.border, color: theme.colors.subtext }]}
           placeholder="you@example.com"
@@ -450,33 +454,15 @@ export default function ProfileScreen() {
 
         <Text style={styles.label}>מספר טלפון</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, { backgroundColor: theme.colors.border, color: theme.colors.subtext }]}
           placeholder="לדוגמה: 050-123-4567"
           placeholderTextColor={theme.colors.subtext}
           value={phone}
           onChangeText={setPhone}
           keyboardType="phone-pad"
+          editable={false}
         />
 
-        <Text style={[styles.label, { marginTop: theme.spacing.xs }]}>אמצעי תשלום ברירת מחדל</Text>
-
-        {/* דרכי תשלום — מיושרות לשמאל */}
-        <View style={styles.paymentRowLeft}>
-          {PAYMENT_OPTIONS.map(opt => {
-            const active = payment === opt.key;
-            return (
-              <TouchableOpacity
-                key={opt.key}
-                style={[styles.payChip, active && styles.payChipActive]}
-                onPress={() => setPayment(opt.key)}
-                activeOpacity={0.9}
-              >
-                <Ionicons name={opt.icon} size={16} color={active ? '#fff' : theme.colors.primary} style={{ marginEnd:6 }} />
-                <Text style={[styles.payChipText, active && styles.payChipTextActive]}>{opt.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
 
         <ZpButton 
           title={saving ? "שומר..." : "שמור פרופיל"} 
@@ -486,122 +472,6 @@ export default function ProfileScreen() {
         />
       </View>
 
-      {/* מקומות שמורים */}
-      <View style={styles.card}>
-        <View style={styles.headerRow}>
-          <Ionicons name="location-outline" size={16} color="#fff" style={styles.cardIconWrap} />
-          <Text style={styles.section}>מקומות שמורים (לדף הבית)</Text>
-        </View>
-
-        {savedPlaces.length === 0 ? (
-          <Text style={styles.hint}>טרם הוגדרו מקומות שמורים. הוסיפו למטה “בית”, “עבודה” או מקום מותאם.</Text>
-        ) : (
-          savedPlaces.map(p => (
-            <View key={p.id} style={styles.placeRow}>
-              {/* מחק — לימין */}
-              <TouchableOpacity style={styles.deleteBtn} onPress={() => removePlace(p.id)} activeOpacity={0.9}>
-                <Text style={styles.deleteBtnText}>מחק</Text>
-              </TouchableOpacity>
-
-              {/* תוכן (כתובת/הערה בלבד) */}
-              <View style={{ flex:1 }}>
-                <Text style={styles.placeTitle}>{p.label}</Text>
-                {!!p.note && <Text style={styles.placeNote} numberOfLines={1}>{p.note}</Text>}
-              </View>
-
-              {/* אייקון בצמוד לשמאל */}
-              <Ionicons
-                name={p.icon || 'location'}
-                size={18}
-                color={theme.colors.primary}
-                style={{ marginStart: 8 }}
-              />
-            </View>
-          ))
-        )}
-
-        {/* הוספה/עדכון */}
-        <View style={styles.addBox}>
-          <Text style={styles.label}>בחרו סוג מקום</Text>
-
-          {/* בית/עבודה/אחר — מיושרים לשמאל */}
-          <View style={styles.quickRowLeft}>
-            {[
-              { key: 'home',  label: 'בית'   },
-              { key: 'work',  label: 'עבודה' },
-              { key: 'custom',label: 'אחר'   },
-            ].map(opt => {
-              const active = placeType === opt.key;
-              return (
-                <TouchableOpacity
-                  key={opt.key}
-                  style={[styles.quickChip, active && styles.quickChipActive]}
-                  onPress={() => setPlaceType(opt.key)}
-                  activeOpacity={0.9}
-                >
-                  <Ionicons name={iconForType(opt.key)} size={14} color={active ? '#fff' : theme.colors.primary} style={{ marginEnd:6 }} />
-                  <Text style={[styles.quickChipText, active && styles.quickChipTextActive]}>{opt.label}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {placeType === 'custom' && (
-            <>
-              <Text style={styles.label}>שם מותאם אישית</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="לדוגמה: חדר כושר / מסעדה אהובה"
-                placeholderTextColor={theme.colors.subtext}
-                value={customLabel}
-                onChangeText={setCustomLabel}
-              />
-            </>
-          )}
-
-          <Text style={styles.label}>כתובת / אזור</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="הקלידו כתובת ובחרו מההצעות…"
-            placeholderTextColor={theme.colors.subtext}
-            value={placeQuery}
-            onChangeText={(t) => { setPlaceQuery(t); setPlaceCoords(null); }}
-          />
-
-          {/* "השתמשו במיקומי הנוכחי" מתחת לשדה הכתובת */}
-          <TouchableOpacity style={[styles.actionBtnGhost, { marginTop: theme.spacing.xs }]} onPress={useCurrentLocation} activeOpacity={0.9}>
-            <Text style={styles.actionBtnGhostText}>השתמשו במיקומי הנוכחי</Text>
-          </TouchableOpacity>
-
-          {/* הצעות — לימין (RTL) */}
-          {suggestions.length > 0 && (
-            <View style={styles.suggestBox}>
-              <FlatList
-                keyboardShouldPersistTaps="handled"
-                data={suggestions}
-                keyExtractor={(i, idx) => String(i.id || i.place_id || idx)}
-                renderItem={({ item }) => (
-                  <TouchableOpacity style={styles.suggestItem} onPress={() => onPickSuggestion(item)} activeOpacity={0.9}>
-                    <Ionicons name="location" size={16} color={theme.colors.primary} style={{ marginStart:8 }} />
-                    <Text style={styles.suggestText} numberOfLines={1}>
-                      {item.description || item.display_name || 'לא ידוע'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              />
-            </View>
-          )}
-
-          {/* "שמור מקום" כמו "שמור פרופיל" */}
-          <ZpButton
-            title="שמור מקום"
-            onPress={savePlace}
-            style={{ marginTop: theme.spacing.sm }}
-            textStyle={{ fontWeight: '800' }}
-            leftIcon={<Ionicons name="save-outline" size={18} color="#fff" style={{ marginEnd: 8 }} />}
-          />
-        </View>
-      </View>
 
       {/* רכבים */}
       <View style={styles.card}>
@@ -611,32 +481,75 @@ export default function ProfileScreen() {
         </View>
 
         {vehicles.length === 0 ? (
-          <Text style={styles.hint}>לא הוספתם עדיין רכבים. הוסיפו רכב למטה.</Text>
+          <View style={styles.emptyStateContainer}>
+            <Text style={styles.hint}>לא הוספתם עדיין רכבים. הוסיפו רכב למטה.</Text>
+          </View>
         ) : (
+          <>
+            {vehicles.length > 1 && (
+              <View style={styles.infoBox}>
+                <Ionicons name="information-circle-outline" size={16} color={theme.colors.primary} />
+                <Text style={styles.infoText}>
+                  רכב ברירת המחדל ישמש להזמנות חדשות. לחצו על "הגדר כברירת מחדל" כדי לשנות.
+                </Text>
+              </View>
+            )}
+          </>
+        )}
+        
+        {vehicles.length > 0 && (
           vehicles.map(v => (
-            <View key={v.id} style={styles.vehicleRow}>
-              {/* מחק — לימין */}
-              <TouchableOpacity
-                style={[styles.smallBtn, { borderColor: theme.colors.error }]}
-                onPress={() => removeVehicle(v.id)}
-                activeOpacity={0.9}
-              >
-                <Text style={[styles.smallBtnText, { color: theme.colors.error }]}>מחק</Text>
-              </TouchableOpacity>
-
-              {/* תוכן */}
-              <View style={{ flex:1 }}>
-                <Text style={styles.vehicleTitle}>{v.licensePlate || v.plate}</Text>
-                {!!(v.description || v.desc) && <Text style={styles.vehicleDesc}>{v.description || v.desc}</Text>}
-                {v.isDefault && <Text style={styles.defaultBadge}>ברירת מחדל</Text>}
+            <View key={v.id} style={[styles.vehicleCard, v.isDefault && styles.vehicleCardDefault]}>
+              {/* כותרת הרכב עם סטטוס */}
+              <View style={styles.vehicleHeader}>
+                <View style={styles.vehicleInfo}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Ionicons name="car" size={18} color={v.isDefault ? theme.colors.primary : theme.colors.subtext} />
+                    <Text style={[styles.vehicleTitle, v.isDefault && { color: theme.colors.primary }]}>
+                      {v.licensePlate || v.plate}
+                    </Text>
+                    {v.vehicleSize && (
+                      <Text style={styles.vehicleSizeBadge}>
+                        {getVehicleSizeInfo(v.vehicleSize)?.icon} {getVehicleSizeInfo(v.vehicleSize)?.label}
+                      </Text>
+                    )}
+                  </View>
+                  {!!(v.description || v.desc) && (
+                    <Text style={styles.vehicleDesc}>{v.description || v.desc}</Text>
+                  )}
+                </View>
+                
+                {/* סטטוס ברירת מחדל */}
+                {v.isDefault && (
+                  <View style={styles.defaultStatusBadge}>
+                    <Ionicons name="star" size={14} color="#fff" />
+                    <Text style={styles.defaultStatusText}>ברירת מחדל</Text>
+                  </View>
+                )}
               </View>
 
-              {/* קבע כברירת מחדל — גרסה עדינה ונעימה */}
-              {!v.isDefault && (
-                <TouchableOpacity style={styles.setDefaultBtn} onPress={() => setDefaultVehicleHandler(v.id)} activeOpacity={0.9}>
-                  <Text style={styles.setDefaultBtnText}>קבעו כברירת מחדל</Text>
+              {/* כפתורי פעולה */}
+              <View style={styles.vehicleActions}>
+                {!v.isDefault && (
+                  <TouchableOpacity 
+                    style={styles.setDefaultButton} 
+                    onPress={() => setDefaultVehicleHandler(v.id)} 
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="star-outline" size={16} color={theme.colors.primary} />
+                    <Text style={styles.setDefaultButtonText}>הגדר כברירת מחדל</Text>
+                  </TouchableOpacity>
+                )}
+                
+                <TouchableOpacity
+                  style={styles.deleteButton}
+                  onPress={() => removeVehicle(v.id)}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="trash-outline" size={16} color={theme.colors.error} />
+                  <Text style={styles.deleteButtonText}>מחק</Text>
                 </TouchableOpacity>
-              )}
+              </View>
             </View>
           ))
         )}
@@ -652,6 +565,31 @@ export default function ProfileScreen() {
             onChangeText={setNewPlate}
             keyboardType="numbers-and-punctuation"
           />
+          
+          <Text style={styles.label}>גודל רכב</Text>
+          <View style={styles.vehicleSizeSelector}>
+            {getVehicleSizes().map(size => (
+              <TouchableOpacity
+                key={size.value}
+                style={[
+                  styles.sizeOption,
+                  newVehicleSize === size.value && styles.sizeOptionSelected
+                ]}
+                onPress={() => setNewVehicleSize(size.value)}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.sizeIcon}>{size.icon}</Text>
+                <Text style={[
+                  styles.sizeLabel,
+                  newVehicleSize === size.value && styles.sizeLabelSelected
+                ]}>
+                  {size.label}
+                </Text>
+                <Text style={styles.sizeDescription}>{size.description}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          
           <Text style={styles.label}>תיאור (לא חובה)</Text>
           <TextInput
             style={styles.input}
@@ -778,6 +716,35 @@ function makeStyles(theme) {
     },
 
     hint:{ fontSize:12, color: colors.subtext, textAlign:'left', writingDirection:'ltr' },
+    
+    emptyStateContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      paddingVertical: spacing.xl * 2,
+      minHeight: 150,
+      marginVertical: spacing.lg,
+    },
+    
+    infoBox: {
+      flexDirection: 'row-reverse',
+      alignItems: 'flex-start',
+      gap: 8,
+      backgroundColor: colors.primary + '10',
+      borderRadius: borderRadii.sm,
+      padding: spacing.sm,
+      marginBottom: spacing.md,
+      borderRightWidth: 3,
+      borderRightColor: colors.primary,
+    },
+    infoText: {
+      flex: 1,
+      fontSize: 13,
+      color: colors.text,
+      lineHeight: 18,
+      textAlign: 'left',
+      writingDirection: 'ltr',
+    },
 
     // דרכי תשלום — לשמאל
     paymentRowLeft:{ flexDirection:'row', flexWrap:'wrap', gap:8, marginTop: spacing.xs, justifyContent:'flex-start', marginBottom: spacing.sm },
@@ -793,22 +760,148 @@ function makeStyles(theme) {
     payChipTextActive:{ color:'#fff', fontWeight:'700', textAlign:'left' },
 
     // רכבים
-    vehicleRow:{
-      flexDirection:'row-reverse',
-      alignItems:'center',
-      gap:8,
-      paddingVertical:8,
-      borderBottomWidth:1,
-      borderBottomColor: colors.border
+    vehicleCard: {
+      backgroundColor: colors.surface,
+      borderRadius: borderRadii.sm,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: spacing.md,
+      marginBottom: spacing.sm,
+      shadowColor: '#000',
+      shadowOpacity: 0.03,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 2 },
+      elevation: 1,
+    },
+    vehicleCardDefault: {
+      borderColor: colors.primary,
+      backgroundColor: colors.primary + '08',
+    },
+    vehicleHeader: {
+      flexDirection: 'row-reverse',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      marginBottom: spacing.sm,
+    },
+    vehicleInfo: {
+      flex: 1,
+    },
+    vehicleActions: {
+      flexDirection: 'row-reverse',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginTop: spacing.xs,
+    },
+    setDefaultButton: {
+      flexDirection: 'row-reverse',
+      alignItems: 'center',
+      gap: 4,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: borderRadii.sm,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.surface,
+    },
+    setDefaultButtonText: {
+      color: colors.primary,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    deleteButton: {
+      flexDirection: 'row-reverse',
+      alignItems: 'center',
+      gap: 4,
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: borderRadii.sm,
+      borderWidth: 1,
+      borderColor: colors.error,
+      backgroundColor: colors.surface,
+    },
+    deleteButtonText: {
+      color: colors.error,
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    defaultStatusBadge: {
+      flexDirection: 'row-reverse',
+      alignItems: 'center',
+      gap: 4,
+      backgroundColor: colors.primary,
+      borderRadius: borderRadii.sm,
+      paddingVertical: 4,
+      paddingHorizontal: 8,
+    },
+    defaultStatusText: {
+      color: '#fff',
+      fontSize: 12,
+      fontWeight: '700',
     },
     vehicleTitle:{ fontSize:15, fontWeight:'700', color: colors.text, textAlign:'left', writingDirection:'ltr' },
-    vehicleDesc:{ fontSize:13, color: colors.subtext, textAlign:'left', writingDirection:'ltr' },
+    vehicleDesc:{ fontSize:13, color: colors.subtext, textAlign:'left', writingDirection:'ltr', marginTop: 4 },
 
     defaultBadge:{
       marginTop:4, alignSelf:'flex-start',
       backgroundColor:'#EEF3FF', borderColor: colors.border, borderWidth:1,
       borderRadius: 999, paddingHorizontal:8, paddingVertical:4,
       color: colors.primary, fontWeight:'700', fontSize:12
+    },
+
+    vehicleSizeBadge:{
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 999,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      fontSize: 11,
+      fontWeight: '600',
+      color: colors.subtext
+    },
+
+    // בורר גודל רכב
+    vehicleSizeSelector:{
+      flexDirection: 'row',
+      gap: 8,
+      marginBottom: 16
+    },
+
+    sizeOption:{
+      flex: 1,
+      alignItems: 'center',
+      padding: 12,
+      borderRadius: borderRadii.sm,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface
+    },
+
+    sizeOptionSelected:{
+      borderColor: colors.primary,
+      backgroundColor: colors.primary + '10'
+    },
+
+    sizeIcon:{
+      fontSize: 24,
+      marginBottom: 4
+    },
+
+    sizeLabel:{
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.text,
+      marginBottom: 2
+    },
+
+    sizeLabelSelected:{
+      color: colors.primary
+    },
+
+    sizeDescription:{
+      fontSize: 11,
+      color: colors.subtext,
+      textAlign: 'center'
     },
 
     smallBtn:{

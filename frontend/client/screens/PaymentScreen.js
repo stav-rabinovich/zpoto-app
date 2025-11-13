@@ -92,6 +92,8 @@ export default function PaymentScreen({ navigation, route }) {
   const [couponError, setCouponError] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState(null);
   const [discount, setDiscount] = useState(null);
+  
+  // State של התראת חפיפת רכב הועבר למסך ההזמנה
 
   // חסימת כפתור החזרה אחרי תשלום מוצלח
   useEffect(() => {
@@ -212,6 +214,8 @@ export default function PaymentScreen({ navigation, route }) {
     };
   }, [spot, startTime, endTime, totalPrice, isExtension, extensionMinutes, paymentAmount, newEndTime, parkingTitle]);
 
+  // פונקציות לטיפול בהתראת חפיפת רכב הועברו למסך ההזמנה
+
   // פונקציית תשלום
   const handlePayment = async () => {
     // ולידציה שונה בהתאם לסוג התשלום
@@ -238,6 +242,8 @@ export default function PaymentScreen({ navigation, route }) {
     setLoading(true);
     try {
       console.log(`💳 Processing ${isExtension ? 'extension' : 'booking'} payment...`);
+      
+      // 🚗 בדיקת חפיפות רכב הועברה למסך ההזמנה (BookingScreen)
       
       // סימולציה של תשלום
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -948,6 +954,8 @@ export default function PaymentScreen({ navigation, route }) {
           </Text>
         </View>
       </ScrollView>
+
+      {/* התראת חפיפת רכב הועברה למסך ההזמנה */}
     </KeyboardAvoidingView>
   );
 }

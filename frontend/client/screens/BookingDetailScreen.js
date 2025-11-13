@@ -170,10 +170,42 @@ export default function BookingDetailScreen({ route, navigation }) {
   const parking = booking.parking || {};
   const isActive = booking.status === 'CONFIRMED' || booking.status === 'ACTIVE';
 
-  // חישוב הסכום הכולל שמחפש החניה שילם
-  // לאחר התשלום, totalPriceCents כבר מכיל את המחיר הסופי שהמשתמש שילם (כולל הנחות)
-  const totalPaidByUser = booking.totalPriceCents ? (booking.totalPriceCents / 100) : 0;
-  const totalCost = totalPaidByUser.toFixed(2);
+  // תיקון חישוב - שימוש בנתונים הנכונים מ-OperationalFee
+  let parkingCost = 0;
+  let operationalFee = 0;
+  let totalCost = 0;
+  let hasCoupon = false;
+  let couponDiscount = 0;
+  
+  // בדיקה אם יש נתוני OperationalFee (הדרך הנכונה)
+  if (booking.operationalFee) {
+    parkingCost = booking.operationalFee.parkingCostCents / 100;
+    operationalFee = booking.operationalFee.operationalFeeCents / 100;
+    totalCost = booking.operationalFee.totalPaymentCents / 100;
+  } else {
+    // fallback - אם אין OperationalFee, נחשב בצורה פשוטה
+    // נניח שהסכום הכולל כולל כבר דמי תפעול, אז נחלק אותו
+    const totalAmount = booking.totalPriceCents ? (booking.totalPriceCents / 100) : 0;
+    parkingCost = totalAmount / 1.1; // מחלקים ב-1.1 כדי לקבל את העלות הבסיסית
+    operationalFee = parkingCost * 0.1; // 10% דמי תפעול
+    totalCost = totalAmount;
+  }
+  
+  // בדיקה אם יש שימוש בקופון
+  if (booking.couponUsages && booking.couponUsages.length > 0) {
+    const couponUsage = booking.couponUsages[0];
+    hasCoupon = true;
+    couponDiscount = couponUsage.discountAmountCents / 100;
+  }
+  
+  console.log('💰 Fixed calculation using OperationalFee data:', {
+    hasOperationalFee: !!booking.operationalFee,
+    parkingCost,
+    operationalFee,
+    couponDiscount,
+    totalCost,
+    hasCoupon
+  });
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ padding: 24 }}>
@@ -195,8 +227,42 @@ export default function BookingDetailScreen({ route, navigation }) {
         {/* עלות מעודכנת */}
         <View style={styles.costSection}>
           <Text style={styles.costLabel}>עלות:</Text>
-          <Text style={styles.costValue}>₪{totalCost} סה"כ</Text>
+          <Text style={styles.costValue}>₪{totalCost.toFixed(2)} סה"כ</Text>
         </View>
+        
+        {/* פירוט מחיר - תיקון חישוב */}
+        <View style={styles.priceBreakdown}>
+          <View style={styles.breakdownRow}>
+            <Text style={styles.breakdownValue}>₪{parkingCost.toFixed(2)}</Text>
+            <Text style={styles.breakdownLabel}>עלות חניה (כולל הארכות):</Text>
+          </View>
+          <View style={styles.breakdownRow}>
+            <Text style={styles.breakdownValue}>₪{operationalFee.toFixed(2)}</Text>
+            <Text style={styles.breakdownLabel}>דמי תפעול (10%):</Text>
+          </View>
+          {hasCoupon && (
+            <View style={styles.breakdownRow}>
+              <Text style={[styles.breakdownValue, { color: '#4CAF50' }]}>-₪{couponDiscount.toFixed(2)}</Text>
+              <Text style={[styles.breakdownLabel, { color: '#4CAF50' }]}>הנחת קופון:</Text>
+            </View>
+          )}
+          <View style={[styles.breakdownRow, { borderTopWidth: 1, borderTopColor: '#E0E0E0', paddingTop: 8, marginTop: 8 }]}>
+            <Text style={[styles.breakdownValue, { fontWeight: '700', color: '#2196F3' }]}>₪{totalCost.toFixed(2)}</Text>
+            <Text style={[styles.breakdownLabel, { fontWeight: '600' }]}>סה"כ לתשלום:</Text>
+          </View>
+        </View>
+        
+        {/* פרטי קופון אם קיים */}
+        {booking.couponUsages && booking.couponUsages.length > 0 && (
+          <View style={styles.couponSection}>
+            <View style={styles.couponBadge}>
+              <Ionicons name="pricetag" size={16} color="#4CAF50" />
+              <Text style={styles.couponText}>
+                קופון {booking.couponUsages[0].coupon?.code} - חסכת ₪{(booking.couponUsages[0].discountAmountCents / 100).toFixed(2)}
+              </Text>
+            </View>
+          </View>
+        )}
       </View>
 
       {/* פרטים נוספים */}
@@ -334,6 +400,58 @@ function makeStyles(theme) {
       fontSize: 22,
       fontWeight: '800',
       color: colors.primary,
+    },
+    
+    // סטיילים לתצוגת קופון
+    couponSection: {
+      marginTop: 16,
+    },
+    couponBadge: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: '#E8F5E8',
+      paddingVertical: 8,
+      paddingHorizontal: 12,
+      borderRadius: 20,
+      gap: 6,
+    },
+    couponText: {
+      fontSize: 14,
+      color: '#2E7D32',
+      fontWeight: '600',
+    },
+    
+    // סטיילים לפירוט מחיר
+    priceBreakdown: {
+      backgroundColor: '#F8F9FA',
+      borderRadius: 12,
+      padding: 16,
+      marginTop: 16,
+    },
+    breakdownTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.text,
+      marginBottom: 12,
+    },
+    breakdownRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: 8,
+    },
+    breakdownLabel: {
+      fontSize: 14,
+      color: colors.subtext,
+      flex: 1,
+      textAlign: 'right',
+    },
+    breakdownValue: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: colors.text,
+      textAlign: 'left',
     },
     
     // כרטיס פרטים נוספים

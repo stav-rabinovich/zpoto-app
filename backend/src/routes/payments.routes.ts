@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { auth, AuthedRequest } from '../middlewares/auth';
 import { prisma } from '../lib/prisma';
 import { createBooking } from '../services/bookings.service';
+import { checkVehicleBookingConflicts } from '../services/vehicleBookingConflicts.service';
 
 const r = Router();
 
@@ -78,6 +79,31 @@ r.post('/process', auth, async (req: AuthedRequest, res, next) => {
         conflictingBooking: conflictingBooking.id,
       });
     }
+
+    // 🚗 בדיקת חפיפות רכב - מניעת הזמנות כפולות לאותו רכב
+    console.log('🚗 Checking vehicle booking conflicts before payment...');
+    
+    const vehicleConflictCheck = await checkVehicleBookingConflicts(
+      vehicleId ? parseInt(vehicleId) : null,
+      licensePlate || null,
+      startDateTime,
+      endDateTime,
+      undefined, // excludeBookingId - אין להחריג כי זו הזמנה חדשה
+      userId
+    );
+
+    if (vehicleConflictCheck.hasConflict) {
+      console.log('🚗 ❌ Vehicle booking conflict detected:', vehicleConflictCheck.message);
+      
+      return res.status(409).json({
+        error: 'VEHICLE_BOOKING_CONFLICT',
+        message: vehicleConflictCheck.message,
+        conflictingBookings: vehicleConflictCheck.conflictingBookings,
+        vehicleConflict: true // דגל מיוחד לזיהוי חפיפת רכב
+      });
+    }
+
+    console.log('🚗 ✅ No vehicle conflicts found, proceeding with payment...');
 
     // סימולציית עיבוד תשלום
     // בעתיד כאן נוסיף אינטגרציה עם ספק תשלומים אמיתי
@@ -200,32 +226,41 @@ r.post('/process', auth, async (req: AuthedRequest, res, next) => {
         // המחיר המקורי = עלות חניה + דמי תפעול מקוריים (לא אחרי הנחה)
         const parking = await prisma.parking.findUnique({
           where: { id: parseInt(parkingId) },
-          select: { priceHr: true }
+          select: { pricing: true }
         });
         
         if (!parking) {
           throw new Error(`Parking ${parkingId} not found for operational fee update`);
         }
         
+        // חילוץ מחיר שעה ראשונה מהמחירון
+        let hourlyPrice = 10; // ברירת מחדל
+        if (parking.pricing) {
+          try {
+            const pricingData = typeof parking.pricing === 'string' 
+              ? JSON.parse(parking.pricing) 
+              : parking.pricing;
+            if (pricingData?.hour1) {
+              hourlyPrice = typeof pricingData.hour1 === 'string' 
+                ? parseFloat(pricingData.hour1) 
+                : pricingData.hour1;
+            }
+          } catch (error) {
+            console.warn('Failed to parse pricing for coupon calculation:', error);
+          }
+        }
+        
         const ms = booking.endTime.getTime() - booking.startTime.getTime();
         const hours = Math.ceil(ms / (1000 * 60 * 60));
-        const originalParkingCostCents = Math.round(parking.priceHr * hours * 100);
-        const originalOperationalFeeCents = Math.round(originalParkingCostCents * 0.1); // 10%
-        const originalTotalPriceCents = originalParkingCostCents + originalOperationalFeeCents;
+        const originalParkingCostCents = Math.round(hourlyPrice * hours * 100);
         
         console.log(`💳 Coupon adjustment calculation:`, {
-          parkingCost: `₪${originalParkingCostCents / 100} (${parking.priceHr}/hr × ${hours}h)`,
-          originalTotal: `₪${originalTotalPriceCents / 100}`,
+          parkingCost: `₪${originalParkingCostCents / 100} (${hourlyPrice}/hr × ${hours}h)`,
           finalTotal: `₪${finalPriceCents / 100}`,
           discount: `₪${discountAmount}`,
-          originalOperationalFee: `₪${originalOperationalFeeCents / 100}`
         });
-        
-        await updateOperationalFeeAfterCoupon(
-          booking.id,
-          finalPriceCents,
-          originalParkingCostCents
-        );
+
+        await updateOperationalFeeAfterCoupon(booking.id, finalPriceCents, originalParkingCostCents);
         
         console.log('💳 ✅ Operational fee updated for coupon usage');
       } catch (error) {

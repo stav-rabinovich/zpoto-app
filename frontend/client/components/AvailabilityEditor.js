@@ -64,7 +64,7 @@ export default function AvailabilityEditor({ value, onChange }) {
     const block = TIME_BLOCKS.find(b => b.key === blockKey);
     Alert.alert(
       'בלוק זמן',
-      `בלוק זמן ${block.label}\n\nלחץ לעבור בין זמין/לא זמין\n\nכל בלוק מכסה 4 שעות רצופות`,
+      `בלוק זמן ${block.label}\n\nלחץ לעבור בין זמין/לא זמין\n\nכל בלוק מכסה 3 שעות רצופות`,
       [{ text: 'הבנתי', style: 'default' }]
     );
   };
@@ -129,11 +129,11 @@ export default function AvailabilityEditor({ value, onChange }) {
                     ]}
                   >
                     <View style={styles.blocksTitleRow}>
-                      <Text style={styles.blocksTitle}>בחר בלוקי זמן (4 שעות כל בלוק):</Text>
+                      <Text style={styles.blocksTitle}>בחר בלוקי זמן (3 שעות כל בלוק):</Text>
                       <TouchableOpacity 
                         onPress={() => Alert.alert(
                           'עזרה - בלוקי זמן',
-                          'כל בלוק מכסה 4 שעות רצופות.\n\nניתן לבחור מספר בלוקים לכל יום.\n\nלחץ על בלוק כדי להפעיל/כבות אותו.\n\nירוק = זמין, לבן = לא זמין',
+                          'כל בלוק מכסה 3 שעות רצופות.\n\nניתן לבחור מספר בלוקים לכל יום.\n\nלחץ על בלוק כדי להפעיל/כבות אותו.\n\nירוק = זמין, לבן = לא זמין',
                           [{ text: 'הבנתי', style: 'default' }]
                         )}
                         style={styles.helpButton}

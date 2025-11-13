@@ -242,7 +242,9 @@ export default function OwnerIntroScreen({ navigation }) {
     <ScrollView
       style={{ flex: 1, backgroundColor: theme.colors.bg }}
       contentContainerStyle={[styles.wrap, { padding: theme.spacing.lg }]}
-      keyboardShouldPersistTaps="handled"
+      showsVerticalScrollIndicator={false}
+      bounces={false}
+      overScrollMode="never"
     >
       {/* HERO מנהלי */}
       <LinearGradient
@@ -256,8 +258,7 @@ export default function OwnerIntroScreen({ navigation }) {
 
         </View>
 
-        {/* ברכה קצרה */}
-        {!!name && <Text style={styles.heroHello}>שלום{name ? `, ${name}` : ''}</Text>}
+        {/* ברכה קצרה - הוסרה */}
 
         {/* תיאור – מיושר לשמאל */}
         <Text style={styles.heroSub}>
@@ -288,27 +289,17 @@ export default function OwnerIntroScreen({ navigation }) {
               borderColor: theme.colors.border 
             }]}>
               <View style={styles.monthlyRevenueHeader}>
-                <View style={[styles.monthlyRevenueIcon, { backgroundColor: `${theme.colors.success}15` }]}>
+                <View style={[styles.monthlyRevenueIcon, { backgroundColor: `${theme.colors.success}15`, marginRight: 12 }]}>
                   <Ionicons name="wallet" size={20} color={theme.colors.success} />
                 </View>
-                <View style={styles.monthlyRevenueInfo}>
-                  <Text style={[styles.monthlyRevenueTitle, { color: theme.colors.text }]}>
+                <View style={[styles.monthlyRevenueInfo, { alignItems: 'flex-start', flex: 1 }]}>
+                  <Text style={[styles.monthlyRevenueTitle, { color: theme.colors.text, textAlign: 'left' }]}>
                     הכנסות החודש
                   </Text>
-                  <Text style={[styles.monthlyRevenueSubtitle, { color: theme.colors.subtext }]}>
+                  <Text style={[styles.monthlyRevenueSubtitle, { color: theme.colors.subtext, textAlign: 'left' }]}>
                     {new Date().toLocaleDateString('he-IL', { month: 'long', year: 'numeric' })}
                   </Text>
                 </View>
-                <TouchableOpacity 
-                  style={[styles.monthlyRevenueDetailsButton, { backgroundColor: `${theme.colors.primary}10` }]}
-                  onPress={() => navigation.navigate('OwnerOverview')}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.monthlyRevenueDetailsText, { color: theme.colors.primary }]}>
-                    פירוט
-                  </Text>
-                  <Ionicons name="chevron-forward" size={14} color={theme.colors.primary} />
-                </TouchableOpacity>
               </View>
               
               <View style={styles.monthlyRevenueContent}>
@@ -368,55 +359,200 @@ export default function OwnerIntroScreen({ navigation }) {
               </View>
             </View>
 
-            <Text style={[styles.sectionTitleLeft, { color: theme.colors.text }]}>מה תרצו לעשות?</Text>
-
-            {/* פעולות מהירות */}
-            <View style={styles.quickGrid}>
+            {/* פעולות מינימליסטיות עתידניות */}
+            <View style={{
+              marginTop: 20,
+              gap: 8,
+            }}>
+              {/* כפתור ראשי - ניהול החניות */}
               <TouchableOpacity
-                style={[styles.quickTile, { borderColor: theme.colors.border }]}
-                onPress={() => navigation.navigate('OwnerOverview')}
-                activeOpacity={0.9}
-              >
-                <Ionicons name="speedometer" size={20} color={theme.colors.primary} />
-                <Text style={[styles.quickLabel, { color: theme.colors.text }]}>סקירה כללית</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.quickTile, { borderColor: theme.colors.border }]}
+                style={{
+                  height: 64,
+                  borderRadius: 20,
+                  backgroundColor: 'rgba(255, 255, 255, 0.25)',
+                  borderWidth: 4,
+                  borderColor: 'rgba(255, 255, 255, 0.7)',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  paddingHorizontal: 20,
+                  backdropFilter: 'blur(15px)',
+                  shadowColor: '#000',
+                  shadowOffset: { width: 0, height: 6 },
+                  shadowOpacity: 0.3,
+                  shadowRadius: 16,
+                  elevation: 12,
+                  // גבול פנימי נוסף
+                  borderTopWidth: 4,
+                  borderTopColor: 'rgba(255, 255, 255, 0.8)',
+                  // אפקט זוהר
+                  position: 'relative',
+                }}
                 onPress={() => navigation.navigate('OwnerDashboard')}
-                activeOpacity={0.9}
+                activeOpacity={0.8}
               >
-                <Ionicons name="business" size={20} color={theme.colors.primary} />
-                <Text style={[styles.quickLabel, { color: theme.colors.text }]}>ניהול החניות</Text>
+                <View style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 8,
+                  backgroundColor: 'rgba(59, 130, 246, 0.2)',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  marginLeft: 0,
+                  marginRight: 16,
+                }}>
+                  <Ionicons name="business" size={18} color="#3B82F6" />
+                </View>
+                
+                <Text style={{
+                  fontSize: 16,
+                  fontWeight: '500',
+                  color: theme.colors.text,
+                  flex: 1,
+                  textAlign: 'left',
+                }}>ניהול החניות</Text>
+                
+                <Ionicons name="chevron-back" size={16} color={theme.colors.subtext} />
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.quickTile, { borderColor: theme.colors.border }]}
-                onPress={() => navigation.navigate('OwnerPending')}
-                activeOpacity={0.9}
-              >
-                <Ionicons name="calendar-outline" size={20} color={theme.colors.primary} />
-                <Text style={[styles.quickLabel, { color: theme.colors.text }]}>הזמנות עתידיות</Text>
-              </TouchableOpacity>
+              {/* גריד 2x2 מינימליסטי */}
+              <View style={{
+                flexDirection: 'row',
+                gap: 8,
+                marginTop: 8,
+              }}>
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    height: 88,
+                    borderRadius: 16,
+                    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                    borderWidth: 5,
+                    borderColor: 'rgba(255, 255, 255, 0.65)',
+                    padding: 16,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.25,
+                    shadowRadius: 14,
+                    elevation: 10,
+                    // גבול פנימי עדין
+                    borderTopWidth: 5,
+                    borderTopColor: 'rgba(255, 255, 255, 0.8)',
+                  }}
+                  onPress={() => navigation.navigate('OwnerOverview')}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="trending-up" size={20} color="#10B981" style={{ marginBottom: 8 }} />
+                  <Text style={{
+                    fontSize: 14,
+                    fontWeight: '500',
+                    color: theme.colors.text,
+                    textAlign: 'center',
+                  }}>היסטוריית הכנסות</Text>
+                </TouchableOpacity>
 
-              {/* פרסום חניה חדשה -> OwnerListingFormScreen.js */}
-              <TouchableOpacity
-                style={[styles.quickTile, { borderColor: theme.colors.border }]}
-                onPress={() => navigation.navigate('OwnerListingForm')}
-                activeOpacity={0.9}
-              >
-                <Ionicons name="add-circle-outline" size={20} color={theme.colors.primary} />
-                <Text style={[styles.quickLabel, { color: theme.colors.text }]}>פרסום חניה חדשה</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    height: 88,
+                    borderRadius: 16,
+                    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                    borderWidth: 5,
+                    borderColor: 'rgba(255, 255, 255, 0.65)',
+                    padding: 16,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.25,
+                    shadowRadius: 14,
+                    elevation: 10,
+                    // גבול פנימי עדין
+                    borderTopWidth: 5,
+                    borderTopColor: 'rgba(255, 255, 255, 0.8)',
+                  }}
+                  onPress={() => navigation.navigate('OwnerPending')}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="calendar" size={20} color="#F59E0B" style={{ marginBottom: 8 }} />
+                  <Text style={{
+                    fontSize: 14,
+                    fontWeight: '500',
+                    color: theme.colors.text,
+                    textAlign: 'center',
+                  }}>הזמנות עתידיות</Text>
+                </TouchableOpacity>
+              </View>
 
-              <TouchableOpacity
-                style={[styles.quickTile, { borderColor: theme.colors.border }]}
-                onPress={() => navigation.navigate('OwnerSettings')}
-                activeOpacity={0.9}
-              >
-                <Ionicons name="settings-outline" size={20} color={theme.colors.primary} />
-                <Text style={[styles.quickLabel, { color: theme.colors.text }]}>הגדרות</Text>
-              </TouchableOpacity>
+              <View style={{
+                flexDirection: 'row',
+                gap: 8,
+              }}>
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    height: 88,
+                    borderRadius: 16,
+                    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                    borderWidth: 5,
+                    borderColor: 'rgba(255, 255, 255, 0.65)',
+                    padding: 16,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.25,
+                    shadowRadius: 14,
+                    elevation: 10,
+                    // גבול פנימי עדין
+                    borderTopWidth: 5,
+                    borderTopColor: 'rgba(255, 255, 255, 0.8)',
+                  }}
+                  onPress={() => navigation.navigate('OwnerListingForm')}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="add-circle" size={20} color="#8B5CF6" style={{ marginBottom: 8 }} />
+                  <Text style={{
+                    fontSize: 14,
+                    fontWeight: '500',
+                    color: theme.colors.text,
+                    textAlign: 'center',
+                  }}>פרסום חניה חדשה</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={{
+                    flex: 1,
+                    height: 88,
+                    borderRadius: 16,
+                    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+                    borderWidth: 5,
+                    borderColor: 'rgba(255, 255, 255, 0.65)',
+                    padding: 16,
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    shadowColor: '#000',
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.25,
+                    shadowRadius: 14,
+                    elevation: 10,
+                    // גבול פנימי עדין
+                    borderTopWidth: 5,
+                    borderTopColor: 'rgba(255, 255, 255, 0.8)',
+                  }}
+                  onPress={() => navigation.navigate('OwnerSettings')}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="settings" size={20} color="#6B7280" style={{ marginBottom: 8 }} />
+                  <Text style={{
+                    fontSize: 14,
+                    fontWeight: '500',
+                    color: theme.colors.text,
+                    textAlign: 'center',
+                  }}>הגדרות</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
           </View>
@@ -544,19 +680,6 @@ export default function OwnerIntroScreen({ navigation }) {
         </>
       )}
 
-      {/* כפתור התנתקות - רק אם המשתמש מחובר כבעל חניה */}
-      {isAuthenticated && user?.role === 'OWNER' && (
-        <View style={styles.logoutContainer}>
-          <TouchableOpacity 
-            style={styles.logoutButton}
-            onPress={handleLogout}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="log-out-outline" size={20} color="#fff" />
-            <Text style={styles.logoutButtonText}>התנתק</Text>
-          </TouchableOpacity>
-        </View>
-      )}
     </ScrollView>
   );
 }

@@ -163,7 +163,7 @@ export default function OwnerListingDetailScreen({ route, navigation }) {
           </View>
 
           {!!parking.address && <Text style={styles.line}>כתובת: {parking.address}</Text>}
-          <Text style={styles.line}>מחיר לשעה: {formatCurrency(parking.priceHr || 0)}</Text>
+          <Text style={styles.line}>מחיר לשעה: {formatCurrency(parking.firstHourPrice || 10)}</Text>
           {typeof parking.lat === 'number' && typeof parking.lng === 'number' && (
             <Text style={styles.line}>מיקום: {parking.lat.toFixed(5)}, {parking.lng.toFixed(5)}</Text>
           )}

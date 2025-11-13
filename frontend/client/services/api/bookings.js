@@ -445,3 +445,131 @@ export const getParkingAvailability = async (parkingId, startTime) => {
     };
   }
 };
+
+/**
+ * בדיקת חפיפות הזמנות לרכב מסוים
+ * 🚗 מטרה: למנוע מצב בו אותו רכב "נמצא" בשני מקומות בו זמנית
+ * @param {Object} params - פרמטרי הבדיקה
+ * @param {number|null} params.vehicleId - מזהה הרכב (אופציונלי)
+ * @param {string|null} params.licensePlate - מספר רכב (אופציונלי)
+ * @param {string} params.startTime - זמן התחלה (ISO string)
+ * @param {string} params.endTime - זמן סיום (ISO string)
+ * @param {number|null} params.excludeBookingId - מזהה הזמנה להחרגה (אופציונלי)
+ * @returns {Promise} תוצאת בדיקת החפיפות
+ */
+export const checkVehicleBookingConflicts = async ({ 
+  vehicleId, 
+  licensePlate, 
+  startTime, 
+  endTime, 
+  excludeBookingId 
+}) => {
+  try {
+    console.log(`🚗 CLIENT: Checking vehicle booking conflicts:`, {
+      vehicleId,
+      licensePlate,
+      startTime,
+      endTime,
+      excludeBookingId
+    });
+
+    if (!vehicleId && !licensePlate) {
+      throw new Error('Either vehicleId or licensePlate must be provided');
+    }
+
+    if (!startTime || !endTime) {
+      throw new Error('startTime and endTime are required');
+    }
+
+    // יצירת timeout promise (30 שניות)
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Request timeout')), 30000);
+    });
+
+    // קריאה ל-API
+    const apiPromise = api.post('/api/bookings/check-vehicle-conflicts', {
+      vehicleId,
+      licensePlate,
+      startTime,
+      endTime,
+      excludeBookingId
+    });
+
+    // המתנה לתגובה עם timeout
+    const response = await Promise.race([apiPromise, timeoutPromise]);
+    
+    console.log('🚗 CLIENT: Vehicle conflict check response:', response.data);
+    
+    return {
+      success: true,
+      hasConflict: response.data.hasConflict,
+      message: response.data.message,
+      conflictingBookings: response.data.conflictingBookings || [],
+      vehicleIdentifier: response.data.vehicleIdentifier,
+      timeRange: response.data.timeRange
+    };
+
+  } catch (error) {
+    console.error('🚗 CLIENT: Failed to check vehicle conflicts:', error);
+    
+    // טיפול בשגיאות שונות
+    if (error.message === 'Request timeout') {
+      return {
+        success: false,
+        error: 'הבקשה חרגה מהזמן המותר. אנא נסה שוב.',
+        hasConflict: false,
+        conflictingBookings: []
+      };
+    }
+
+    if (error.response?.status === 409 && error.response?.data?.vehicleConflict) {
+      // זוהתה חפיפת רכב - החזר את הפרטים
+      return {
+        success: true,
+        hasConflict: true,
+        message: error.response.data.message,
+        conflictingBookings: error.response.data.conflictingBookings || [],
+        vehicleConflict: true
+      };
+    }
+
+    return {
+      success: false,
+      error: error.response?.data?.error || error.message || 'שגיאה בבדיקת חפיפות רכב',
+      hasConflict: false,
+      conflictingBookings: []
+    };
+  }
+};
+
+/**
+ * קבלת הזמנות פעילות של רכב מסוים
+ * @param {number} vehicleId - מזהה הרכב
+ * @returns {Promise} רשימת הזמנות פעילות
+ */
+export const getActiveVehicleBookings = async (vehicleId) => {
+  try {
+    console.log(`🚗 CLIENT: Getting active bookings for vehicle ${vehicleId}`);
+    
+    const response = await api.get(`/api/bookings/vehicle-active/${vehicleId}`);
+    
+    console.log('🚗 CLIENT: Active vehicle bookings response:', response.data);
+    
+    return {
+      success: true,
+      vehicle: response.data.vehicle,
+      activeBookings: response.data.activeBookings || [],
+      count: response.data.count || 0
+    };
+
+  } catch (error) {
+    console.error('🚗 CLIENT: Failed to get active vehicle bookings:', error);
+    
+    return {
+      success: false,
+      error: error.response?.data?.error || 'שגיאה בקבלת הזמנות פעילות',
+      activeBookings: [],
+      count: 0
+    };
+  }
+};

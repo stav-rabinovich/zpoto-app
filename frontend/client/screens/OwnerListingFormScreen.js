@@ -103,7 +103,7 @@ export default function OwnerListingFormScreen({ navigation, route }) {
         phone,
         lat: 32.0853, // ברירת מחדל - תל אביב
         lng: 34.7818,
-        priceHr: 0, // ברירת מחדל
+        pricing: JSON.stringify({ hour1: 10, hour2: 10, hour3: 10 }), // מחירון ברירת מחדל
         onboarding: JSON.stringify(onboardingData),
       });
 

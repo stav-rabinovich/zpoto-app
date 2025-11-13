@@ -49,15 +49,56 @@ export async function approveListingRequest(id: number) {
       ? `${request.fullAddress}, ${request.city}`
       : request.address;
 
+  // חילוץ maxVehicleSize מנתוני האונבורדינג
+  let maxVehicleSize = null;
+  if (request.onboarding) {
+    try {
+      const onboardingData = JSON.parse(request.onboarding);
+      if (onboardingData.vehicleTypes && Array.isArray(onboardingData.vehicleTypes)) {
+        // מיפוי מהטקסט בעברית לערכי enum
+        const vehicleTypeMapping = {
+          'רכב מיני (קטן)': 'MINI',
+          'רכב משפחתי (סטנדרטי)': 'FAMILY', 
+          'SUV / קרוסאובר': 'SUV',
+          'רכב גדול (וואן / מסחרי)': 'SUV' // גם רכב גדול נחשב SUV
+        };
+        
+        // מציאת הגודל המקסימלי מהרשימה
+        const sizeOrder = ['MINI', 'FAMILY', 'SUV'];
+        let maxSizeIndex = -1;
+        
+        for (const vehicleType of onboardingData.vehicleTypes) {
+          const mappedSize = vehicleTypeMapping[vehicleType as keyof typeof vehicleTypeMapping];
+          if (mappedSize) {
+            const sizeIndex = sizeOrder.indexOf(mappedSize);
+            if (sizeIndex > maxSizeIndex) {
+              maxSizeIndex = sizeIndex;
+              maxVehicleSize = mappedSize;
+            }
+          }
+        }
+        
+        console.log(`🚗 Parsed vehicle types from onboarding:`, onboardingData.vehicleTypes);
+        console.log(`🚗 Determined maxVehicleSize:`, maxVehicleSize);
+      }
+    } catch (error) {
+      console.error('Failed to parse onboarding data:', error);
+    }
+  }
+
+  // השתמש במחירון שבעל החניה הגדיר, לא ברירת מחדל קבועה
+  const pricingData = request.pricing || JSON.stringify({ hour1: 15, hour2: 15, hour3: 15 });
+  
   const parking = await prisma.parking.create({
     data: {
       title: parkingAddress,
       address: parkingAddress,
       lat: request.lat,
       lng: request.lng,
-      priceHr: request.priceHr || 15, // ברירת מחדל
+      pricing: pricingData,
       ownerId: request.userId,
-      isActive: false, // חניה חדשה נוצרת חסומה עד השלמת מסמכים
+      maxVehicleSize: maxVehicleSize as any,
+      isActive: false,
     },
   });
 

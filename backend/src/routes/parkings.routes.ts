@@ -6,12 +6,12 @@ const r = Router();
 
 /**
  * GET /api/parkings/search
- * חיפוש חניות לפי מיקום וזמן
- * Query params: lat, lng, radius (km), startTime (ISO), endTime (ISO)
+ * חיפוש חניות לפי מיקום, זמן וגודל רכב
+ * Query params: lat, lng, radius (km), startTime (ISO), endTime (ISO), vehicleSize (MINI/FAMILY/SUV), onlyCompatible (boolean)
  */
 r.get('/search', async (req, res, next) => {
   try {
-    const { lat, lng, radius, startTime, endTime } = req.query;
+    const { lat, lng, radius, startTime, endTime, vehicleSize, onlyCompatible } = req.query;
 
     if (!lat || !lng) {
       return res.status(400).json({ error: 'Missing required params: lat, lng' });
@@ -30,6 +30,15 @@ r.get('/search', async (req, res, next) => {
       if (isNaN(params.startTime.getTime()) || isNaN(params.endTime.getTime())) {
         return res.status(400).json({ error: 'Invalid date format for startTime/endTime' });
       }
+    }
+
+    // הוספת פרמטרי סינון רכב
+    if (vehicleSize) {
+      params.vehicleSize = String(vehicleSize);
+    }
+
+    if (onlyCompatible) {
+      params.onlyCompatible = String(onlyCompatible).toLowerCase() === 'true';
     }
 
     const data = await svc.searchParkings(params);
@@ -52,21 +61,22 @@ r.get('/', async (_req, res, next) => {
 // POST /api/parkings — מחייב התחברות, משייך ownerId מה-JWT
 r.post('/', auth, async (req: AuthedRequest, res, next) => {
   try {
-    const { address, lat, lng, priceHr } = req.body ?? {};
+    const { address, lat, lng, pricing } = req.body ?? {};
     if (
       typeof address !== 'string' ||
       typeof lat !== 'number' ||
       typeof lng !== 'number' ||
-      typeof priceHr !== 'number'
+      typeof pricing !== 'string'
     ) {
-      return res.status(400).json({ error: 'Invalid body: {address, lat, lng, priceHr}' });
+      return res.status(400).json({ error: 'Invalid body: {address, lat, lng, pricing}' });
     }
 
     const data = await svc.createParking({
+      title: address, // נשתמש בכתובת כתיטל
       address,
       lat,
       lng,
-      priceHr,
+      pricing,
       ownerId: Number(req.userId),
     });
 

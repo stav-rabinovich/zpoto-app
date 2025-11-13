@@ -5,14 +5,31 @@ import { prisma } from '../lib/prisma';
 
 const r = Router();
 
-// POST /api/auth/register { email, password }
+// POST /api/auth/register { email, password, name, phone }
 r.post('/register', async (req, res) => {
-  const { email, password } = req.body ?? {};
+  const { email, password, name, phone } = req.body ?? {};
+  
+  // ולידציות בסיסיות
   if (typeof email !== 'string' || typeof password !== 'string' || password.length < 6) {
     return res.status(400).json({ error: 'Invalid body: {email, password>=6}' });
   }
+  
+  // ולידציות חובה
+  if (!name || typeof name !== 'string' || name.trim().length === 0) {
+    return res.status(400).json({ error: 'Name is required and must be a non-empty string' });
+  }
+  
+  if (!phone || typeof phone !== 'string' || phone.trim().length === 0) {
+    return res.status(400).json({ error: 'Phone is required and must be a non-empty string' });
+  }
+  
   try {
-    const { user, token } = await users.register(email.toLowerCase(), password);
+    const { user, token } = await users.register(
+      email.toLowerCase(), 
+      password, 
+      name, 
+      phone
+    );
     res.status(201).json({ user, token });
   } catch (e: any) {
     if (e.message === 'EMAIL_TAKEN') return res.status(409).json({ error: 'Email already in use' });
@@ -51,6 +68,7 @@ r.get('/me', auth, async (req, res) => {
       select: {
         id: true,
         email: true,
+        name: true,
         phone: true,
         role: true,
         createdAt: true,

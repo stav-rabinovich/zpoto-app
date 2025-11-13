@@ -380,16 +380,30 @@ r.get('/parkings/:id', async (req, res, next) => {
  */
 r.patch('/parkings/:id', async (req, res) => {
   const id = Number(req.params.id);
-  const { isActive } = req.body;
+  const { isActive, maxVehicleSize } = req.body;
 
   try {
+    const updateData: any = {};
+    
+    if (typeof isActive === 'boolean') {
+      updateData.isActive = isActive;
+    }
+    
+    if (maxVehicleSize !== undefined) {
+      // וולידציה של maxVehicleSize
+      if (maxVehicleSize === null || ['MINI', 'FAMILY', 'SUV'].includes(maxVehicleSize)) {
+        updateData.maxVehicleSize = maxVehicleSize;
+      } else {
+        return res.status(400).json({ error: 'Invalid maxVehicleSize. Must be null, MINI, FAMILY, or SUV' });
+      }
+    }
+
     const updated = await prisma.parking.update({
       where: { id },
-      data: {
-        ...(typeof isActive === 'boolean' && { isActive }),
-      },
+      data: updateData,
     });
 
+    console.log(`🚗 Updated parking ${id} maxVehicleSize to:`, maxVehicleSize);
     res.json(updated);
   } catch (e: any) {
     console.error('❌ Error updating parking:', e);

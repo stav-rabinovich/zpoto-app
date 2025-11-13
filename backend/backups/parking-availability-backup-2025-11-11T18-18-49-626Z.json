@@ -1,0 +1,19 @@
+{
+  "timestamp": "2025-11-11T18:18:49.623Z",
+  "totalParkings": 2,
+  "parkingsWithAvailability": 2,
+  "parkings": [
+    {
+      "id": 1,
+      "title": "החרמון 5, בית דגן, בית דגן",
+      "availability": "{\"sunday\":[0,4,8,12,16,20],\"monday\":[0,4,8,12,16,20],\"tuesday\":[0,4,8,12,16,20],\"wednesday\":[0,4,8,12,16,20],\"thursday\":[0,4,8,12,16,20],\"friday\":[0,4,8,12,16,20],\"saturday\":[0,4,8,12,16,20]}",
+      "ownerId": 1
+    },
+    {
+      "id": 2,
+      "title": "איריס 20, בית דגן, בית דגן",
+      "availability": "{\"sunday\":[],\"monday\":[],\"thursday\":[12,15,18,21],\"friday\":[],\"saturday\":[],\"wednesday\":[],\"tuesday\":[]}",
+      "ownerId": 5
+    }
+  ]
+}

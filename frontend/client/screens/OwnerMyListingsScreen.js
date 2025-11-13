@@ -93,7 +93,7 @@ export default function OwnerMyListingsScreen({ navigation }) {
                 </View>
               </View>
               <Text style={styles.row}>כתובת: {item.address || '-'}</Text>
-              <Text style={styles.row}>מחיר לשעה: {formatCurrency(item.priceHr || 0)}</Text>
+              <Text style={styles.row}>מחיר לשעה: {formatCurrency(item.firstHourPrice || 10)}</Text>
               {/* // 📝 LEGACY CODE - Approval Mode Display (Commented Out) */}
               {/* <Text style={styles.row}>
                 מצב אישור: {item.approvalMode === 'AUTO' ? 'אוטומטי' : 'ידני'}

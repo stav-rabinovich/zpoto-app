@@ -29,6 +29,7 @@ export const getUserVehicles = async () => {
  * יצירת רכב חדש
  * @param {Object} vehicleData - נתוני הרכב
  * @param {string} vehicleData.licensePlate - מספר רכב (חובה)
+ * @param {string} vehicleData.vehicleSize - גודל רכב: MINI, FAMILY, SUV (חובה)
  * @param {string} vehicleData.make - יצרן (אופציונלי)
  * @param {string} vehicleData.model - דגם (אופציונלי)
  * @param {string} vehicleData.color - צבע (אופציונלי)
@@ -245,4 +246,38 @@ export const sortVehicles = (vehicles) => {
 export const hasDefaultVehicle = (vehicles) => {
   if (!Array.isArray(vehicles)) return false;
   return vehicles.some(vehicle => vehicle.isDefault);
+};
+
+/**
+ * פונקציות עזר לגדלי רכבים
+ */
+
+/**
+ * קבלת רשימת גדלי רכבים זמינים
+ * @returns {Array} רשימת גדלי רכבים
+ */
+export const getVehicleSizes = () => [
+  { value: 'MINI', label: 'מיני', description: 'רכב קטן (עד 4 מטר)', icon: '🚗' },
+  { value: 'FAMILY', label: 'משפחתי', description: 'רכב בינוני (4-4.5 מטר)', icon: '🚙' },
+  { value: 'SUV', label: 'SUV', description: 'רכב גדול (מעל 4.5 מטר)', icon: '🚐' }
+];
+
+/**
+ * קבלת תיאור גודל רכב
+ * @param {string} vehicleSize - גודל הרכב
+ * @returns {Object} פרטי גודל הרכב
+ */
+export const getVehicleSizeInfo = (vehicleSize) => {
+  const sizes = getVehicleSizes();
+  return sizes.find(size => size.value === vehicleSize) || null;
+};
+
+/**
+ * ולידציה של גודל רכב
+ * @param {string} vehicleSize - גודל הרכב
+ * @returns {boolean} האם הגודל תקין
+ */
+export const validateVehicleSize = (vehicleSize) => {
+  const validSizes = ['MINI', 'FAMILY', 'SUV'];
+  return validSizes.includes(vehicleSize);
 };

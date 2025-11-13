@@ -3,7 +3,7 @@ import { prisma } from '../lib/prisma';
 /**
  * הגשת בקשה חדשה להיות בעל חניה
  */
-export async function createListingRequest(input: {
+export async function createParkingRequest(input: {
   userId: number;
   title: string;
   address: string;
@@ -11,7 +11,7 @@ export async function createListingRequest(input: {
   city?: string;
   lat: number;
   lng: number;
-  priceHr: number;
+  pricing: string;
   description?: string;
   phone?: string;
   onboarding?: string;
@@ -28,7 +28,7 @@ export async function createListingRequest(input: {
         city: input.city,
         lat: input.lat,
         lng: input.lng,
-        priceHr: input.priceHr,
+        pricing: input.pricing,
         description: input.description,
         phone: input.phone,
         onboarding: input.onboarding,
@@ -86,7 +86,6 @@ export async function updateMyParking(
     address: string;
     lat: number;
     lng: number;
-    priceHr: number;
     isActive: boolean;
     availability: string;
     pricing: string;
@@ -230,10 +229,10 @@ export async function checkBookingConflicts(
 
   console.log(`🔍 Looking for conflicts on ${dayKey} (day ${dayOfWeek}) for time slots:`, timeSlotsToRemove);
 
-  // חישוב טווח שעות מבלוקי הזמן
+  // חישוב טווח שעות מבלוקי הזמן - 🔄 עודכן ל-3 שעות
   const timeRanges = timeSlotsToRemove.map(slot => ({
     start: slot,
-    end: slot + 4, // כל בלוק הוא 4 שעות
+    end: slot + 3, // כל בלוק הוא 3 שעות
   }));
 
   console.log(`🔍 Time ranges to check:`, timeRanges);

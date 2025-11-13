@@ -176,9 +176,9 @@ r.post('/apply', async (req, res, next) => {
         fullAddress: address.trim(),
         city: city.trim(),
         phone: phone.trim(),
-        lat: 32.0853, // ברירת מחדל - תל אביב
+        lat: 32.0853,
         lng: 34.7818,
-        priceHr: 0, // ישוטח במהלך האונבורדינג
+        pricing: JSON.stringify({ hour1: 10, hour2: 10, hour3: 10 }), // ברירת מחדל זמנית
         description: `בקשה מ-${name.trim()}`,
         status: 'PENDING',
       },
@@ -202,12 +202,12 @@ r.use(requireOwner);
 /**
  * POST /api/owner/listing-requests
  * הגשת בקשה חדשה להיות בעל חניה
- * Body: { title, address, lat, lng, priceHr, description? }
+ * Body: { title, address, lat, lng, pricing, description? }
  */
 r.post('/listing-requests', async (req: AuthedRequest, res, next) => {
   try {
     console.log('🔥 LISTING REQUEST:', req.body, 'User ID:', req.userId);
-    const { title, address, fullAddress, city, phone, lat, lng, priceHr, description, onboarding } =
+    const { title, address, fullAddress, city, phone, lat, lng, pricing, description, onboarding } =
       req.body || {};
 
     // בדיקות בסיסיות
@@ -236,22 +236,22 @@ r.post('/listing-requests', async (req: AuthedRequest, res, next) => {
       phone,
       lat: latitude,
       lng: longitude,
-      priceHr: priceHr || 0,
+      pricing: pricing || JSON.stringify({ hour1: 10, hour2: 10, hour3: 10 }),
       description,
       onboarding,
     });
 
-    const data = await svc.createListingRequest({
+    const data = await svc.createParkingRequest({
       userId: Number(req.userId),
       title: title || address,
       address,
       fullAddress,
       city,
-      phone,
       lat: latitude,
       lng: longitude,
-      priceHr: priceHr || 0,
+      pricing: pricing || JSON.stringify({ hour1: 10, hour2: 10, hour3: 10 }),
       description,
+      phone,
       onboarding,
     });
 
@@ -304,7 +304,7 @@ r.get('/parkings/:id', async (req: AuthedRequest, res, next) => {
 
 /**
  * PATCH /api/owner/parkings/:id
- * Body: { title?, address?, lat?, lng?, priceHr?, isActive?, availability? }
+ * Body: { title?, address?, lat?, lng?, pricing?, isActive?, availability? }
  */
 r.patch('/parkings/:id', async (req: AuthedRequest, res, next) => {
   try {

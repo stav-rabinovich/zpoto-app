@@ -4,16 +4,28 @@ import jwt from 'jsonwebtoken';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
-export async function register(email: string, password: string) {
+export async function register(
+  email: string, 
+  password: string, 
+  name: string, 
+  phone: string
+) {
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
     throw new Error('EMAIL_TAKEN');
   }
+  
   const hash = await bcrypt.hash(password, 10);
   const user = await prisma.user.create({
-    data: { email, password: hash },
-    select: { id: true, email: true, role: true, createdAt: true },
+    data: { 
+      email, 
+      password: hash,
+      name: name.trim(),
+      phone: phone.trim()
+    },
+    select: { id: true, email: true, name: true, phone: true, role: true, createdAt: true },
   });
+  
   const token = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '7d' });
   return { user, token };
 }
@@ -31,7 +43,14 @@ export async function login(email: string, password: string) {
   if (!ok) throw new Error('INVALID_CREDENTIALS');
   const token = jwt.sign({ sub: user.id }, JWT_SECRET, { expiresIn: '7d' });
   return {
-    user: { id: user.id, email: user.email, role: user.role, createdAt: user.createdAt },
+    user: { 
+      id: user.id, 
+      email: user.email, 
+      name: user.name,
+      phone: user.phone,
+      role: user.role, 
+      createdAt: user.createdAt 
+    },
     token,
   };
 }

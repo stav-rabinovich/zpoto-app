@@ -76,9 +76,13 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const register = async (email, password) => {
+  const register = async (email, password, name, phone) => {
     try {
-      const { data } = await api.post('/api/auth/register', { email, password });
+      const requestData = { email, password, name, phone };
+      
+      console.log('📝 Registering with data:', { email, name: !!name, phone: !!phone });
+      
+      const { data } = await api.post('/api/auth/register', requestData);
       
       await SecureStore.setItemAsync('userToken', data.token);
       await SecureStore.setItemAsync('user', JSON.stringify(data.user));
@@ -86,12 +90,13 @@ export const AuthProvider = ({ children }) => {
       setToken(data.token);
       setUser(data.user);
       
-      console.log('✅ Register successful - user:', data.user.email, 'token exists:', !!data.token);
-      console.log('💾 Token saved to SecureStore successfully');
+      console.log('✅ Register successful - user:', data.user.email, 'name:', data.user.name, 'phone:', data.user.phone);
+      console.log('💾 Token and user data saved to SecureStore successfully');
       
-      return { success: true };
+      return { success: true, user: data.user };
     } catch (error) {
       const message = error.response?.data?.error || 'שגיאת הרשמה';
+      console.error('❌ Register failed:', message);
       return { success: false, error: message };
     }
   };

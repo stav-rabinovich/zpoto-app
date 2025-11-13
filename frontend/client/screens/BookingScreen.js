@@ -30,7 +30,8 @@ import { formatForAPI, convertFromUTC, formatForDisplay, addHoursInIsrael, getIs
 import { scheduleBookingNotifications, cancelBookingNotifications } from '../utils/notify';
 import { useTheme } from '@shopify/restyle';
 import ZpButton from '../components/ui/ZpButton';
-import { createBooking } from '../services/api/bookings';
+import { createBooking, checkVehicleBookingConflicts } from '../services/api/bookings';
+import VehicleConflictAlert from '../components/VehicleConflictAlert';
 import { LinearGradient } from 'expo-linear-gradient';
 import TimePickerWheel, { roundTo15Minutes } from '../components/ui/TimePickerWheel';
 import { useAuth } from '../contexts/AuthContext';
@@ -40,6 +41,7 @@ import BookingValidator from '../components/BookingValidator';
 import NetworkStatus from '../components/NetworkStatus';
 import { API_BASE } from '../consts';
 import { BOOKING_TYPES, isImmediateBooking, isFutureBooking } from '../constants/bookingTypes';
+import { getUserVehicles, getDefaultVehicle, getVehicleSizeInfo } from '../services/api/vehicles';
 
 dayjs.locale('he');
 
@@ -337,6 +339,12 @@ export default function BookingScreen({ route, navigation }) {
   const [availability, setAvailability] = useState(null);
   const [validationResult, setValidationResult] = useState(null);
   
+  // State של התראת חפיפת רכב
+  const [vehicleConflictAlert, setVehicleConflictAlert] = useState({
+    visible: false,
+    conflictData: null
+  });
+  
   // הוסר קוד serverPrice - משתמשים בחישוב client-side מעודכן
 
   // הגדרת זמן סיום ראשוני ועדכון כשזמן ההתחלה משתנה
@@ -373,15 +381,15 @@ export default function BookingScreen({ route, navigation }) {
         // טעינת רכבים מהשרת
         try {
           console.log('🚗 Loading vehicles from server...');
-          const vehiclesResponse = await api.get('/api/vehicles');
-          const userVehicles = vehiclesResponse.data?.data || [];
+          const vehiclesResult = await getUserVehicles();
+          const userVehicles = vehiclesResult.success ? vehiclesResult.data : [];
           console.log('🚗 Loaded vehicles:', userVehicles);
           
           setVehicles(userVehicles);
           
           // בחירת רכב ברירת מחדל אוטומטית
           if (userVehicles.length > 0) {
-            const defaultVehicle = userVehicles.find(v => v.isDefault) || userVehicles[0];
+            const defaultVehicle = getDefaultVehicle(userVehicles) || userVehicles[0];
             console.log('🚗 Selected default vehicle:', defaultVehicle);
             
             setSelectedVehicleId(defaultVehicle.id);
@@ -845,6 +853,19 @@ export default function BookingScreen({ route, navigation }) {
     setPanelVisible(false);
   };
 
+  // פונקציות לטיפול בהתראת חפיפת רכב
+  const handleCloseVehicleConflictAlert = () => {
+    setVehicleConflictAlert({
+      visible: false,
+      conflictData: null
+    });
+  };
+
+  const handleViewBookings = () => {
+    handleCloseVehicleConflictAlert();
+    navigation.navigate('Bookings'); // ניווט למסך ההזמנות
+  };
+
   const confirm = useCallback(async () => {
     if (!spot) { navigation.goBack(); return; }
     if (!plate.trim()) { Alert.alert('שגיאה', 'נא להזין מספר רכב.'); return; }
@@ -866,6 +887,32 @@ export default function BookingScreen({ route, navigation }) {
     if (end - start < MIN_MS) {
       Alert.alert('שגיאה', 'הסיום חייב להיות לפחות שעה אחרי ההתחלה.');
       return;
+    }
+
+    // 🚗 בדיקת חפיפות רכב לפני המעבר לתשלום
+    if (selectedVehicleId || plate.trim()) {
+      console.log('🚗 BOOKING: Checking vehicle conflicts before proceeding...');
+      
+      const conflictCheck = await checkVehicleBookingConflicts({
+        vehicleId: selectedVehicleId,
+        licensePlate: plate.trim(),
+        startTime: formatForAPI(start),
+        endTime: formatForAPI(end)
+      });
+
+      if (conflictCheck.hasConflict) {
+        console.log('🚗 BOOKING: Vehicle conflict detected:', conflictCheck.message);
+        
+        // הצגת התראת חפיפה
+        setVehicleConflictAlert({
+          visible: true,
+          conflictData: conflictCheck
+        });
+        
+        return; // עצירת התהליך
+      }
+
+      console.log('🚗 BOOKING: No vehicle conflicts, proceeding to payment...');
     }
 
     // במקום ליצור הזמנה ישירות, ננווט למסך תשלום
@@ -1199,9 +1246,57 @@ export default function BookingScreen({ route, navigation }) {
           {/* רכב ברירת מחדל */}
           {selectedVehicleId && vehicles.find(v => v.id === selectedVehicleId) && (
             <View style={styles.defaultVehicleContainer}>
-              <Text style={styles.defaultVehicleText}>
-                נטען רכב ברירת מחדל מהפרופיל שלך
-              </Text>
+              <View style={styles.defaultVehicleHeader}>
+                <Text style={styles.defaultVehicleText}>
+                  נטען רכב ברירת מחדל מהפרופיל שלך
+                </Text>
+                {(() => {
+                  const selectedVehicle = vehicles.find(v => v.id === selectedVehicleId);
+                  if (selectedVehicle?.vehicleSize) {
+                    const sizeInfo = getVehicleSizeInfo(selectedVehicle.vehicleSize);
+                    return (
+                      <View style={styles.vehicleSizeBadge}>
+                        <Text style={styles.vehicleSizeText}>
+                          {sizeInfo?.icon} {sizeInfo?.label}
+                        </Text>
+                      </View>
+                    );
+                  }
+                  return null;
+                })()}
+              </View>
+              
+              {/* הודעת תאימות החניה */}
+              {(() => {
+                const selectedVehicle = vehicles.find(v => v.id === selectedVehicleId);
+                if (selectedVehicle?.vehicleSize && spot?.maxVehicleSize) {
+                  const vehicleSizeInfo = getVehicleSizeInfo(selectedVehicle.vehicleSize);
+                  const parkingSizeInfo = getVehicleSizeInfo(spot.maxVehicleSize);
+                  
+                  // בדיקת תאימות לפי היררכיה: MINI < FAMILY < SUV
+                  const sizeOrder = ['MINI', 'FAMILY', 'SUV'];
+                  const vehicleIndex = sizeOrder.indexOf(selectedVehicle.vehicleSize);
+                  const parkingIndex = sizeOrder.indexOf(spot.maxVehicleSize);
+                  const isCompatible = vehicleIndex <= parkingIndex;
+                  
+                  return (
+                    <View style={[styles.compatibilityMessage, isCompatible ? styles.compatibilitySuccess : styles.compatibilityWarning]}>
+                      <Ionicons 
+                        name={isCompatible ? "checkmark-circle" : "warning"} 
+                        size={16} 
+                        color={isCompatible ? "#10B981" : "#F59E0B"} 
+                      />
+                      <Text style={[styles.compatibilityText, isCompatible ? styles.compatibilityTextSuccess : styles.compatibilityTextWarning]}>
+                        {isCompatible 
+                          ? `הרכב שלך מתאים לחניה זו (מקסימום: ${parkingSizeInfo?.icon} ${parkingSizeInfo?.label})`
+                          : `הרכב שלך גדול מדי לחניה זו (מקסימום: ${parkingSizeInfo?.icon} ${parkingSizeInfo?.label})`
+                        }
+                      </Text>
+                    </View>
+                  );
+                }
+                return null;
+              })()}
               {vehicles.length > 1 && (
                 <TouchableOpacity 
                   style={styles.changeVehicleBtn}
@@ -1210,8 +1305,12 @@ export default function BookingScreen({ route, navigation }) {
                     Alert.alert(
                       'בחירת רכב',
                       'בחר רכב אחר מהרשימה:',
-                      vehicles.map(v => ({
-                        text: `${v.licensePlate} - ${v.description || `${v.make || ''} ${v.model || ''}`.trim() || 'רכב'}`,
+                      vehicles.map(v => {
+                        const sizeInfo = getVehicleSizeInfo(v.vehicleSize);
+                        const sizeText = sizeInfo ? `${sizeInfo.icon} ${sizeInfo.label}` : '';
+                        const vehicleDesc = v.description || `${v.make || ''} ${v.model || ''}`.trim() || 'רכב';
+                        return {
+                          text: `${v.licensePlate} - ${vehicleDesc}${sizeText ? ` (${sizeText})` : ''}`,
                         onPress: () => {
                           setSelectedVehicleId(v.id);
                           setPlate(v.licensePlate || '');
@@ -1228,7 +1327,8 @@ export default function BookingScreen({ route, navigation }) {
                           }
                           setCarDesc(vehicleDescription);
                         }
-                      })).concat([{ text: 'ביטול', style: 'cancel' }])
+                        };
+                      }).concat([{ text: 'ביטול', style: 'cancel' }])
                     );
                   }}
                 >
@@ -1355,6 +1455,14 @@ export default function BookingScreen({ route, navigation }) {
         title={panelMode === 'start' ? 'בחרו זמן התחלה' : 'בחרו זמן סיום'}
         onClose={() => setPanelVisible(false)}
         onConfirm={handlePanelConfirm}
+      />
+
+      {/* התראת חפיפת רכב */}
+      <VehicleConflictAlert
+        visible={vehicleConflictAlert.visible}
+        onClose={handleCloseVehicleConflictAlert}
+        onViewBookings={handleViewBookings}
+        conflictData={vehicleConflictAlert.conflictData}
       />
     </KeyboardAvoidingView>
   );
@@ -1644,57 +1752,64 @@ function makeStyles(theme) {
       backgroundColor: '#f5f5f5',
     },
     fieldButtonTextDisabled: {
-      color: '#999',
+      color: colors.subtext,
     },
-
-    // הודעת שגיאה להזמנה מיידית
-    immediateValidationError: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: 'rgba(239, 68, 68, 0.1)',
-      borderColor: '#EF4444',
-      borderWidth: 1,
-      borderRadius: 6,
-      padding: 8,
-      marginTop: 8,
-    },
-    immediateValidationErrorText: {
-      fontSize: 12,
-      color: '#EF4444',
-      textAlign: 'right',
-      writingDirection: 'rtl',
-      flex: 1,
-    },
-
-    // הודעת עזרה להזמנה עתידית
-    futureHelpMessage: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: 'rgba(59, 130, 246, 0.1)',
-      borderColor: '#3B82F6',
-      borderWidth: 1,
-      borderRadius: 6,
-      padding: 8,
-      marginTop: 8,
-    },
-    futureHelpMessageText: {
-      fontSize: 12,
-      color: '#3B82F6',
-      textAlign: 'right',
-      writingDirection: 'rtl',
-      flex: 1,
-    },
-
-
-    // כותרת סיכום
-    summaryHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: 12,
-    },
-    summaryHeaderIcon: {
+    disabledIcon: {
       fontSize: 18,
       marginLeft: 8,
+    },
+
+    // סגנונות רכב וגודל
+    defaultVehicleHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 8,
+    },
+    vehicleSizeBadge: {
+      backgroundColor: colors.surface,
+      borderColor: colors.border,
+      borderWidth: 1,
+      borderRadius: 999,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+    },
+    vehicleSizeText: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.subtext,
+    },
+
+    // הודעות תאימות
+    compatibilityMessage: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      padding: 12,
+      borderRadius: 8,
+      marginTop: 8,
+    },
+    compatibilitySuccess: {
+      backgroundColor: 'rgba(16, 185, 129, 0.1)',
+      borderColor: '#10B981',
+      borderWidth: 1,
+    },
+    compatibilityWarning: {
+      backgroundColor: 'rgba(245, 158, 11, 0.1)',
+      borderColor: '#F59E0B',
+      borderWidth: 1,
+    },
+    compatibilityText: {
+      flex: 1,
+      fontSize: 13,
+      textAlign: 'right',
+      writingDirection: 'rtl',
+    },
+    compatibilityTextSuccess: {
+      color: '#059669',
+    },
+    compatibilityTextWarning: {
+      color: '#D97706',
     },
   });
 }

@@ -14,14 +14,16 @@ export const HEB_DAYS = [
   { key: 'sat', label: 'ש׳' },
 ];
 
-// בלוקי זמן של 4 שעות - מבנה חדש
+// בלוקי זמן של 3 שעות - מבנה חדש
 export const TIME_BLOCKS = [
-  { key: 'block1', label: '00:00-04:00', from: '00:00', to: '04:00' },
-  { key: 'block2', label: '04:00-08:00', from: '04:00', to: '08:00' },
-  { key: 'block3', label: '08:00-12:00', from: '08:00', to: '12:00' },
-  { key: 'block4', label: '12:00-16:00', from: '12:00', to: '16:00' },
-  { key: 'block5', label: '16:00-20:00', from: '16:00', to: '20:00' },
-  { key: 'block6', label: '20:00-24:00', from: '20:00', to: '24:00' },
+  { key: 'block1', label: '00:00-03:00', from: '00:00', to: '03:00' },
+  { key: 'block2', label: '03:00-06:00', from: '03:00', to: '06:00' },
+  { key: 'block3', label: '06:00-09:00', from: '06:00', to: '09:00' },
+  { key: 'block4', label: '09:00-12:00', from: '09:00', to: '12:00' },
+  { key: 'block5', label: '12:00-15:00', from: '12:00', to: '15:00' },
+  { key: 'block6', label: '15:00-18:00', from: '15:00', to: '18:00' },
+  { key: 'block7', label: '18:00-21:00', from: '18:00', to: '21:00' },
+  { key: 'block8', label: '21:00-24:00', from: '21:00', to: '24:00' },
 ];
 
 export function defaultAlwaysAvailable() {

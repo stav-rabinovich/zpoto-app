@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { fromUTC, getIsraelDayOfWeek, getIsraelHour, validateTimeRange } from '../utils/timezone';
+import { calculateBlockStart3Hour } from '../config/timeBlocks';
 
 const prisma = new PrismaClient();
 
@@ -103,8 +104,8 @@ export function isParkingAvailableByOwnerSettings(
       return false;
     }
 
-    // בדוק את הבלוק של השעה הנוכחית
-    const blockStart = Math.floor(hour / 4) * 4; // 0, 4, 8, 12, 16, 20
+    // בדוק את הבלוק של השעה הנוכחית - 🔄 עודכן ל-3 שעות
+    const blockStart = calculateBlockStart3Hour(hour); // 0, 3, 6, 9, 12, 15, 18, 21
     const isBlockAvailable = daySlots.includes(blockStart);
 
     console.log(`🔍 Hour ${hour} -> Block ${blockStart}: available = ${isBlockAvailable}`);
@@ -163,19 +164,20 @@ export async function listParkings() {
 
 /** יצירת חניה חדשה עם ownerId (לא Nested Write) */
 export async function createParking(input: {
+  title: string;
   address: string;
   lat: number;
   lng: number;
-  priceHr: number;
+  pricing: string; // מחירון JSON
   ownerId: number;
 }) {
   return prisma.parking.create({
     data: {
-      title: input.address, // הכותרת היא הכתובת
+      title: input.title,
       address: input.address,
       lat: input.lat,
       lng: input.lng,
-      priceHr: input.priceHr,
+      pricing: input.pricing,
       ownerId: input.ownerId,
     },
   });
@@ -196,7 +198,7 @@ export async function updateParking(
     address: string;
     lat: number;
     lng: number;
-    priceHr: number;
+    pricing: string; // מחירון JSON
     isActive: boolean;
   }>
 ) {
@@ -212,12 +214,38 @@ export async function deleteParking(id: number) {
 }
 
 /**
- * חיפוש חניות לפי מיקום וזמן
+ * בדיקה אם רכב תואם לחניה לפי גודל מקסימלי
+ * החניה מגדירה את הרכב הגדול ביותר שיכול להיכנס
+ * כל רכב קטן יותר או שווה גם יכול להיכנס
+ */
+function isVehicleCompatibleWithParking(vehicleSize: string, maxVehicleSize: string | null): boolean {
+  if (!maxVehicleSize) {
+    return true; // אין הגבלות = מתאים לכל הרכבים
+  }
+
+  // היררכיית גדלים: MINI < FAMILY < SUV
+  const sizeOrder = ['MINI', 'FAMILY', 'SUV'];
+  const vehicleIndex = sizeOrder.indexOf(vehicleSize);
+  const maxIndex = sizeOrder.indexOf(maxVehicleSize);
+
+  // אם אחד הגדלים לא קיים במערך, נחזיר true (fallback)
+  if (vehicleIndex === -1 || maxIndex === -1) {
+    return true;
+  }
+
+  // הרכב מתאים אם הוא קטן או שווה לגודל המקסימלי
+  return vehicleIndex <= maxIndex;
+}
+
+/**
+ * חיפוש חניות לפי מיקום, זמן וגודל רכב
  * @param lat - קו רוחב מרכז החיפוש
  * @param lng - קו אורך מרכז החיפוש
  * @param radiusKm - רדיוס בקילומטרים (ברירת מחדל 5)
  * @param startTime - זמן התחלה (אופציונלי)
  * @param endTime - זמן סיום (אופציונלי)
+ * @param vehicleSize - גודל רכב לסינון (אופציונלי)
+ * @param onlyCompatible - האם להציג רק חניות תואמות (אופציונלי)
  */
 export async function searchParkings(params: {
   lat: number;
@@ -225,8 +253,10 @@ export async function searchParkings(params: {
   radiusKm?: number;
   startTime?: Date;
   endTime?: Date;
+  vehicleSize?: string;
+  onlyCompatible?: boolean;
 }) {
-  const { lat, lng, radiusKm = 5, startTime, endTime } = params;
+  const { lat, lng, radiusKm = 5, startTime, endTime, vehicleSize, onlyCompatible } = params;
 
   // חישוב bounding box (קירוב פשוט)
   // 1 מעלה ≈ 111 ק"מ
@@ -248,10 +278,6 @@ export async function searchParkings(params: {
       owner: {
         isBlocked: false,
       },
-      // מסנן חניות ללא מחירון מלא (חייב להיות pricing עם hour1-hour12)
-      pricing: {
-        not: null,
-      },
     },
     select: {
       id: true,
@@ -259,11 +285,11 @@ export async function searchParkings(params: {
       address: true,
       lat: true,
       lng: true,
-      priceHr: true,
       isActive: true,
       approvalMode: true,
       availability: true,
       pricing: true,
+      maxVehicleSize: true,
       createdAt: true,
       ownerId: true,
       entranceImageUrl: true,
@@ -273,7 +299,7 @@ export async function searchParkings(params: {
       owner: {
         select: { isBlocked: true },
       },
-    },
+    } as any,
   });
 
   // סינון נוסף - רק חניות עם מחירון מלא (12 שעות)
@@ -330,10 +356,35 @@ export async function searchParkings(params: {
 
   console.log(`📋 Parkings after pricing filter: ${filteredParkings.length}/${parkings.length}`);
 
+  // סינון לפי גודל רכב (אם נדרש)
+  let vehicleFilteredParkings = filteredParkings;
+  if (vehicleSize && onlyCompatible) {
+    vehicleFilteredParkings = filteredParkings.filter(parking => {
+      try {
+        const maxVehicleSize = (parking as any).maxVehicleSize; // Cast זמני עד שהטיפוסים יתעדכנו
+        
+        const isCompatible = isVehicleCompatibleWithParking(vehicleSize, maxVehicleSize);
+        
+        if (!isCompatible) {
+          console.log(`🚗 Parking ${parking.id} filtered out: vehicle size ${vehicleSize} too large for max size ${maxVehicleSize}`);
+          return false;
+        }
+
+        console.log(`🚗 Parking ${parking.id} compatible with vehicle size ${vehicleSize}. Max size: ${maxVehicleSize || 'unlimited'}`);
+        return true;
+      } catch (error) {
+        console.log(`🚗 Parking ${parking.id} vehicle filter error:`, error);
+        return true; // במקרה של שגיאה - נכלול את החניה
+      }
+    });
+
+    console.log(`📋 Parkings after vehicle filter: ${vehicleFilteredParkings.length}/${filteredParkings.length}`);
+  }
+
   // אם יש תאריכים - סינון לפי זמינות
   if (startTime && endTime) {
     const parkingsWithAvailability = await Promise.all(
-      filteredParkings.map(async parking => {
+      vehicleFilteredParkings.map(async (parking: any) => {
         // בדיקת זמינות לפי הגדרות בעל החניה
         const isAvailableByOwner = isParkingAvailableByOwnerSettings(
           parking.availability,
@@ -348,16 +399,16 @@ export async function searchParkings(params: {
         }
 
         // בדיקת חפיפות עם הזמנות קיימות
-        const hasConflict = await hasActiveBookings(parking.id, startTime, endTime);
+        const hasConflict = await hasActiveBookings(parking.id as unknown as number, startTime, endTime);
         if (hasConflict) {
           console.log(`🔍 Parking ${parking.id} filtered out: has active booking conflict`);
           return null; // יש התנגשות עם הזמנה קיימת
         }
 
         // חישוב מחיר שעה ראשונה מהמחירון
-        let firstHourPrice = parking.priceHr; // ברירת מחדל לשדה הישן
+        let firstHourPrice = 10; // ברירת מחדל
         console.log(
-          `💰 Calculating price for parking ${parking.id} (with dates), legacy priceHr: ${parking.priceHr}`
+          `💰 Calculating price for parking ${parking.id} (with dates)`
         );
 
         if (parking.pricing) {
@@ -392,7 +443,7 @@ export async function searchParkings(params: {
           }
         } else {
           console.log(
-            `💰 No pricing data for parking ${parking.id} (with dates), using legacy priceHr: ${parking.priceHr}`
+            `💰 No pricing data for parking ${parking.id} (with dates), using default price: ${firstHourPrice}`
           );
         }
 
@@ -408,7 +459,7 @@ export async function searchParkings(params: {
         };
 
         console.log(
-          `🎯 Returning parking ${parking.id} (with dates) with firstHourPrice: ${result.firstHourPrice}, priceHr: ${result.priceHr}`
+          `🎯 Returning parking ${parking.id} (with dates) with firstHourPrice: ${result.firstHourPrice}`
         );
         return result;
       })
@@ -423,7 +474,7 @@ export async function searchParkings(params: {
   const oneHourLater = new Date(now.getTime() + 60 * 60 * 1000); // שעה מהעכשיו
 
   const availableParkings = await Promise.all(
-    filteredParkings.map(async parking => {
+    vehicleFilteredParkings.map(async (parking: any) => {
       // בדיקת זמינות לפי הגדרות בעל החניה לזמן הנוכחי
       const isAvailableNow = isParkingAvailableByOwnerSettings(
         parking.availability,
@@ -438,7 +489,7 @@ export async function searchParkings(params: {
       }
 
       // בדיקת הזמנות פעילות לזמן הנוכחי
-      const hasCurrentBooking = await hasActiveBookings(parking.id, now, oneHourLater);
+      const hasCurrentBooking = await hasActiveBookings(parking.id as unknown as number, now, oneHourLater);
       if (hasCurrentBooking) {
         console.log(`🔍 Parking ${parking.id} filtered out: has active booking now`);
         return null;
@@ -451,14 +502,14 @@ export async function searchParkings(params: {
   const finalAvailableParkings = availableParkings.filter(p => p !== null);
 
   console.log(
-    `📋 Parkings after availability filter: ${finalAvailableParkings.length}/${filteredParkings.length}`
+    `📋 Parkings after availability filter: ${finalAvailableParkings.length}/${vehicleFilteredParkings.length}`
   );
 
   const result = finalAvailableParkings.map(p => {
     // חישוב מחיר שעה ראשונה מהמחירון
-    let firstHourPrice = p.priceHr; // ברירת מחדל לשדה הישן
+    let firstHourPrice = 10; // ברירת מחדל
     console.log(
-      `💰 Calculating price for parking ${p.id}, legacy priceHr: ${p.priceHr}, has pricing: ${!!p.pricing}`
+      `💰 Calculating price for parking ${p.id}, has pricing: ${!!p.pricing}`
     );
 
     if (p.pricing) {
@@ -489,7 +540,7 @@ export async function searchParkings(params: {
         console.warn(`💰 ❌ Failed to parse pricing data for parking ${p.id}:`, error);
       }
     } else {
-      console.log(`💰 No pricing data for parking ${p.id}, using legacy priceHr: ${p.priceHr}`);
+      console.log(`💰 No pricing data for parking ${p.id}, using default price: ${firstHourPrice}`);
     }
 
     console.log(`💰 🎯 Final firstHourPrice for parking ${p.id}: ${firstHourPrice}`);
@@ -519,7 +570,7 @@ export async function searchParkings(params: {
     };
 
     console.log(
-      `🎯 Returning parking ${p.id} with firstHourPrice: ${result.firstHourPrice}, priceHr: ${result.priceHr}`
+      `🎯 Returning parking ${p.id} with firstHourPrice: ${result.firstHourPrice}`
     );
     return result;
   });
@@ -527,10 +578,10 @@ export async function searchParkings(params: {
   console.log(`🎯 Returning ${result.length} parkings to frontend`);
 
   // לוג מפורט של החניות שמוחזרות כדי לראות אם pricing מועבר
-  result.forEach(parking => {
+  result.forEach((parking: any) => {
     console.log(`🎯 Final parking ${parking.id}:`);
     console.log(`   - title: ${parking.title}`);
-    console.log(`   - priceHr: ${parking.priceHr}`);
+    console.log(`   - firstHourPrice: ${parking.firstHourPrice}`);
     console.log(`   - pricing field exists: ${!!parking.pricing}`);
     console.log(`   - pricing value: ${parking.pricing}`);
     console.log(`   - pricing type: ${typeof parking.pricing}`);

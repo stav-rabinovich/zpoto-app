@@ -8,25 +8,26 @@ datasource db {
 }
 
 model User {
-  id                   Int                @id @default(autoincrement())
-  email                String             @unique
-  password             String?
-  name                 String?
-  phone                String?
-  role                 String             @default("USER")
-  googleId             String?            @unique
-  facebookId           String?            @unique
-  appleId              String?            @unique
-  profilePicture       String?
-  isEmailVerified      Boolean            @default(false)
-  isBlocked            Boolean            @default(false)
-  ownershipBlocked     Boolean            @default(false)
-  lastLoginAt          DateTime?
-  registrationSource   String?
-  migratedFromDeviceId String?
-  migrationCompletedAt DateTime?
-  createdAt            DateTime           @default(now())
-  updatedAt            DateTime           @updatedAt
+  id                           Int                @id @default(autoincrement())
+  email                        String             @unique
+  password                     String?
+  name                         String?
+  phone                        String?
+  role                         String             @default("USER")
+  googleId                     String?            @unique
+  facebookId                   String?            @unique
+  appleId                      String?            @unique
+  profilePicture               String?
+  isEmailVerified              Boolean            @default(false)
+  isBlocked                    Boolean            @default(false)
+  ownershipBlocked             Boolean            @default(false)
+  lastLoginAt                  DateTime?
+  registrationSource           String?
+  migratedFromDeviceId         String?
+  migrationCompletedAt         DateTime?
+  showOnlyCompatibleParkings   Boolean            @default(false) // העדפת סינון רכבים
+  createdAt                    DateTime           @default(now())
+  updatedAt                    DateTime           @updatedAt
   bookings             Booking[]
   chats                Chat[]
   uploadedDocuments    Document[]         @relation("DocumentUploader")
@@ -48,22 +49,22 @@ model User {
 }
 
 model Parking {
-  id                 Int                 @id @default(autoincrement())
-  title              String
-  lat                Float
-  lng                Float
-  priceHr            Float
-  isActive           Boolean             @default(true)
-  approvalMode       String              @default("AUTO")
-  availability       String?
-  pricing            String?
-  createdAt          DateTime            @default(now())
-  ownerId            Int
-  address            String?
-  entranceImageUrl   String?
-  emptyImageUrl      String?
-  withCarImageUrl    String?
-  additionalImageUrl String?
+  id                   Int                 @id @default(autoincrement())
+  title                String
+  lat                  Float
+  lng                  Float
+  isActive             Boolean             @default(true)
+  approvalMode         String              @default("AUTO")
+  availability         String?
+  pricing              String?
+  maxVehicleSize       VehicleSize?        // גודל רכב מקסימלי שיכול להיכנס
+  createdAt            DateTime            @default(now())
+  ownerId              Int
+  address              String?
+  entranceImageUrl     String?
+  emptyImageUrl        String?
+  withCarImageUrl      String?
+  additionalImageUrl   String?
   anonymousFavorites AnonymousFavorite[]
   bookings           Booking[]
   chats              Chat[]
@@ -86,7 +87,8 @@ model Booking {
   paymentMethod      String?
   paymentStatus      String?         @default("PENDING")
   vehicleDescription String?
-  vehicleId          Int?
+  vehicleId          Int?            // קישור לרכב של המשתמש
+  vehicleLicensePlate String?        // מספר רכב (גיבוי אם אין vehicleId)
   approvalExpiresAt  DateTime?
   approvedAt         DateTime?
   rejectedAt         DateTime?
@@ -97,6 +99,7 @@ model Booking {
   commissionRate     Float?          @default(0.15) // שיעור עמלה (15%)
   parking            Parking         @relation(fields: [parkingId], references: [id])
   user               User            @relation(fields: [userId], references: [id])
+  vehicle            Vehicle?        @relation(fields: [vehicleId], references: [id])
   commission         Commission?
   operationalFee     OperationalFee?
   couponUsages       CouponUsage[]
@@ -116,7 +119,7 @@ model ListingRequest {
   city            String?
   lat             Float
   lng             Float
-  priceHr         Float
+  pricing         String?
   description     String?
   phone           String?
   onboarding      String?
@@ -146,20 +149,24 @@ model Chat {
 }
 
 model Vehicle {
-  id           Int      @id @default(autoincrement())
+  id           Int         @id @default(autoincrement())
   licensePlate String
-  make         String?
-  model        String?
-  color        String?
-  year         Int?
-  description  String?
-  isDefault    Boolean  @default(false)
-  createdAt    DateTime @default(now())
+  vehicleSize  VehicleSize // גודל הרכב - חובה
+  make         String?     // יצרן
+  model        String?     // דגם
+  color        String?     // צבע
+  year         Int?        // שנת ייצור
+  description  String?     // תיאור נוסף
+  isDefault    Boolean     @default(false)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
   userId       Int
-  user         User     @relation(fields: [userId], references: [id])
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  bookings     Booking[]   // הזמנות שבוצעו עם הרכב הזה
 
   @@unique([userId, licensePlate])
   @@index([userId])
+  @@index([vehicleSize])
 }
 
 model SavedPlace {
@@ -535,4 +542,14 @@ enum CouponDiscountType {
 enum CouponApplyTo {
   SERVICE_FEE // דמי תפעול בלבד
   TOTAL_AMOUNT // סכום כולל
+}
+
+// =====================
+// VEHICLE MANAGEMENT SYSTEM
+// =====================
+
+enum VehicleSize {
+  MINI      // רכב קטן - מיני
+  FAMILY    // רכב משפחתי - סדאן/האצ'בק
+  SUV       // רכב גדול - SUV/מסחרי
 }

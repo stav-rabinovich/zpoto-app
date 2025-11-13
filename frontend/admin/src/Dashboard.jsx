@@ -485,7 +485,7 @@ function RequestsView({ rows, approve, reject, load, colors, onEdit }) {
                       })()} 
                       colors={colors} 
                     />
-                    <InfoRow icon="💰" label="מחיר" value={`₪${r.priceHr}/שעה`} colors={colors} />
+                    <InfoRow icon="💰" label="מחיר" value={`₪${r.firstHourPrice || 10}/שעה`} colors={colors} />
                     <InfoRow icon="📧" label="מייל" value={r.user?.email} colors={colors} />
                     <InfoRow icon="📞" label="טלפון" value={r.phone || 'לא סופק'} colors={colors} />
                   </div>

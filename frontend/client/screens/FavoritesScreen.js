@@ -50,7 +50,7 @@ export default function FavoritesScreen({ navigation }) {
             address: fav.parking.address,
             lat: fav.parking.lat,
             lng: fav.parking.lng,
-            priceHr: fav.parking.priceHr,
+            firstHourPrice: fav.parking.firstHourPrice || 10,
             latitude: fav.parking.lat,  // הוספה לתאימות
             longitude: fav.parking.lng  // הוספה לתאימות
           };
@@ -293,7 +293,13 @@ function makeStyles(theme) {
     },
 
     // ריק
-    empty:{ alignItems:'center', paddingTop: 40 },
+    empty:{ 
+      alignItems:'center', 
+      justifyContent: 'center',
+      paddingTop: '40%',
+      flex: 1,
+      minHeight: 300,
+    },
     emptyTitle:{ color: colors.subtext, marginTop:6 },
     emptySub:{ color: colors.subtext, marginTop:2, fontSize:12 },
   });

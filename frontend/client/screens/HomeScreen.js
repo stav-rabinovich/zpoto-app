@@ -43,6 +43,8 @@ import { getRecentSearches, saveRecentSearch, clearRecentSearches, getActiveBook
 import { formatForAPI, prepareSearchParams, addHoursInIsrael } from '../utils/timezone';
 import { handleNearMeSearch, navigationActions } from '../utils/navigationHelpers';
 import { BOOKING_TYPES, isImmediateBooking } from '../constants/bookingTypes';
+import { getUserVehicles, getDefaultVehicle, getVehicleSizeInfo } from '../services/api/vehicles';
+import { getUserPreferences } from '../services/api/userPreferences';
 
 function msToHhMmSs(ms) {
   if (ms <= 0) return '00:00:00';
@@ -135,6 +137,10 @@ export default function HomeScreen() {
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [selectedCoords, setSelectedCoords] = useState(null);
 
+  // רכבים וסינון
+  const [userVehicles, setUserVehicles] = useState([]);
+  const [vehicleFilterEnabled, setVehicleFilterEnabled] = useState(false);
+
   useEffect(() => {
     (async () => {
       try {
@@ -205,6 +211,43 @@ export default function HomeScreen() {
       setLeftMs(0);
     }
   }, []);
+
+  // טעינת רכבים והעדפות משתמש
+  useEffect(() => {
+    const loadUserData = async () => {
+      if (!isAuthenticated) {
+        setUserVehicles([]);
+        setVehicleFilterEnabled(false);
+        return;
+      }
+
+      try {
+        const [vehiclesResult, preferencesResult] = await Promise.all([
+          getUserVehicles(),
+          getUserPreferences()
+        ]);
+
+        if (vehiclesResult.success) {
+          setUserVehicles(vehiclesResult.data);
+          console.log('🚗 Loaded user vehicles for HomeScreen:', vehiclesResult.data.length);
+        } else {
+          console.warn('🚗 Failed to load vehicles:', vehiclesResult.error);
+        }
+
+        if (preferencesResult.success) {
+          setVehicleFilterEnabled(preferencesResult.data.showOnlyCompatibleParkings || false);
+          console.log('⚙️ Loaded user preferences for HomeScreen:', preferencesResult.data);
+        } else {
+          console.warn('⚙️ Failed to load preferences:', preferencesResult.error);
+          setVehicleFilterEnabled(false);
+        }
+      } catch (error) {
+        console.error('Failed to load user data:', error);
+      }
+    };
+
+    loadUserData();
+  }, [isAuthenticated]);
 
   useEffect(() => {
     const unsub = navigation.addListener('focus', loadActive);
@@ -861,6 +904,47 @@ export default function HomeScreen() {
                 />
               </View>
 
+              {/* כפתור סינון רכבים */}
+              {isAuthenticated && userVehicles.length > 0 && (
+                <View style={styles.vehicleFilterSection}>
+                  <TouchableOpacity
+                    style={[styles.vehicleFilterButton, vehicleFilterEnabled && styles.vehicleFilterButtonActive]}
+                    onPress={() => setVehicleFilterEnabled(!vehicleFilterEnabled)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.vehicleFilterContent}>
+                      <Ionicons 
+                        name={vehicleFilterEnabled ? "car" : "car-outline"} 
+                        size={18} 
+                        color={vehicleFilterEnabled ? "#fff" : theme.colors.primary} 
+                      />
+                      <Text style={[
+                        styles.vehicleFilterText,
+                        vehicleFilterEnabled && styles.vehicleFilterTextActive
+                      ]}>
+                        {vehicleFilterEnabled ? 'מסנן לפי הרכב שלי' : 'סנן לפי הרכב שלי'}
+                      </Text>
+                      {(() => {
+                        const defaultVehicle = getDefaultVehicle(userVehicles);
+                        if (defaultVehicle?.vehicleSize) {
+                          const sizeInfo = getVehicleSizeInfo(defaultVehicle.vehicleSize);
+                          return (
+                            <View style={styles.vehicleSizeIndicator}>
+                              <Text style={[
+                                styles.vehicleSizeText,
+                                vehicleFilterEnabled && styles.vehicleSizeTextActive
+                              ]}>
+                                {sizeInfo?.icon}
+                              </Text>
+                            </View>
+                          );
+                        }
+                        return null;
+                      })()}
+                    </View>
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {/* כפתור חיפוש חניות */}
               <View style={styles.searchButtonSection}>
@@ -909,7 +993,7 @@ export default function HomeScreen() {
                     });
                     
                     // חיפוש חניות במיקום הנבחר עם רדיוס 1 ק"מ
-                    navigation.navigate('SearchResults', {
+                    const searchParams = {
                       query: selectedLocation,
                       coords: selectedCoords,
                       startDate: startDate.toISOString(),
@@ -922,7 +1006,31 @@ export default function HomeScreen() {
                       },
                       radius: 1000, // 1 ק"מ ברדיוס
                       minDurationHours: 1, // מינימום שעה אחת
-                    });
+                    };
+
+                    // הוספת פרמטרי רכב לסינון אם מופעל
+                    if (vehicleFilterEnabled && userVehicles.length > 0) {
+                      const defaultVehicle = getDefaultVehicle(userVehicles);
+                      if (defaultVehicle && defaultVehicle.vehicleSize) {
+                        searchParams.vehicleSize = defaultVehicle.vehicleSize;
+                        searchParams.onlyCompatible = true;
+                        console.log('🚗 Adding vehicle filter to HomeScreen search:', {
+                          vehicleSize: defaultVehicle.vehicleSize,
+                          licensePlate: defaultVehicle.licensePlate,
+                          vehicleFilterEnabled,
+                          userVehiclesCount: userVehicles.length
+                        });
+                      }
+                    } else {
+                      console.log('🚗 Vehicle filter NOT enabled:', {
+                        vehicleFilterEnabled,
+                        userVehiclesCount: userVehicles.length
+                      });
+                    }
+
+                    console.log('🏠 HomeScreen sending search params:', searchParams);
+
+                    navigation.navigate('SearchResults', searchParams);
                   }}
                   activeOpacity={0.8}
                   disabled={!selectedLocation || !startDate || !endDate}
@@ -1438,6 +1546,56 @@ function makeStyles(theme) {
       fontWeight: '700',
       color: '#FFFFFF',
       textAlign: 'center',
+    },
+
+    // כפתור סינון רכבים
+    vehicleFilterSection: {
+      marginTop: spacing.sm,
+      paddingHorizontal: spacing.md,
+    },
+    vehicleFilterButton: {
+      backgroundColor: 'rgba(255,255,255,0.95)',
+      borderColor: colors.primary,
+      borderWidth: 1.5,
+      borderRadius: 20,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+      shadowColor: '#000',
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 6,
+    },
+    vehicleFilterButtonActive: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+      shadowColor: colors.primary,
+      shadowOpacity: 0.3,
+    },
+    vehicleFilterContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.xs,
+    },
+    vehicleFilterText: {
+      fontSize: 15,
+      fontWeight: '600',
+      color: colors.primary,
+      textAlign: 'center',
+    },
+    vehicleFilterTextActive: {
+      color: '#fff',
+    },
+    vehicleSizeIndicator: {
+      marginLeft: spacing.xs,
+    },
+    vehicleSizeText: {
+      fontSize: 16,
+      color: colors.primary,
+    },
+    vehicleSizeTextActive: {
+      color: '#fff',
     },
   });
 }

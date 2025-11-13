@@ -18,12 +18,14 @@ const DAYS = [
 ];
 
 const TIME_SLOTS = [
-  { label: '00:00-04:00', start: 0, end: 4 },
-  { label: '04:00-08:00', start: 4, end: 8 },
-  { label: '08:00-12:00', start: 8, end: 12 },
-  { label: '12:00-16:00', start: 12, end: 16 },
-  { label: '16:00-20:00', start: 16, end: 20 },
-  { label: '20:00-24:00', start: 20, end: 24 },
+  { label: '00:00-03:00', start: 0, end: 3 },
+  { label: '03:00-06:00', start: 3, end: 6 },
+  { label: '06:00-09:00', start: 6, end: 9 },
+  { label: '09:00-12:00', start: 9, end: 12 },
+  { label: '12:00-15:00', start: 12, end: 15 },
+  { label: '15:00-18:00', start: 15, end: 18 },
+  { label: '18:00-21:00', start: 18, end: 21 },
+  { label: '21:00-24:00', start: 21, end: 24 },
 ];
 
 export default function OwnerAvailabilityScreen({ route, navigation }) {
@@ -76,6 +78,54 @@ export default function OwnerAvailabilityScreen({ route, navigation }) {
     return migrated;
   };
 
+  // 🔄 פונקציה חדשה למיגרציה מבלוקי 4 שעות לבלוקי 3 שעות
+  const migrate4HourTo3Hour = (old4HourAvailability) => {
+    const migrated = {};
+    
+    Object.keys(old4HourAvailability).forEach(dayKey => {
+      const old4HourSlots = old4HourAvailability[dayKey] || [];
+      const new3HourSlots = [];
+      
+      // מיפוי מבלוקי 4 שעות לבלוקי 3 שעות
+      old4HourSlots.forEach(slot4h => {
+        // אם זה כבר בלוק של 3 שעות תקין, לא נגע בו
+        if ([0, 3, 6, 9, 12, 15, 18, 21].includes(slot4h)) {
+          new3HourSlots.push(slot4h);
+          return;
+        }
+        
+        // המרה מבלוקי 4 שעות לבלוקי 3 שעות
+        switch(slot4h) {
+          case 4:  // 04:00-08:00 -> 03:00-06:00 + 06:00-09:00
+            if (!new3HourSlots.includes(3)) new3HourSlots.push(3);
+            new3HourSlots.push(6);
+            break;
+          case 8:  // 08:00-12:00 -> 06:00-09:00 + 09:00-12:00
+            if (!new3HourSlots.includes(6)) new3HourSlots.push(6);
+            new3HourSlots.push(9);
+            break;
+          case 16: // 16:00-20:00 -> 15:00-18:00 + 18:00-21:00
+            if (!new3HourSlots.includes(15)) new3HourSlots.push(15);
+            new3HourSlots.push(18);
+            break;
+          case 20: // 20:00-24:00 -> 18:00-21:00 + 21:00-24:00
+            if (!new3HourSlots.includes(18)) new3HourSlots.push(18);
+            new3HourSlots.push(21);
+            break;
+          default:
+            // אם זה מספר לא מוכר, לא נגע בו
+            console.warn(`Unknown time slot: ${slot4h}, keeping as-is`);
+            new3HourSlots.push(slot4h);
+        }
+      });
+      
+      // הסרת כפילויות ומיון
+      migrated[dayKey] = [...new Set(new3HourSlots)].sort((a, b) => a - b);
+    });
+    
+    return migrated;
+  };
+
   useEffect(() => {
     loadParking();
   }, [parkingId]);
@@ -97,26 +147,83 @@ export default function OwnerAvailabilityScreen({ route, navigation }) {
             ? JSON.parse(response.data.availability) 
             : response.data.availability;
           
-          // בדיקה אם צריך מיגרציה (אם יש בלוקים ישנים)
-          const needsMigration = Object.values(parsed).some(daySlots => 
-            Array.isArray(daySlots) && daySlots.some(slot => [6, 18].includes(slot))
+          // בדיקה אם צריך מיגרציה מ-6 שעות ל-4 שעות (רק אם זה באמת פורמט ישן)
+          // פורמט 6 שעות ישן משתמש רק ב-6,18 ולא בבלוקים אחרים
+          // פורמט 3 שעות חדש יכול להכיל 6,18 יחד עם בלוקים אחרים
+          const allSlots = Object.values(parsed).flat().filter(slot => typeof slot === 'number');
+          const uniqueSlots = [...new Set(allSlots)].sort((a, b) => a - b);
+          
+          // פורמט 6 שעות ישן: רק [6, 18] או תת-קבוצה שלהם
+          // פורמט 3 שעות: כל בלוק שהוא כפולה של 3
+          const isOld6HourFormat = uniqueSlots.length > 0 && 
+            uniqueSlots.every(slot => [6, 18].includes(slot)) &&
+            uniqueSlots.some(slot => [6, 18].includes(slot));
+          
+          const needs6to4Migration = isOld6HourFormat;
+          
+          // בדיקה אם צריך מיגרציה מ-4 שעות ל-3 שעות (רק אם יש בלוקים ייחודיים ל-4 שעות)
+          // בדיקה מדויקת: אם יש בלוקים של 4, 8, 16, 20 וגם אין בלוקים של 3, 6, 9, 15
+          const has4HourBlocks = Object.values(parsed).some(daySlots => 
+            Array.isArray(daySlots) && daySlots.some(slot => [4, 8, 16, 20].includes(slot))
           );
           
-          if (needsMigration) {
-            console.log('🔄 Migrating old availability format to new 4-hour blocks');
-            const migratedAvailability = migrateOldAvailability(parsed);
-            setAvailability(migratedAvailability);
+          const has3HourBlocks = Object.values(parsed).some(daySlots => 
+            Array.isArray(daySlots) && daySlots.some(slot => [3, 6, 9, 15].includes(slot))
+          );
+          
+          // מיגרציה נדרשת רק אם יש בלוקי 4 שעות ואין בלוקי 3 שעות
+          const needs4to3Migration = has4HourBlocks && !has3HourBlocks;
+          
+          console.log('🔍 Migration detection:', {
+            allSlots,
+            uniqueSlots,
+            isOld6HourFormat,
+            needs6to4Migration,
+            has4HourBlocks,
+            has3HourBlocks,
+            needs4to3Migration,
+            parsedData: parsed
+          });
+          
+          let finalAvailability = parsed;
+          
+          if (needs6to4Migration) {
+            console.log('🔄 Migrating old availability format from 6-hour to 4-hour blocks');
+            finalAvailability = migrateOldAvailability(parsed);
+          }
+          
+          if (needs4to3Migration) {
+            console.log('🔄 Migrating availability format from 4-hour to 3-hour blocks');
+            finalAvailability = migrate4HourTo3Hour(finalAvailability);
             
-            // שמירה אוטומטית של הפורמט החדש
+            setAvailability(finalAvailability);
+            
+            // שמירה אוטומטית של הפורמט החדש (3 שעות)
             setTimeout(() => {
               api.patch(`/api/owner/parkings/${parkingId}`, {
-                availability: JSON.stringify(migratedAvailability)
+                availability: JSON.stringify(finalAvailability)
+              }, {
+                headers: { Authorization: `Bearer ${token}` }
+              }).catch(err => console.log('Auto-migration save failed:', err));
+            }, 1000);
+          } else if (needs6to4Migration) {
+            console.log('🔄 Migrating old availability format from 6-hour to 3-hour blocks (via 4-hour)');
+            finalAvailability = migrateOldAvailability(parsed);
+            finalAvailability = migrate4HourTo3Hour(finalAvailability);
+            
+            setAvailability(finalAvailability);
+            
+            // שמירה אוטומטית של הפורמט החדש (3 שעות)
+            setTimeout(() => {
+              api.patch(`/api/owner/parkings/${parkingId}`, {
+                availability: JSON.stringify(finalAvailability)
               }, {
                 headers: { Authorization: `Bearer ${token}` }
               }).catch(err => console.log('Auto-migration save failed:', err));
             }, 1000);
           } else {
-            setAvailability(parsed || {});
+            console.log('✅ No migration needed, data is already in 3-hour format');
+            setAvailability(finalAvailability || {});
           }
         } catch {
           setAvailability({});
@@ -289,7 +396,7 @@ export default function OwnerAvailabilityScreen({ route, navigation }) {
         <View style={styles.infoBox}>
           <Ionicons name="information-circle" size={20} color={theme.colors.primary} />
           <Text style={styles.infoText}>
-            סמן את בלוקי הזמן בהן החניה פנויה. כל בלוק מכסה 4 שעות. לקוחות יוכלו להזמין רק בזמנים אלו.
+            סמן את בלוקי הזמן בהן החניה פנויה. כל בלוק מכסה 3 שעות. לקוחות יוכלו להזמין רק בזמנים אלו.
           </Text>
         </View>
 

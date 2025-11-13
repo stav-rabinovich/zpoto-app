@@ -89,6 +89,10 @@ app.use('/api/vehicles', vehiclesRouter);
 import profileRouter from './routes/profile.routes';
 app.use('/api/profile', profileRouter);
 
+// User Preferences
+import userPreferencesRouter from './routes/user-preferences.routes';
+app.use('/api/user/preferences', userPreferencesRouter);
+
 // Public (ללא אימות)
 import publicRouter from './routes/public.routes';
 app.use('/api/public', publicRouter);

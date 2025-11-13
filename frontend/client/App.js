@@ -329,8 +329,8 @@ export default function App() {
                   <Stack.Screen name="Profile" component={ProfileScreen} options={{ ...mainScreenOptions, title: 'הפרופיל שלי' }} />
                   
                   {/* עמודים משניים - מעבר מהצד */}
-                  <Stack.Screen name="Login" component={LoginScreen} options={{ title: 'התחברות', headerShown: false }} />
-                  <Stack.Screen name="Register" component={RegisterScreen} options={{ title: 'הרשמה', headerShown: false }} />
+                  <Stack.Screen name="Login" component={LoginScreen} options={{ title: 'התחברות' }} />
+                  <Stack.Screen name="Register" component={RegisterScreen} options={{ title: 'הרשמה' }} />
                   <Stack.Screen name="SearchResults" component={SearchResultsScreen} options={{ title: 'תוצאות חיפוש' }} />
                   <Stack.Screen name="Booking" component={BookingScreen} options={{ title: 'הזמנה' }} />
                   <Stack.Screen name="Payment" component={PaymentScreen} options={{ title: 'תשלום' }} />

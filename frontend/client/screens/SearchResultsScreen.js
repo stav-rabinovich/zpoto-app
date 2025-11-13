@@ -20,6 +20,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useAuthGate } from '../hooks/useAuthGate';
 import webSocketService from '../services/webSocketService';
 import { getUserFavorites, addFavorite, removeFavorite } from '../services/api/userService';
+import { getUserVehicles, getDefaultVehicle } from '../services/api/vehicles';
+import { getUserPreferences } from '../services/api/userPreferences';
 import { API_BASE } from '../consts';
 import { validateBookingSlot } from '../services/api/bookings';
 import { formatForAPI, prepareSearchParams } from '../utils/timezone';
@@ -127,7 +129,7 @@ export default function SearchResultsScreen({ route, navigation }) {
   const theme = useTheme();
   const styles = useMemo(() => makeStyles(theme, CARD_WIDTH), [theme]);
   const { attemptAction, ACTIONS_REQUIRING_AUTH } = useAuthGate();
-  const { user } = useAuth(); // לזיהוי בעלי חניה
+  const { user, isAuthenticated } = useAuth(); // לזיהוי בעלי חניה
 
   const initialQuery = route?.params?.query ?? '';
   const coordsFromSearch = route?.params?.coords || null;
@@ -139,6 +141,16 @@ export default function SearchResultsScreen({ route, navigation }) {
   const minDurationHours = route?.params?.minDurationHours || 1;
   const isImmediate = route?.params?.isImmediate || false;
   const bookingTypeFromParams = route?.params?.bookingType || null; // סוג הזמנה מהפרמטרים
+  const vehicleSizeFromParams = route?.params?.vehicleSize || null; // גודל רכב מהפרמטרים
+  const onlyCompatibleFromParams = route?.params?.onlyCompatible || false; // סינון תאימות מהפרמטרים
+  
+  // לוג פרמטרים מ-HomeScreen
+  console.log('🏠 SearchResultsScreen received params:', {
+    vehicleSize: vehicleSizeFromParams,
+    onlyCompatible: onlyCompatibleFromParams,
+    searchType,
+    bookingType: bookingTypeFromParams
+  });
 
   const [region, setRegion] = useState(null);
   const [searchCenter, setSearchCenter] = useState(null);
@@ -158,6 +170,11 @@ export default function SearchResultsScreen({ route, navigation }) {
   const [pickedPoint, setPickedPoint] = useState(null);
   const [reverseLoading, setReverseLoading] = useState(false);
   const [viewportDirty, setViewportDirty] = useState(false);
+
+  // רכבים והעדפות סינון
+  const [userVehicles, setUserVehicles] = useState([]);
+  const [userPreferences, setUserPreferences] = useState({});
+  const [vehicleFilterEnabled, setVehicleFilterEnabled] = useState(false);
 
   // Chip (מותאם מיתוג, RTL)
   const Chip = useCallback(function Chip({ label, active, onPress }) {
@@ -351,6 +368,51 @@ export default function SearchResultsScreen({ route, navigation }) {
   const [ownerSpots, setOwnerSpots] = useState([]);
   const lastSearchCenterRef = useRef(null); // למעקב אחר הмרכז האחרון שחיפשנו
   
+  // טעינת רכבים והעדפות משתמש
+  useEffect(() => {
+    const loadUserData = async () => {
+      if (!isAuthenticated) {
+        setUserVehicles([]);
+        setUserPreferences({});
+        setVehicleFilterEnabled(false);
+        return;
+      }
+
+      try {
+        const [vehiclesResult, preferencesResult] = await Promise.all([
+          getUserVehicles(),
+          getUserPreferences()
+        ]);
+
+        if (vehiclesResult.success) {
+          setUserVehicles(vehiclesResult.data);
+          console.log('🚗 Loaded user vehicles:', vehiclesResult.data.length);
+        } else {
+          console.warn('🚗 Failed to load vehicles:', vehiclesResult.error);
+        }
+
+        if (preferencesResult.success) {
+          setUserPreferences(preferencesResult.data);
+          // אם יש פרמטרים מ-HomeScreen, השתמש בהם. אחרת השתמש בהעדפות
+          const shouldEnableFilter = onlyCompatibleFromParams || preferencesResult.data.showOnlyCompatibleParkings || false;
+          setVehicleFilterEnabled(shouldEnableFilter);
+          console.log('⚙️ Loaded user preferences:', preferencesResult.data);
+          console.log('🚗 Vehicle filter from params:', { vehicleSizeFromParams, onlyCompatibleFromParams, shouldEnableFilter });
+        } else {
+          console.warn('⚙️ Failed to load preferences:', preferencesResult.error);
+          // אם נכשל לטעון העדפות, השתמש בפרמטרים מ-HomeScreen או ברירות מחדל
+          setUserPreferences({});
+          setVehicleFilterEnabled(onlyCompatibleFromParams || false);
+        }
+      } catch (error) {
+        console.error('Failed to load user data:', error);
+      }
+    };
+
+    loadUserData();
+  }, [isAuthenticated]);
+
+  
   useEffect(() => {
     let isCurrentRequest = true; // למניעת race conditions
     let debounceTimer = null; // למניעת קריאות מרובות מהירות
@@ -362,13 +424,21 @@ export default function SearchResultsScreen({ route, navigation }) {
           return; 
         }
         
-        // בדיקה אם כבר חיפשנו במיקום הזה
+        // בדיקה אם כבר חיפשנו במיקום הזה (אבל לא אם שינינו סינון רכבים)
         const currentCenter = `${searchCenter.latitude?.toFixed(6) || 0},${searchCenter.longitude?.toFixed(6) || 0}`;
+        const searchKey = `${currentCenter}-${vehicleFilterEnabled}-${userVehicles.length}`;
         
-        if (lastSearchCenterRef.current === currentCenter) {
-          console.log('🔄 Same search center, skipping reload:', currentCenter);
+        if (lastSearchCenterRef.current === searchKey) {
+          console.log('🔄 Same search parameters, skipping reload:', searchKey);
           return;
         }
+        
+        console.log('🚗 Starting new search with parameters:', {
+          center: currentCenter,
+          vehicleFilterEnabled,
+          userVehiclesCount: userVehicles.length,
+          searchKey
+        });
         
         const baseLat = searchCenter.latitude;
         const baseLng = searchCenter.longitude;
@@ -448,6 +518,30 @@ export default function SearchResultsScreen({ route, navigation }) {
         if (filtersFromAdvanced?.hasCharging) searchParams.hasCharging = true;
         if (searchType && searchType !== 'general') searchParams.searchType = searchType;
 
+        // הוספת פרמטרי רכב לסינון
+        if (vehicleFilterEnabled && userVehicles.length > 0) {
+          // אם יש פרמטרים מ-HomeScreen, השתמש בהם
+          if (vehicleSizeFromParams && onlyCompatibleFromParams) {
+            searchParams.vehicleSize = vehicleSizeFromParams;
+            searchParams.onlyCompatible = onlyCompatibleFromParams;
+            console.log('🚗 Using vehicle filter from HomeScreen params:', {
+              vehicleSize: vehicleSizeFromParams,
+              onlyCompatible: onlyCompatibleFromParams
+            });
+          } else {
+            // אחרת השתמש ברכב ברירת המחדל
+            const defaultVehicle = getDefaultVehicle(userVehicles);
+            if (defaultVehicle && defaultVehicle.vehicleSize) {
+              searchParams.vehicleSize = defaultVehicle.vehicleSize;
+              searchParams.onlyCompatible = true;
+              console.log('🚗 Using default vehicle filter:', {
+                vehicleSize: defaultVehicle.vehicleSize,
+                licensePlate: defaultVehicle.licensePlate
+              });
+            }
+          }
+        }
+
         console.log('📤 Sending search params:', searchParams);
         console.log('🎯 Search criteria:', {
           location: `${baseLat}, ${baseLng}`,
@@ -519,7 +613,7 @@ export default function SearchResultsScreen({ route, navigation }) {
         mergedList.forEach((parking, index) => {
           console.log(`🎯 Parking ${index + 1} (ID: ${parking.id}):`);
           console.log(`   - title: ${parking.title}`);
-          console.log(`   - priceHr: ${parking.priceHr}`);
+          console.log(`   - firstHourPrice: ${parking.firstHourPrice}`);
           console.log(`   - pricing field: ${parking.pricing}`);
           console.log(`   - pricing type: ${typeof parking.pricing}`);
         });
@@ -540,8 +634,8 @@ export default function SearchResultsScreen({ route, navigation }) {
           })
           .map(x => {
             console.log(`🔍 Raw parking ${x.id} data:`, x);
-            const price = typeof x.firstHourPrice === 'number' ? x.firstHourPrice : (typeof x.priceHr === 'number' ? x.priceHr : 10);
-            console.log(`💰 Frontend mapping parking ${x.id}: firstHourPrice=${x.firstHourPrice} (type: ${typeof x.firstHourPrice}), priceHr=${x.priceHr} (type: ${typeof x.priceHr}), final price=${price}`);
+            const price = typeof x.firstHourPrice === 'number' ? x.firstHourPrice : 10;
+            console.log(`💰 Frontend mapping parking ${x.id}: firstHourPrice=${x.firstHourPrice} (type: ${typeof x.firstHourPrice}), final price=${price}`);
             
             return {
               id: `parking-${x.id}`,
@@ -577,7 +671,7 @@ export default function SearchResultsScreen({ route, navigation }) {
 
         // עדכון רק אם זה עדיין הבקשה הנוכחית
         if (isCurrentRequest) {
-          lastSearchCenterRef.current = currentCenter; // שמירת המיקום שחיפשנו
+          lastSearchCenterRef.current = searchKey; // שמירת פרמטרי החיפוש שביצענו
           setOwnerSpots(mapped);
         }
       } catch (error) {
@@ -603,7 +697,7 @@ export default function SearchResultsScreen({ route, navigation }) {
         clearTimeout(debounceTimer);
       }
     };
-  }, [searchCenter]);
+  }, [searchCenter, vehicleFilterEnabled, userVehicles]);
 
   const spotsRaw = useMemo(() => {
     const base = [...demoSpots];
@@ -874,6 +968,29 @@ export default function SearchResultsScreen({ route, navigation }) {
         <View style={styles.timeBadge}>
           <Ionicons name="time-outline" size={14} color="#fff" style={{ marginStart: 6 }} />
           <Text style={styles.timeBadgeText} numberOfLines={1}>{timeBadge}</Text>
+        </View>
+      )}
+
+      {/* כפתור סינון רכבים */}
+      {isAuthenticated && userVehicles.length > 0 && (
+        <View style={styles.vehicleFilterContainer}>
+          <TouchableOpacity
+            style={[styles.vehicleFilterButton, vehicleFilterEnabled && styles.vehicleFilterButtonActive]}
+            onPress={() => setVehicleFilterEnabled(!vehicleFilterEnabled)}
+            activeOpacity={0.8}
+          >
+            <Ionicons 
+              name={vehicleFilterEnabled ? "car" : "car-outline"} 
+              size={16} 
+              color={vehicleFilterEnabled ? "#fff" : theme.colors.primary} 
+            />
+            <Text style={[
+              styles.vehicleFilterText,
+              vehicleFilterEnabled && styles.vehicleFilterTextActive
+            ]}>
+              {vehicleFilterEnabled ? 'מסנן לפי הרכב שלי' : 'סנן לפי הרכב שלי'}
+            </Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -1476,5 +1593,41 @@ function makeStyles(theme, cardWidth) {
     pickText:{ flex:1, color:'#fff', fontWeight:'700', textAlign:'right' },
     pickBtn:{ backgroundColor:colors.primary, paddingVertical:8, paddingHorizontal:12, borderRadius:10 },
     pickBtnText:{ color:'#fff', fontWeight:'800', textAlign:'right' },
+
+    // כפתור סינון רכבים
+    vehicleFilterContainer:{
+      position:'absolute', 
+      top: 110, 
+      right: 16,
+      zIndex: 1000
+    },
+    vehicleFilterButton:{
+      flexDirection:'row-reverse', 
+      alignItems:'center', 
+      gap: 8,
+      backgroundColor:'rgba(255,255,255,0.95)', 
+      paddingVertical: 8, 
+      paddingHorizontal: 12, 
+      borderRadius: 20,
+      borderWidth: 1, 
+      borderColor: colors.primary,
+      shadowColor:'#000', 
+      shadowOpacity:0.1, 
+      shadowRadius:4, 
+      shadowOffset:{ width:0, height:2 }, 
+      elevation:3
+    },
+    vehicleFilterButtonActive:{
+      backgroundColor: colors.primary,
+      borderColor: colors.primary
+    },
+    vehicleFilterText:{
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.primary
+    },
+    vehicleFilterTextActive:{
+      color: '#fff'
+    },
   });
 }

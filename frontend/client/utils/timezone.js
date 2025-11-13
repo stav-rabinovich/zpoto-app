@@ -378,7 +378,7 @@ export function debugTime(time, label = 'Time') {
 export const TIMEZONE_CONSTANTS = {
   ISRAEL_TIMEZONE,
   DAY_NAMES: ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'],
-  HOUR_BLOCKS: [0, 4, 8, 12, 16, 20], // בלוקי זמן של 4 שעות
+  HOUR_BLOCKS: [0, 3, 6, 9, 12, 15, 18, 21], // בלוקי זמן של 3 שעות
   FORMATS: {
     TIME_ONLY: 'HH:mm',
     DATE_ONLY: 'yyyy-MM-dd',

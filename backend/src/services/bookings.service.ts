@@ -6,6 +6,7 @@ import {
   getIsraelHour,
   validateTimeRange,
 } from '../utils/timezone';
+import { calculateBlockStart3Hour } from '../config/timeBlocks';
 import { calculateProportionalPrice } from './pricing.service';
 import {
   shouldUseProportionalPricing,
@@ -22,7 +23,7 @@ async function createCommissionForBooking(booking: any, originalPrice?: number) 
   // קבלת פרטי החניה כולל בעל החניה
   const parking = await prisma.parking.findUnique({
     where: { id: booking.parkingId },
-    select: { ownerId: true, pricing: true, priceHr: true },
+    select: { ownerId: true, pricing: true },
   });
 
   if (!parking) {
@@ -38,15 +39,17 @@ async function createCommissionForBooking(booking: any, originalPrice?: number) 
   const COMMISSION_RATE = 0.15;
   
   // 🔧 FIX: השתמש במחיר החניה בפועל מההזמנה (תומך במחירון חדש)
-  // במקום parking.priceHr הישן
-  const parkingCostCents = booking.totalPriceCents || Math.round(parking.priceHr * hours * 100);
+  // ההזמנה חייבת לכלול totalPriceCents - אין יותר fallback
+  if (!booking.totalPriceCents) {
+    throw new Error(`Booking ${booking.id} missing totalPriceCents - cannot calculate commission`);
+  }
+  const parkingCostCents = booking.totalPriceCents;
   
   // 🔧 FIX: העמלה צריכה להיות רק על עלות החניה, לא על דמי התפעול
   // בעל החניה מקבל: עלות החניה - עמלה (15% מעלות החניה)
   console.log(`💰 FIXED: Commission calculation based on parking cost only (excluding operational fees)`);
   
   console.log(`💰 Commission base calculation:`);
-  console.log(`   Hourly rate: ₪${parking.priceHr}`);
   console.log(`   Hours: ${hours}`);
   console.log(`   Parking cost (gross): ₪${parkingCostCents / 100}`);
   console.log(`   Commission rate: ${COMMISSION_RATE * 100}%`);
@@ -209,7 +212,7 @@ function calculateAvailabilityFromSchedule(startTime: Date, schedule: any): Date
     console.log(`🔍 Checking hours ${startHour} to ${endHour} for ${dayName}`);
 
     for (let hour = startHour; hour < endHour; hour++) {
-      const blockStart = Math.floor(hour / 4) * 4; // 0, 4, 8, 12, 16, 20
+      const blockStart = calculateBlockStart3Hour(hour); // 0, 3, 6, 9, 12, 15, 18, 21
 
       // בדוק אם הבלוק הזה זמין
       const isBlockAvailable = availableBlocks.includes(blockStart);
@@ -275,7 +278,6 @@ export async function listBookingsByUser(userId: number) {
           address: true,
           lat: true,
           lng: true,
-          priceHr: true,
           isActive: true,
           owner: {
             select: {
@@ -376,7 +378,6 @@ export async function createBooking(input: {
   const parking = await prisma.parking.findUnique({
     where: { id: input.parkingId },
     select: {
-      priceHr: true,
       pricing: true,
       approvalMode: true,
       title: true,
@@ -389,7 +390,7 @@ export async function createBooking(input: {
 
   // 🆕 חישוב מחיר עם תמיכה במודל יחסי חדש
   let totalPriceCents = 0;
-  let pricingSource = 'Legacy priceHr field';
+  let pricingSource = 'Pricing field';
   let pricingMethod = 'legacy';
   let priceBreakdown = null;
   let exactDurationHours = 0;
@@ -412,7 +413,11 @@ export async function createBooking(input: {
           console.log(
             `💰 🆕 Using NEW PROPORTIONAL pricing system for ${exactDurationHours.toFixed(2)} hours`
           );
-          const breakdown = calculateProportionalPrice(ms, pricingData, parking.priceHr);
+          // השתמש בשעה הראשונה כבסיס לחישוב יחסי
+          const baseHourPrice = typeof pricingData.hour1 === 'string' 
+            ? parseFloat(pricingData.hour1) 
+            : pricingData.hour1;
+          const breakdown = calculateProportionalPrice(ms, pricingData, baseHourPrice);
 
           totalPriceCents = breakdown.totalPriceCents;
           pricingSource = 'NEW proportional pricing system';
@@ -442,8 +447,8 @@ export async function createBooking(input: {
                   ? parseFloat(pricingData.hour1)
                   : pricingData.hour1;
             } else {
-              // fallback למחיר הישן
-              hourPrice = parking.priceHr;
+              // אם אין מחיר לשעה הספציפית ואין שעה ראשונה - שגיאה
+              throw new Error(`No pricing data found for hour ${i} and no hour1 fallback`);
             }
 
             const hourPriceCents = Math.round(hourPrice * 100);
@@ -465,7 +470,10 @@ export async function createBooking(input: {
           let legacyPriceCents = 0;
           for (let i = 1; i <= hours; i++) {
             const hourKey = `hour${i}`;
-            let hourPrice = pricingData[hourKey] || pricingData.hour1 || parking.priceHr;
+            let hourPrice = pricingData[hourKey] || pricingData.hour1;
+            if (!hourPrice) {
+              throw new Error(`No pricing data for legacy comparison at hour ${i}`);
+            }
             hourPrice = typeof hourPrice === 'string' ? parseFloat(hourPrice) : hourPrice;
             legacyPriceCents += Math.round(hourPrice * 100);
           }
@@ -482,18 +490,16 @@ export async function createBooking(input: {
           });
         }
       } else {
-        // אין מחירון תקין, השתמש במחיר הישן
-        console.log(`💰 ⚠️ No valid pricing data, using legacy priceHr`);
-        totalPriceCents = Math.round(hours * parking.priceHr * 100);
+        // אין מחירון תקין - שגיאה
+        throw new Error(`No valid pricing data found for parking ${input.parkingId}`);
       }
-    } catch (error) {
-      console.warn('Failed to parse pricing data, using legacy priceHr:', error);
-      totalPriceCents = Math.round(hours * parking.priceHr * 100);
+    } catch (error: any) {
+      console.error('Failed to parse pricing data:', error);
+      throw new Error(`Invalid pricing data for parking ${input.parkingId}: ${error?.message || error}`);
     }
   } else {
-    // אין מחירון חדש, השתמש במחיר הישן
-    console.log(`💰 ⚠️ No pricing field, using legacy priceHr`);
-    totalPriceCents = Math.round(hours * parking.priceHr * 100);
+    // אין מחירון - שגיאה
+    throw new Error(`No pricing field found for parking ${input.parkingId}`);
   }
 
   // לוגינג מפורט של חישוב המחיר
@@ -512,7 +518,6 @@ export async function createBooking(input: {
     title: parking.title,
     ownerId: parking.ownerId,
     approvalMode: parking.approvalMode,
-    legacyPriceHr: parking.priceHr,
     hours: hours,
     exactDurationHours: exactDurationHours.toFixed(2),
     totalPriceCents: totalPriceCents,

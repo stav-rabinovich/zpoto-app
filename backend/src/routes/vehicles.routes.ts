@@ -32,10 +32,14 @@ r.get('/', auth, async (req: AuthedRequest, res, next) => {
 r.post('/', auth, async (req: AuthedRequest, res, next) => {
   try {
     const userId = req.userId!;
-    const { licensePlate, make, model, color, year, description, isDefault } = req.body;
+    const { licensePlate, vehicleSize, make, model, color, year, description, isDefault } = req.body;
 
     if (!licensePlate?.trim()) {
       return res.status(400).json({ error: 'License plate is required' });
+    }
+
+    if (!vehicleSize || !['MINI', 'FAMILY', 'SUV'].includes(vehicleSize)) {
+      return res.status(400).json({ error: 'Valid vehicle size is required (MINI, FAMILY, SUV)' });
     }
 
     // אם זה רכב ברירת מחדל, נבטל את ברירת המחדל מכל הרכבים האחרים
@@ -50,13 +54,14 @@ r.post('/', auth, async (req: AuthedRequest, res, next) => {
       data: {
         userId,
         licensePlate: licensePlate.trim(),
+        vehicleSize: vehicleSize,
         make: make?.trim() || null,
         model: model?.trim() || null,
         color: color?.trim() || null,
         year: year ? parseInt(year) : null,
         description: description?.trim() || null,
         isDefault: Boolean(isDefault),
-      },
+      } as any,
     });
 
     res.status(201).json({ data: vehicle });
@@ -76,7 +81,7 @@ r.put('/:id', auth, async (req: AuthedRequest, res, next) => {
   try {
     const userId = req.userId!;
     const vehicleId = parseInt(req.params.id);
-    const { licensePlate, make, model, color, year, description, isDefault } = req.body;
+    const { licensePlate, vehicleSize, make, model, color, year, description, isDefault } = req.body;
 
     if (isNaN(vehicleId)) {
       return res.status(400).json({ error: 'Invalid vehicle ID' });
@@ -95,6 +100,10 @@ r.put('/:id', auth, async (req: AuthedRequest, res, next) => {
       return res.status(400).json({ error: 'License plate is required' });
     }
 
+    if (vehicleSize && !['MINI', 'FAMILY', 'SUV'].includes(vehicleSize)) {
+      return res.status(400).json({ error: 'Valid vehicle size is required (MINI, FAMILY, SUV)' });
+    }
+
     // אם זה רכב ברירת מחדל, נבטל את ברירת המחדל מכל הרכבים האחרים
     if (isDefault && !existingVehicle.isDefault) {
       await prisma.vehicle.updateMany({
@@ -103,17 +112,23 @@ r.put('/:id', auth, async (req: AuthedRequest, res, next) => {
       });
     }
 
+    const updateData: any = {
+      licensePlate: licensePlate.trim(),
+      make: make?.trim() || null,
+      model: model?.trim() || null,
+      color: color?.trim() || null,
+      year: year ? parseInt(year) : null,
+      description: description?.trim() || null,
+      isDefault: Boolean(isDefault),
+    };
+
+    if (vehicleSize) {
+      updateData.vehicleSize = vehicleSize as any;
+    }
+
     const vehicle = await prisma.vehicle.update({
       where: { id: vehicleId },
-      data: {
-        licensePlate: licensePlate.trim(),
-        make: make?.trim() || null,
-        model: model?.trim() || null,
-        color: color?.trim() || null,
-        year: year ? parseInt(year) : null,
-        description: description?.trim() || null,
-        isDefault: Boolean(isDefault),
-      },
+      data: updateData,
     });
 
     res.json({ data: vehicle });
