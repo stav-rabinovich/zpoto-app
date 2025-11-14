@@ -25,13 +25,14 @@ function WheelPicker({
 }) {
   const listRef = useRef(null);
   const selectedIndex = Math.max(0, data.findIndex(d => d.value === value));
+  const [isUserScrolling, setIsUserScrolling] = useState(false); // מעקב אחר גלילה ידנית
 
   useEffect(() => {
-    if (listRef.current && data.length > 0) {
+    if (listRef.current && data.length > 0 && !isUserScrolling) {
       const targetIndex = Math.max(0, data.findIndex(d => d.value === value));
       listRef.current.scrollToIndex({ index: targetIndex, animated: false });
     }
-  }, [value, data]);
+  }, [value, data, isUserScrolling]);
 
   const onScrollEnd = (event) => {
     const y = event.nativeEvent.contentOffset.y;
@@ -70,7 +71,11 @@ function WheelPicker({
         showsVerticalScrollIndicator={false}
         snapToInterval={ITEM_H}
         decelerationRate="fast"
-        onMomentumScrollEnd={onScrollEnd}
+        onScrollBeginDrag={() => setIsUserScrolling(true)} // המשתמש התחיל לגלול
+        onMomentumScrollEnd={(event) => {
+          setIsUserScrolling(false); // המשתמש סיים לגלול
+          onScrollEnd(event);
+        }}
         getItemLayout={(_, index) => ({ length: ITEM_H, offset: ITEM_H * index, index })}
         contentContainerStyle={{ paddingTop: (height - ITEM_H) / 2, paddingBottom: (height - ITEM_H) / 2 }}
       />
@@ -160,16 +165,25 @@ function WheelsDateTimePanel({
   const [selDay, setSelDay] = useState(setTimeInIsrael(init, 0, 0).getTime());
   const [selHour, setSelHour] = useState(getIsraelHourFromDate(init));
   const [selMin, setSelMin] = useState(getIsraelMinutesFromDate(init));
+  const [hasUserInteracted, setHasUserInteracted] = useState(false); // מעקב אחר אינטראקציות משתמש
 
   useEffect(() => {
-    if (!visible) return;
-    const i = clampToRange(roundTo15Minutes(initial), min, max);
-    // 🔧 תוקן: משתמש בפונקציות העזר החדשות במקום המרות ידניות
-    const d0 = setTimeInIsrael(i, 0, 0);
-    setSelDay(d0.getTime());
-    setSelHour(getIsraelHourFromDate(i));
-    setSelMin(getIsraelMinutesFromDate(i));
-  }, [visible, initial, minimumDate, maximumDate]);
+    // אתחל רק כשהפאנל נפתח ולא כשיש שינויים ב-initial
+    if (!visible) {
+      setHasUserInteracted(false); // איפוס כשסוגרים את הפאנל
+      return;
+    }
+    
+    // אתחל רק אם המשתמש עוד לא התחיל לערוך
+    if (!hasUserInteracted) {
+      const i = clampToRange(roundTo15Minutes(initial), min, max);
+      // 🔧 תוקן: משתמש בפונקציות העזר החדשות במקום המרות ידניות
+      const d0 = setTimeInIsrael(i, 0, 0);
+      setSelDay(d0.getTime());
+      setSelHour(getIsraelHourFromDate(i));
+      setSelMin(getIsraelMinutesFromDate(i));
+    }
+  }, [visible, minimumDate, maximumDate]); // הוסר initial מה-dependencies
 
   const isMinDay = !!min && new Date(selDay).getTime() === new Date(min.getFullYear(),min.getMonth(),min.getDate(),0,0,0,0).getTime();
   const isMaxDay = !!max && new Date(selDay).getTime() === new Date(max.getFullYear(),max.getMonth(),max.getDate(),0,0,0,0).getTime();
@@ -256,6 +270,7 @@ function WheelsDateTimePanel({
             {/* ימני = יום קודם */}
             <TouchableOpacity
               onPress={() => {
+                setHasUserInteracted(true); // סמן שהמשתמש התחיל לערוך
                 const i = dayData.findIndex(d => d.value === selDay);
                 if (i > 0) setSelDay(dayData[i - 1].value);
               }}
@@ -270,6 +285,7 @@ function WheelsDateTimePanel({
                 data={dayData}
                 value={selDay}
                 onChange={(val) => {
+                  setHasUserInteracted(true); // סמן שהמשתמש התחיל לערוך
                   setSelDay(val);
                   if (isMinDay && selHour < minHour) setSelHour(minHour);
                   if (isMinDay && selHour === minHour && selMin < minMin) setSelMin(minMin);
@@ -281,6 +297,7 @@ function WheelsDateTimePanel({
             {/* שמאלי = יום הבא */}
             <TouchableOpacity
               onPress={() => {
+                setHasUserInteracted(true); // סמן שהמשתמש התחיל לערוך
                 const i = dayData.findIndex(d => d.value === selDay);
                 if (i < dayData.length - 1) setSelDay(dayData[i + 1].value);
               }}
@@ -298,6 +315,7 @@ function WheelsDateTimePanel({
                 data={minuteData}
                 value={Math.max(selMin, (isMinDay && selHour === minHour) ? minMin : 0)}
                 onChange={(m) => {
+                  setHasUserInteracted(true); // סמן שהמשתמש התחיל לערוך
                   if (isMinDay && selHour === minHour && m < minMin) m = minMin;
                   setSelMin(m);
                 }}
@@ -310,6 +328,7 @@ function WheelsDateTimePanel({
                 data={hourData}
                 value={Math.max(selHour, minHour)}
                 onChange={(h) => {
+                  setHasUserInteracted(true); // סמן שהמשתמש התחיל לערוך
                   if (isMinDay && h < minHour) h = minHour;
                   setSelHour(h);
                   if (isMinDay && h === minHour && selMin < minMin) setSelMin(minMin);

@@ -697,21 +697,27 @@ export default function HomeScreen() {
       </Animated.View>
       
       <TouchableWithoutFeedback onPress={dismissAll}>
-        <KeyboardAvoidingView
-          style={{ flex: 1 }}
-          behavior={Platform.select({ ios: 'padding', android: undefined })}
-          keyboardVerticalOffset={Platform.select({ ios: 8, android: 0 })}
-        >
-              <SafeAreaView style={{ flex: 1 }}>
+        <SafeAreaView style={{ flex: 1 }}>
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.select({ ios: 'padding', android: 'height' })}
+            keyboardVerticalOffset={Platform.select({ ios: 0, android: 0 })}
+          >
                 <ScrollView
                   style={{ flex: 1 }}
                   contentContainerStyle={{
-                    paddingHorizontal: theme.spacing.xl,
+                    paddingHorizontal: theme.spacing.md,
                     paddingTop: theme.spacing.md,
                     paddingBottom: Math.max(insets.bottom + 70, theme.spacing.lg),
-                    flexGrow: 1,
+                    minHeight: '100%', // מבטיח גובה מינימלי
                   }}
                   keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false} // הסתרת אינדיקטור
+                  bounces={true}
+                  scrollEventThrottle={16} // ערך סטנדרטי לביצועים
+                  decelerationRate="normal"
+                  removeClippedSubviews={false} // מבטיח רינדור חלק
+                  keyboardDismissMode="interactive" // סגירת מקלדת אינטראקטיבית
                 >
                   {/* באנר הזמנה פעילה */}
                   {activeBooking && (
@@ -743,145 +749,285 @@ export default function HomeScreen() {
                     </View>
                   )}
 
-              {/* שורת חיפוש מובנת ומזמינה */}
-              <View style={styles.searchWrap}>
-                <View style={styles.searchRow}>
-                  {/* כפתור "סביבי" */}
-                  <TouchableOpacity
-                    style={styles.nearInline}
-                    onPress={handleNearMe}
-                    activeOpacity={0.9}
-                    accessibilityRole="button"
-                    accessibilityLabel="סביבי – רדיוס 700 מטר"
-                  >
-                    <LinearGradient
-                      colors={[theme.colors.gradientStart, theme.colors.gradientEnd]}
-                      start={{ x:0, y:1 }} end={{ x:1, y:0 }}
-                      style={StyleSheet.absoluteFillObject}
-                    />
-                    <Ionicons name="navigate" size={14} color="#FFFFFF" style={{ marginRight: 6 }} />
-                    <Text style={styles.nearInlineText}>סביבי</Text>
-                  </TouchableOpacity>
+              {/* מלבן מרכזי עם כל הפונקציונליות */}
+              <View style={styles.mainSearchCard}>
+                {/* כותרת המלבן */}
+                <View style={styles.cardHeader}>
+                  <Text style={styles.cardTitle}>חיפוש חניה</Text>
+                </View>
 
-                  <Ionicons name="search" size={20} style={styles.searchIcon} />
-
-                  <TextInput
-                    ref={inputRef}
-                    style={styles.searchInput}
-                    placeholder="איפה תרצה להחנות?"
-                    placeholderTextColor={theme.colors.subtext}
-                    value={query}
-                    onChangeText={(text) => {
-                      setQuery(text);
-                      // אם משנים את הטקסט, בטל את הבחירה
-                      if (text !== selectedLocation) {
-                        setSelectedLocation(null);
-                        setSelectedCoords(null);
-                      }
-                    }}
-                    onFocus={handleInputFocus}
-                    textAlign="right"
-                    returnKeyType="search"
-                    onSubmitEditing={handleSearch}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    accessibilityLabel="שדה חיפוש כתובת"
-                  />
-                  {query.length > 0 && (
+                {/* שורת חיפוש */}
+                <View style={styles.searchSection}>
+                  <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionLabel}>איפה תרצה להחנות?</Text>
+                  </View>
+                  <View style={styles.searchRow}>
+                    {/* כפתור "סביבי" */}
                     <TouchableOpacity
-                      onPress={() => { setQuery(''); setSuggestions([]); setSuggestOpen(false); }}
-                      hitSlop={{ top:8, bottom:8, left:8, right:8 }}
+                      style={styles.nearInline}
+                      onPress={handleNearMe}
+                      activeOpacity={0.9}
                       accessibilityRole="button"
-                      accessibilityLabel="נקה חיפוש"
+                      accessibilityLabel="סביבי – רדיוס 700 מטר"
                     >
-                      <Ionicons name="close-circle" size={18} style={styles.clearIcon} />
+                      <LinearGradient
+                        colors={[theme.colors.gradientStart, theme.colors.gradientEnd]}
+                        start={{ x:0, y:1 }} end={{ x:1, y:0 }}
+                        style={StyleSheet.absoluteFillObject}
+                      />
+                      <Ionicons name="navigate" size={14} color="#FFFFFF" style={{ marginRight: 6 }} />
+                      <Text style={styles.nearInlineText}>סביבי</Text>
                     </TouchableOpacity>
+
+                    <Ionicons name="search" size={18} style={styles.searchIcon} />
+
+                    <TextInput
+                      ref={inputRef}
+                      style={styles.searchInput}
+                      placeholder="הזן כתובת או שם מקום"
+                      placeholderTextColor={theme.colors.subtext}
+                      value={query}
+                      onChangeText={(text) => {
+                        setQuery(text);
+                        if (text !== selectedLocation) {
+                          setSelectedLocation(null);
+                          setSelectedCoords(null);
+                        }
+                      }}
+                      onFocus={handleInputFocus}
+                      textAlign="right"
+                      returnKeyType="search"
+                      onSubmitEditing={handleSearch}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      accessibilityLabel="שדה חיפוש כתובת"
+                    />
+                    {query.length > 0 && (
+                      <TouchableOpacity
+                        onPress={() => { setQuery(''); setSuggestions([]); setSuggestOpen(false); }}
+                        hitSlop={{ top:8, bottom:8, left:8, right:8 }}
+                        accessibilityRole="button"
+                        accessibilityLabel="נקה חיפוש"
+                      >
+                        <Ionicons name="close-circle" size={18} style={styles.clearIcon} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* הצעות */}
+                  {suggestOpen && (
+                    <View style={styles.suggestBoxInline}>
+                      {suggestLoading ? (
+                        <View style={styles.suggestLoadingContainer}>
+                          <ActivityIndicator size="small" color={theme.colors.primary} />
+                          <Text style={styles.suggestLoadingText}>מחפש...</Text>
+                        </View>
+                      ) : suggestions.length > 0 ? (
+                        <FlatList
+                          keyboardShouldPersistTaps="handled"
+                          data={suggestions}
+                          keyExtractor={(i, idx) => String(i.id || i.place_id || idx)}
+                          scrollEnabled={false}
+                          nestedScrollEnabled={true}
+                          renderItem={({ item }) => (
+                            <TouchableOpacity
+                              style={styles.suggestItem}
+                              onPress={() => onPickSuggestion(item)}
+                              activeOpacity={0.9}
+                            >
+                              <Ionicons 
+                                name={item.isRecent ? "time" : (item.isBusiness ? "storefront" : "location")} 
+                                size={16} 
+                                color={item.isRecent ? theme.colors.subtext : (item.isBusiness ? theme.colors.secondary : theme.colors.primary)} 
+                                style={styles.suggestIcon} 
+                              />
+                              <Text style={styles.suggestText} numberOfLines={1}>
+                                {item.description || item.display_name || 'לא ידוע'}
+                              </Text>
+                              {item.isRecent && (
+                                <Text style={styles.suggestRecentLabel}>אחרון</Text>
+                              )}
+                            </TouchableOpacity>
+                          )}
+                        />
+                      ) : (
+                        <View style={styles.suggestEmptyContainer}>
+                          <Text style={styles.suggestEmptyText}>לא נמצאו תוצאות</Text>
+                        </View>
+                      )}
+                    </View>
                   )}
                 </View>
 
-                {/* הצעות (inline) - עם אינדיקטור טעינה משופר */}
-                {suggestOpen && (
-                  <View style={styles.suggestBoxInline}>
-                    {suggestLoading ? (
-                      <View style={styles.suggestLoadingContainer}>
-                        <ActivityIndicator size="small" color={theme.colors.primary} />
-                        <Text style={styles.suggestLoadingText}>מחפש...</Text>
-                      </View>
-                    ) : suggestions.length > 0 ? (
-                      <FlatList
-                        keyboardShouldPersistTaps="handled"
-                        data={suggestions}
-                        keyExtractor={(i, idx) => String(i.id || i.place_id || idx)}
-                        scrollEnabled={false}
-                        nestedScrollEnabled={true}
-                        renderItem={({ item }) => (
-                          <TouchableOpacity
-                            style={styles.suggestItem}
-                            onPress={() => onPickSuggestion(item)}
-                            activeOpacity={0.9}
-                          >
-                            <Ionicons 
-                              name={item.isRecent ? "time" : (item.isBusiness ? "storefront" : "location")} 
-                              size={16} 
-                              color={item.isRecent ? theme.colors.subtext : (item.isBusiness ? theme.colors.secondary : theme.colors.primary)} 
-                              style={styles.suggestIcon} 
-                            />
-                            <Text style={styles.suggestText} numberOfLines={1}>
-                              {item.description || item.display_name || 'לא ידוע'}
-                            </Text>
-                            {item.isRecent && (
-                              <Text style={styles.suggestRecentLabel}>אחרון</Text>
-                            )}
-                          </TouchableOpacity>
-                        )}
-                      />
-                    ) : (
-                      <View style={styles.suggestEmptyContainer}>
-                        <Text style={styles.suggestEmptyText}>לא נמצאו תוצאות</Text>
-                      </View>
-                    )}
+                {/* קו הפרדה */}
+                <View style={styles.divider} />
+
+                {/* בחירת זמנים */}
+                <View style={styles.dateTimeSection}>
+                  <View style={styles.sectionHeader}>
+                    <Text style={styles.sectionLabel}>מתי תרצה להחנות?</Text>
                   </View>
+                  <View style={styles.compactDateTimeRow}>
+                    {/* תאריך ושעת התחלה */}
+                    <TouchableOpacity
+                      style={styles.compactDateTimeButton}
+                      onPress={() => setShowStartPicker(true)}
+                      activeOpacity={0.8}
+                    >
+                      <View style={styles.compactDateTimeContent}>
+                        <Text style={styles.compactDateTimeLabel}>התחלה</Text>
+                        <Text style={styles.compactDateTimeValue}>
+                          {formatDate(startDate)} • {formatTime(startDate)}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+
+                    {/* משך זמן */}
+                    <View style={styles.compactDurationIndicator}>
+                      <Text style={styles.compactDurationText}>{getDuration()}</Text>
+                    </View>
+
+                    {/* תאריך ושעת סיום */}
+                    <TouchableOpacity
+                      style={styles.compactDateTimeButton}
+                      onPress={() => setShowEndPicker(true)}
+                      activeOpacity={0.8}
+                    >
+                      <View style={styles.compactDateTimeContent}>
+                        <Text style={styles.compactDateTimeLabel}>סיום</Text>
+                        <Text style={styles.compactDateTimeValue}>
+                          {formatDate(endDate)} • {formatTime(endDate)}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* כפתור סינון רכבים */}
+                {isAuthenticated && userVehicles.length > 0 && (
+                  <>
+                    <View style={styles.divider} />
+                    <View style={styles.vehicleFilterSection}>
+                      <View style={styles.toggleRow}>
+                        <View style={styles.toggleInfo}>
+                          <Text style={styles.vehicleEmoji}>
+                            {(() => {
+                              const defaultVehicle = getDefaultVehicle(userVehicles);
+                              if (defaultVehicle?.vehicleSize) {
+                                const sizeInfo = getVehicleSizeInfo(defaultVehicle.vehicleSize);
+                                return sizeInfo?.icon || '🚗';
+                              }
+                              return '🚗';
+                            })()}
+                          </Text>
+                          <View style={styles.toggleTextContainer}>
+                            <Text style={styles.toggleMainText}>סנן לפי הרכב שלי</Text>
+                            {(() => {
+                              const defaultVehicle = getDefaultVehicle(userVehicles);
+                              if (defaultVehicle?.vehicleSize) {
+                                const sizeInfo = getVehicleSizeInfo(defaultVehicle.vehicleSize);
+                                return (
+                                  <Text style={styles.toggleSubText}>
+                                    {sizeInfo?.name}
+                                  </Text>
+                                );
+                              }
+                              return null;
+                            })()}
+                          </View>
+                        </View>
+                        <TouchableOpacity
+                          style={[styles.toggleSwitch, vehicleFilterEnabled && styles.toggleSwitchActive]}
+                          onPress={() => setVehicleFilterEnabled(!vehicleFilterEnabled)}
+                          activeOpacity={0.8}
+                        >
+                          <View style={[styles.toggleKnob, vehicleFilterEnabled && styles.toggleKnobActive]} />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  </>
                 )}
-              </View>
 
-              {/* הגדרות תאריך ושעה - מקצועי */}
-              <View style={styles.dateTimeSection}>
-                <View style={[styles.compactDateTimeRow, { marginHorizontal: theme.spacing.md }]}>
-                  {/* תאריך ושעת התחלה */}
+                {/* קו הפרדה */}
+                <View style={styles.divider} />
+
+                {/* כפתור חיפוש */}
+                <View style={styles.searchButtonSection}>
                   <TouchableOpacity
-                    style={styles.compactDateTimeButton}
-                    onPress={() => setShowStartPicker(true)}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.compactDateTimeContent}>
-                      <Text style={styles.compactDateTimeLabel}>התחלה</Text>
-                      <Text style={styles.compactDateTimeValue}>
-                        {formatDate(startDate)} • {formatTime(startDate)}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
+                    style={[
+                      styles.findParkingButton,
+                      (!selectedLocation || !startDate || !endDate) && styles.findParkingButtonDisabled
+                    ]}
+                    onPress={() => {
+                      if (!selectedLocation) {
+                        Alert.alert('שגיאה', 'אנא בחר מיקום לחיפוש');
+                        return;
+                      }
+                      
+                      if (!selectedCoords || !selectedCoords.lat || !selectedCoords.lng) {
+                        Alert.alert(
+                          'שגיאה', 
+                          'לא נמצאו קואורדינטות למיקום הנבחר. אנא בחר מיקום אחר מהרשימה או נסה לחפש מיקום יותר ספציפי.',
+                          [
+                            { text: 'אישור', onPress: () => {
+                              setSelectedLocation(null);
+                              setSelectedCoords(null);
+                              setQuery('');
+                            }}
+                          ]
+                        );
+                        return;
+                      }
+                      
+                      const durationHours = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
+                      if (durationHours < 1) {
+                        Alert.alert('שגיאה', 'יש לבחור לפחות שעה אחת לחניה');
+                        return;
+                      }
+                      
+                      const searchParams = {
+                        query: selectedLocation,
+                        coords: selectedCoords,
+                        startDate: startDate.toISOString(),
+                        endDate: endDate.toISOString(),
+                        searchType: 'future',
+                        bookingType: BOOKING_TYPES.FUTURE,
+                        filters: {
+                          isCovered: false,
+                          hasCharging: false,
+                        },
+                        radius: 1000,
+                        minDurationHours: 1,
+                      };
 
-                  {/* משך זמן */}
-                  <View style={styles.compactDurationIndicator}>
-                    <Text style={styles.compactDurationText}>{getDuration()}</Text>
-                  </View>
+                      if (vehicleFilterEnabled && userVehicles.length > 0) {
+                        const defaultVehicle = getDefaultVehicle(userVehicles);
+                        if (defaultVehicle && defaultVehicle.vehicleSize) {
+                          searchParams.vehicleSize = defaultVehicle.vehicleSize;
+                          searchParams.onlyCompatible = true;
+                        }
+                      }
 
-                  {/* תאריך ושעת סיום */}
-                  <TouchableOpacity
-                    style={styles.compactDateTimeButton}
-                    onPress={() => setShowEndPicker(true)}
+                      navigation.navigate('SearchResults', searchParams);
+                    }}
                     activeOpacity={0.8}
+                    disabled={!selectedLocation || !startDate || !endDate}
                   >
-                    <View style={styles.compactDateTimeContent}>
-                      <Text style={styles.compactDateTimeLabel}>סיום</Text>
-                      <Text style={styles.compactDateTimeValue}>
-                        {formatDate(endDate)} • {formatTime(endDate)}
-                      </Text>
-                    </View>
+                    <LinearGradient
+                      colors={[theme.colors.gradientStart, theme.colors.gradientEnd]}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={styles.findParkingButtonGradient}
+                    >
+                      <View style={styles.findParkingButtonContent}>
+                        <Text style={styles.findParkingButtonText}>מצא לי חניות</Text>
+                        <Ionicons name="search" size={20} color="#FFFFFF" />
+                      </View>
+                    </LinearGradient>
                   </TouchableOpacity>
                 </View>
 
-                {/* Time Picker Wheels - משופר */}
+                {/* Time Picker Wheels */}
                 <TimePickerWheel
                   visible={showStartPicker}
                   initial={startDate}
@@ -897,154 +1043,15 @@ export default function HomeScreen() {
                   onClose={() => setShowEndPicker(false)}
                   onConfirm={handleEndTimeConfirm}
                   minimumDate={(() => {
-                    // 🔧 תוקן: משתמש בפונקציית העזר החדשה במקום המרה ידנית
                     return addHoursInIsrael(startDate, 1);
                   })()}
                   title="בחירת זמן סיום"
                 />
               </View>
 
-              {/* כפתור סינון רכבים */}
-              {isAuthenticated && userVehicles.length > 0 && (
-                <View style={styles.vehicleFilterSection}>
-                  <TouchableOpacity
-                    style={[styles.vehicleFilterButton, vehicleFilterEnabled && styles.vehicleFilterButtonActive]}
-                    onPress={() => setVehicleFilterEnabled(!vehicleFilterEnabled)}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.vehicleFilterContent}>
-                      <Ionicons 
-                        name={vehicleFilterEnabled ? "car" : "car-outline"} 
-                        size={18} 
-                        color={vehicleFilterEnabled ? "#fff" : theme.colors.primary} 
-                      />
-                      <Text style={[
-                        styles.vehicleFilterText,
-                        vehicleFilterEnabled && styles.vehicleFilterTextActive
-                      ]}>
-                        {vehicleFilterEnabled ? 'מסנן לפי הרכב שלי' : 'סנן לפי הרכב שלי'}
-                      </Text>
-                      {(() => {
-                        const defaultVehicle = getDefaultVehicle(userVehicles);
-                        if (defaultVehicle?.vehicleSize) {
-                          const sizeInfo = getVehicleSizeInfo(defaultVehicle.vehicleSize);
-                          return (
-                            <View style={styles.vehicleSizeIndicator}>
-                              <Text style={[
-                                styles.vehicleSizeText,
-                                vehicleFilterEnabled && styles.vehicleSizeTextActive
-                              ]}>
-                                {sizeInfo?.icon}
-                              </Text>
-                            </View>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </View>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {/* כפתור חיפוש חניות */}
-              <View style={styles.searchButtonSection}>
-                <TouchableOpacity
-                  style={[
-                    styles.findParkingButton,
-                    (!selectedLocation || !startDate || !endDate) && styles.findParkingButtonDisabled
-                  ]}
-                  onPress={() => {
-                    if (!selectedLocation) {
-                      Alert.alert('שגיאה', 'אנא בחר מיקום לחיפוש');
-                      return;
-                    }
-                    
-                    // וודא שיש קואורדינטות
-                    if (!selectedCoords || !selectedCoords.lat || !selectedCoords.lng) {
-                      Alert.alert(
-                        'שגיאה', 
-                        'לא נמצאו קואורדינטות למיקום הנבחר. אנא בחר מיקום אחר מהרשימה או נסה לחפש מיקום יותר ספציפי.',
-                        [
-                          { text: 'אישור', onPress: () => {
-                            // נקה את הבחירה כדי שהמשתמש יוכל לבחור שוב
-                            setSelectedLocation(null);
-                            setSelectedCoords(null);
-                            setQuery('');
-                          }}
-                        ]
-                      );
-                      return;
-                    }
-                    
-                    // וודא שיש לפחות שעה אחת בין התחלה לסיום
-                    const durationHours = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
-                    if (durationHours < 1) {
-                      Alert.alert('שגיאה', 'יש לבחור לפחות שעה אחת לחניה');
-                      return;
-                    }
-                    
-                    console.log('🚗 Starting parking search with params:', {
-                      location: selectedLocation,
-                      coords: selectedCoords,
-                      startDate: startDate.toISOString(),
-                      endDate: endDate.toISOString(),
-                      duration: `${durationHours.toFixed(1)} hours`,
-                      searchType: 'location'
-                    });
-                    
-                    // חיפוש חניות במיקום הנבחר עם רדיוס 1 ק"מ
-                    const searchParams = {
-                      query: selectedLocation,
-                      coords: selectedCoords,
-                      startDate: startDate.toISOString(),
-                      endDate: endDate.toISOString(),
-                      searchType: 'future', // חיפוש עתידי
-                      bookingType: BOOKING_TYPES.FUTURE, // סוג הזמנה עתידית
-                      filters: {
-                        isCovered: false, // מבטל מסננים שהוסרו
-                        hasCharging: false, // מבטל מסננים שהוסרו
-                      },
-                      radius: 1000, // 1 ק"מ ברדיוס
-                      minDurationHours: 1, // מינימום שעה אחת
-                    };
-
-                    // הוספת פרמטרי רכב לסינון אם מופעל
-                    if (vehicleFilterEnabled && userVehicles.length > 0) {
-                      const defaultVehicle = getDefaultVehicle(userVehicles);
-                      if (defaultVehicle && defaultVehicle.vehicleSize) {
-                        searchParams.vehicleSize = defaultVehicle.vehicleSize;
-                        searchParams.onlyCompatible = true;
-                        console.log('🚗 Adding vehicle filter to HomeScreen search:', {
-                          vehicleSize: defaultVehicle.vehicleSize,
-                          licensePlate: defaultVehicle.licensePlate,
-                          vehicleFilterEnabled,
-                          userVehiclesCount: userVehicles.length
-                        });
-                      }
-                    } else {
-                      console.log('🚗 Vehicle filter NOT enabled:', {
-                        vehicleFilterEnabled,
-                        userVehiclesCount: userVehicles.length
-                      });
-                    }
-
-                    console.log('🏠 HomeScreen sending search params:', searchParams);
-
-                    navigation.navigate('SearchResults', searchParams);
-                  }}
-                  activeOpacity={0.8}
-                  disabled={!selectedLocation || !startDate || !endDate}
-                >
-                  <View style={styles.findParkingButtonContent}>
-                    <Text style={styles.findParkingButtonText}>מצא לי חניות</Text>
-                    <Ionicons name="search" size={20} color="#FFFFFF" />
-                  </View>
-                </TouchableOpacity>
-              </View>
-
             </ScrollView>
-          </SafeAreaView>
-        </KeyboardAvoidingView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
       </TouchableWithoutFeedback>
 
     </View>
@@ -1094,22 +1101,103 @@ function makeStyles(theme) {
     },
     subtitle:{ fontSize:13, textAlign:'center', color: colors.subtext, marginTop: 4, marginBottom: spacing.md },
 
+    // מלבן מרכזי מקצועי ואלגנטי
+    mainSearchCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 24, // עיגול אלגנטי יותר
+      marginTop: spacing.md,
+      marginHorizontal: spacing.sm, // מרווח מאוזן
+      paddingVertical: spacing.xl + 4, // padding מושלם
+      paddingHorizontal: spacing.xl + 8,
+      // צללים מקצועיים מדורגים
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.12,
+      shadowRadius: 16,
+      elevation: 8,
+      // מסגרת עדינה ומקצועית
+      borderWidth: 1,
+      borderColor: colors.border + '20',
+      position: 'relative',
+      // גרדיאנט עדין ברקע (אופציונלי)
+      overflow: 'hidden',
+    },
+
+    // כותרת המלבן - עם מרווח גדול יותר
+    cardHeader: {
+      marginBottom: spacing.xl, // מרווח גדול יותר מהתוכן
+      paddingBottom: 0,
+    },
+    cardTitle: {
+      fontSize: 28, // גודל גדול יותר
+      fontWeight: '800', // משקל חזק יותר
+      color: colors.text,
+      textAlign: 'left',
+      letterSpacing: -0.5,
+    },
+
+    // סקציות - מאווررות יותר
+    searchSection: {
+      marginBottom: spacing.lg, // מרווח גדול יותר
+    },
+    dateTimeSection: {
+      marginVertical: spacing.lg, // מרווח גדול יותר
+    },
+    vehicleFilterSection: {
+      marginVertical: spacing.lg, // מרווח גדול יותר
+    },
+    searchButtonSection: {
+      marginTop: spacing.lg, // מרווח גדול יותר
+    },
+    // כותרות סקציות - נקיות ללא אינדיקטורים
+    sectionHeader: {
+      marginBottom: spacing.md, // מרווח נוח
+    },
+    sectionLabel: {
+      fontSize: 18, // גודל גדול יותר
+      fontWeight: '700', // משקל חזק
+      color: colors.text,
+      textAlign: 'left',
+      marginBottom: spacing.lg, // מרווח גדול מאוד מהתוכן
+    },
+
+    // קו הפרדה - מאוד עדין וקומפקטי
+    divider: {
+      height: 1,
+      backgroundColor: colors.border + '50',
+      marginVertical: spacing.sm, // מרווח קטן יותר
+      marginHorizontal: -spacing.sm,
+      borderRadius: 0.5,
+    },
+
     // חיפוש
     searchWrap:{ marginTop: spacing.lg },
     searchRow:{
       flexDirection:'row',
       alignItems:'center',
-      backgroundColor: colors.surface,
-      borderRadius: borderRadii.lg,
-      borderWidth: 2, 
-      borderColor: colors.primary,
-      paddingHorizontal: spacing.md,
-      paddingVertical: spacing.sm,
-      shadowColor: colors.primary, 
-      shadowOpacity: 0.15, 
-      shadowRadius: 16, 
-      shadowOffset: { width: 0, height: 8 }, 
-      elevation: 8
+      backgroundColor: colors.background,
+      borderRadius: 16, // עיגול אלגנטי יותר
+      borderWidth: 1.5, 
+      borderColor: colors.border + '40',
+      paddingHorizontal: spacing.lg + 2,
+      paddingVertical: spacing.md + 2,
+      // צללים מקצועיים
+      shadowColor: colors.primary + '40',
+      shadowOpacity: 0.08, 
+      shadowRadius: 8, 
+      shadowOffset: { width: 0, height: 3 }, 
+      elevation: 4,
+      transform: [{ scale: 1 }],
+      position: 'relative',
+      marginHorizontal: -spacing.sm,
+      // אפקט focus מתקדם
+      transition: 'all 0.2s ease-in-out',
+    },
+    searchRowFocused: {
+      borderColor: colors.primary + '80',
+      shadowOpacity: 0.08,
+      shadowRadius: 8,
+      transform: [{ scale: 1.01 }],
     },
     searchIcon:{
       color: colors.accent,
@@ -1130,21 +1218,28 @@ function makeStyles(theme) {
       marginRight: spacing.xs,
     },
 
-    // כפתור "סביבי" בפנים
+    // כפתור "סביבי" בפנים - גדול יותר ומעוצב
     nearInline:{
       flexDirection:'row',
       alignItems:'center',
       justifyContent:'center',
-      paddingHorizontal: 12,
-      height: 36,
+      paddingHorizontal: 14, // padding גדול יותר
+      height: 36, // גובה גדול יותר
       borderRadius: 999,
       overflow:'hidden',
       borderWidth: 1,
       borderColor: '#C7DEFF',
-      minWidth: 84,
-      marginRight: spacing.sm,
+      minWidth: 80, // רוחב גדול יותר
+      marginLeft: spacing.xs,
+      marginRight: spacing.md,
+      // צללים עדינים
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.1,
+      shadowRadius: 2,
+      elevation: 2,
     },
-    nearInlineText:{ color:'#FFFFFF', fontWeight:'900', fontSize: 13 },
+    nearInlineText:{ color:'#FFFFFF', fontWeight:'700', fontSize: 12 }, // גודל מעודן יותר
 
     // הצעות
     suggestBoxInline:{
@@ -1199,6 +1294,208 @@ function makeStyles(theme) {
       color: colors.subtext,
       fontSize: 14,
       textAlign: 'center',
+    },
+
+    // כפתורי תאריך ושעה מעוצבים - רחבים
+    compactDateTimeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: spacing.md,
+      marginHorizontal: -spacing.sm, // מתרחב מעט מעבר לpadding של המלבן
+    },
+    compactDateTimeButton: {
+      flex: 1,
+      backgroundColor: colors.background,
+      borderRadius: 12, // עיגול מעודן
+      borderWidth: 1,
+      borderColor: colors.border + '50',
+      paddingVertical: spacing.md, // padding קומפקטי
+      paddingHorizontal: spacing.sm, // padding קומפקטי
+      shadowColor: '#000', // צל עדין
+      shadowOpacity: 0.03,
+      shadowRadius: 4,
+      shadowOffset: { width: 0, height: 1 },
+      elevation: 1,
+      position: 'relative',
+      transform: [{ scale: 1 }],
+    },
+    dateTimeButtonActive: {
+      borderColor: colors.primary + '60',
+      backgroundColor: colors.primary + '08',
+      shadowColor: colors.primary,
+      shadowOpacity: 0.1,
+    },
+    compactDateTimeContent: {
+      alignItems: 'center',
+    },
+    compactDateTimeLabel: {
+      fontSize: 12,
+      fontWeight: '600',
+      color: colors.subtext,
+      marginBottom: 4,
+      textAlign: 'center',
+    },
+    compactDateTimeValue: {
+      fontSize: 14,
+      fontWeight: '700',
+      color: colors.text,
+      textAlign: 'center',
+    },
+    compactDurationIndicator: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: spacing.xs,
+      minWidth: 40,
+    },
+    compactDurationText: {
+      fontSize: 10,
+      fontWeight: '600',
+      color: colors.accent,
+      textAlign: 'center',
+    },
+
+    // כפתור toggle מקצועי לסינון רכבים
+    toggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: spacing.xs, // padding קטן יותר
+      minHeight: 40, // גובה מינימלי לכפתור
+    },
+    toggleInfo: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      flex: 1,
+      paddingVertical: spacing.xs, // padding אנכי קטן
+    },
+    vehicleEmoji: {
+      fontSize: 22, // גודל מותאם לכפתור
+      marginRight: spacing.sm,
+      lineHeight: 30, // גובה קו מותאם לכפתור
+      textAlignVertical: 'center',
+      includeFontPadding: false,
+      // יישור מדויק לכפתור
+      alignSelf: 'center',
+    },
+    toggleTextContainer: {
+      flex: 1,
+    },
+    toggleMainText: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: colors.text,
+      textAlign: 'left',
+    },
+    toggleSubText: {
+      fontSize: 13,
+      fontWeight: '500',
+      color: colors.subtext,
+      textAlign: 'left',
+      marginTop: 2,
+    },
+    toggleSwitch: {
+      width: 54, // רחב יותר
+      height: 30, // גבוה יותר
+      borderRadius: 15,
+      backgroundColor: colors.border + '40', // צבע רקע עדין יותר
+      padding: 3, // padding גדול יותר
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 1 },
+      shadowOpacity: 0.1,
+      shadowRadius: 2,
+      elevation: 2,
+    },
+    toggleSwitchActive: {
+      backgroundColor: colors.primary,
+      shadowColor: colors.primary,
+      shadowOpacity: 0.3,
+    },
+    toggleKnob: {
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      backgroundColor: '#fff',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.25, // צל חזק יותר
+      shadowRadius: 4,
+      elevation: 4, // elevation גבוה יותר
+      alignSelf: 'flex-start',
+      // אנימציה חלקה
+      transform: [{ translateX: 0 }],
+    },
+    toggleKnobActive: {
+      alignSelf: 'flex-end',
+      transform: [{ translateX: 0 }], // מוכן לאנימציה
+    },
+
+    // כפתור חיפוש מעוצב - קומפקטי ומעודן
+    findParkingButton: {
+      borderRadius: 14, // עיגול מעודן
+      overflow: 'hidden',
+      shadowColor: colors.primary,
+      shadowOffset: { width: 0, height: 4 }, // צל מעודן
+      shadowOpacity: 0.2, // עדין יותר
+      shadowRadius: 8, // רדיוס מעודן
+      elevation: 6,
+      transform: [{ scale: 1 }],
+      position: 'relative',
+    },
+    findParkingButtonDisabled: {
+      opacity: 0.6,
+      shadowOpacity: 0.1,
+    },
+    findParkingButtonGradient: {
+      paddingVertical: spacing.md, // קומפקטי
+      paddingHorizontal: spacing.md, // קומפקטי
+    },
+    findParkingButtonContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: spacing.sm,
+    },
+    findParkingButtonText: {
+      fontSize: 16, // גודל מעודן יותר
+      fontWeight: '600', // משקל מעודן יותר
+      color: '#FFFFFF',
+      textAlign: 'center',
+      letterSpacing: 0.3, // מרווח אותיות עדין
+    },
+
+    // אפקטים מקצועיים מתקדמים
+    pulseAnimation: {
+      // אנימציית דופק עדינה לכפתור החיפוש
+      shadowColor: colors.primary,
+      shadowOpacity: 0.5,
+      shadowRadius: 24,
+      transform: [{ scale: 1.02 }],
+    },
+    microInteraction: {
+      // אפקט מיקרו-אינטראקציה
+      transform: [{ scale: 0.97 }],
+    },
+    // אפקטי מעבר חלקים
+    smoothTransition: {
+      // מעברים חלקים לכל האלמנטים
+      transition: 'all 0.2s ease-in-out',
+    },
+    // אפקט זוהר עדין
+    glowEffect: {
+      shadowColor: colors.primary,
+      shadowOpacity: 0.15,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 0 },
+    },
+    // אפקט עומק מתקדם
+    depthEffect: {
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.1,
+      shadowRadius: 8,
+      elevation: 6,
     },
 
     // מקומות שמורים
@@ -1511,91 +1808,6 @@ function makeStyles(theme) {
     },
     dateTimePicker: {
       backgroundColor: 'transparent',
-    },
-
-    // כפתור חיפוש חניות - רוחב כמו סרגל החיפוש
-    searchButtonSection: {
-      marginTop: spacing.md,
-      paddingHorizontal: spacing.md, // אותו רווח כמו סרגל החיפוש
-      marginBottom: spacing.lg,
-    },
-    findParkingButton: {
-      backgroundColor: colors.primary, // צבעי המותג
-      borderRadius: 25, // עיגול יותר
-      paddingVertical: spacing.md, // קטן יותר
-      paddingHorizontal: spacing.lg,
-      shadowColor: colors.primary,
-      shadowOpacity: 0.3,
-      shadowRadius: 12,
-      shadowOffset: { width: 0, height: 6 },
-      elevation: 8,
-      borderWidth: 0, // בלי גבול
-    },
-    findParkingButtonDisabled: {
-      backgroundColor: colors.subtext,
-      shadowOpacity: 0.1,
-    },
-    findParkingButtonContent: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: spacing.sm,
-    },
-    findParkingButtonText: {
-      fontSize: 18,
-      fontWeight: '700',
-      color: '#FFFFFF',
-      textAlign: 'center',
-    },
-
-    // כפתור סינון רכבים
-    vehicleFilterSection: {
-      marginTop: spacing.sm,
-      paddingHorizontal: spacing.md,
-    },
-    vehicleFilterButton: {
-      backgroundColor: 'rgba(255,255,255,0.95)',
-      borderColor: colors.primary,
-      borderWidth: 1.5,
-      borderRadius: 20,
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.md,
-      shadowColor: '#000',
-      shadowOpacity: 0.1,
-      shadowRadius: 8,
-      shadowOffset: { width: 0, height: 4 },
-      elevation: 6,
-    },
-    vehicleFilterButtonActive: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
-      shadowColor: colors.primary,
-      shadowOpacity: 0.3,
-    },
-    vehicleFilterContent: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: spacing.xs,
-    },
-    vehicleFilterText: {
-      fontSize: 15,
-      fontWeight: '600',
-      color: colors.primary,
-      textAlign: 'center',
-    },
-    vehicleFilterTextActive: {
-      color: '#fff',
-    },
-    vehicleSizeIndicator: {
-      marginLeft: spacing.xs,
-    },
-    vehicleSizeText: {
-      fontSize: 16,
-      color: colors.primary,
-    },
-    vehicleSizeTextActive: {
-      color: '#fff',
     },
   });
 }
